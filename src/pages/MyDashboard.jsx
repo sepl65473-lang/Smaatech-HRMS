@@ -4,7 +4,6 @@ import Avatar from '../components/Avatar';
 import LeaveForm from '../components/LeaveForm';
 import FaceAttendanceModal from '../components/FaceAttendanceModal';
 import FaceEnrollModal from '../components/FaceEnrollModal';
-import QrCheckInModal from '../components/QrCheckInModal';
 import { IconPlus, IconCheck } from '../components/Icons';
 import { formatDate, daysBetween, formatINR, leaveTagClass, leaveTagLabel } from '../lib/helpers';
 import { downloadPayslip } from '../lib/payslip';
@@ -12,7 +11,8 @@ import { downloadPayslip } from '../lib/payslip';
 export default function MyDashboard() {
   const {
     currentUser, employees, leaves, attendance, payroll, settings, reviews,
-    addLeave, checkIn, checkOut, audit, submitSelfReview, toast, updateSettings,
+    addLeave, checkIn, checkOut, audit, submitSelfReview, toast,
+    enrollFace, faceEnrolled,
   } = useHRMS();
   const [formOpen, setFormOpen] = useState(false);
   const [selfRating, setSelfRating] = useState(3);
@@ -28,11 +28,6 @@ export default function MyDashboard() {
   const [pendingRowId, setPendingRowId] = useState(null);
   const [pendingLoc, setPendingLoc] = useState(null);
   const [faceEnrollOpen, setFaceEnrollOpen] = useState(false);
-
-  // QR-based attendance (no face enrollment required — scanning the office
-  // wall display already proves on-site presence)
-  const [qrModalOpen, setQrModalOpen] = useState(false);
-  const [qrAction, setQrAction] = useState('in');
 
   // Haversine distance calculation in meters
   const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
@@ -82,13 +77,8 @@ export default function MyDashboard() {
     [employees, currentUser.empId],
   );
 
-  const myProfile = useMemo(
-    () => (me ? (settings.loginProfiles || []).find((p) => p.empName === me.name) ?? null : null),
-    [settings.loginProfiles, me],
-  );
-
   const startAttendance = async (rowId, action) => {
-    if (!myProfile?.faceDescriptor?.length) {
+    if (!faceEnrolled) {
       toast('error', `Enroll your face below before you can check ${action === 'in' ? 'in' : 'out'}.`);
       return;
     }
@@ -119,9 +109,12 @@ export default function MyDashboard() {
   const handleCheckIn = (rowId) => startAttendance(rowId, 'in');
   const handleCheckOut = (rowId) => startAttendance(rowId, 'out');
 
-  const handleFaceVerified = async () => {
+  // `photo` is the captured selfie Blob — the server independently re-detects
+  // and matches it against the enrolled descriptor; this call doesn't know
+  // yet whether it'll actually pass.
+  const handleFaceVerified = async (photo) => {
     setFaceModalOpen(false);
-    const locationData = { ...(pendingLoc || {}), faceVerified: true };
+    const locationData = { ...(pendingLoc || {}), photo };
     try {
       if (faceAction === 'in') {
         await checkIn(pendingRowId, locationData);
@@ -136,7 +129,7 @@ export default function MyDashboard() {
       }
     } catch {
       // The server already surfaced the rejection reason (e.g. outside the
-      // geofence) via a toast — nothing more to do here.
+      // geofence, or the face didn't match) via a toast — nothing more to do here.
     } finally {
       setPendingRowId(null);
       setPendingLoc(null);
@@ -149,40 +142,13 @@ export default function MyDashboard() {
     setPendingLoc(null);
   };
 
-  const openQrCheckIn = (rowId, action) => {
-    setPendingRowId(rowId);
-    setQrAction(action);
-    setQrModalOpen(true);
-  };
-
-  const handleQrScanSuccess = async () => {
-    setQrModalOpen(false);
-    try {
-      if (qrAction === 'in') {
-        await checkIn(pendingRowId, { qrVerified: true });
-        toast('success', 'Checked in — office QR scan verified.');
-      } else {
-        await checkOut(pendingRowId, { qrVerified: true });
-        toast('info', 'Checked out — office QR scan verified.');
-      }
-    } catch {
-      // Server already surfaced the rejection reason via a toast.
-    } finally {
-      setPendingRowId(null);
-    }
-  };
-
-  const handleSaveMyFace = async (descriptor) => {
-    const profiles = settings.loginProfiles || [];
-    const idx = profiles.findIndex((p) => p.empName === me.name);
-    if (idx === -1) {
+  const handleSaveMyFace = async (photoBlob) => {
+    if (!me) {
       toast('error', "Your login isn't linked to your employee record — ask HR to fix this in Settings → Users.");
       setFaceEnrollOpen(false);
       return;
     }
-    const updated = profiles.map((p, i) => (i === idx ? { ...p, faceDescriptor: descriptor } : p));
-    await updateSettings({ loginProfiles: updated }, false);
-    toast('success', 'Face enrolled — you can now check in and out.');
+    await enrollFace(photoBlob);
     setFaceEnrollOpen(false);
   };
 
@@ -266,12 +232,12 @@ export default function MyDashboard() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-            {myProfile?.faceDescriptor?.length
+            {faceEnrolled
               ? <span className="state-badge approved">Face ID enrolled</span>
               : <span className="muted-text">Face ID not enrolled</span>}
-            {myProfile ? (
+            {me ? (
               <button type="button" className="mini-btn" onClick={() => setFaceEnrollOpen(true)}>
-                {myProfile.faceDescriptor?.length ? 'Re-enroll my face' : 'Enroll my face'}
+                {faceEnrolled ? 'Re-enroll my face' : 'Enroll my face'}
               </button>
             ) : (
               <span className="muted-text">Login not linked — ask HR to link your profile in Settings → Users.</span>
@@ -333,34 +299,24 @@ export default function MyDashboard() {
 
                 {/* Check In Action Button */}
                 {!todayRow.checkIn && (
-                  <>
-                    {myProfile?.faceDescriptor?.length ? (
-                      <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckIn(todayRow.id)}>
-                        {gpsLoading ? 'Checking location…' : 'Check In (Face + GPS)'}
-                      </button>
-                    ) : (
-                      <span className="muted-text">Enroll your face above for Face + GPS check-in</span>
-                    )}
-                    <button type="button" className="mini-btn" onClick={() => openQrCheckIn(todayRow.id, 'in')}>
-                      Scan Office QR
+                  faceEnrolled ? (
+                    <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckIn(todayRow.id)}>
+                      {gpsLoading ? 'Checking location…' : 'Check In (Face + GPS)'}
                     </button>
-                  </>
+                  ) : (
+                    <span className="muted-text">Enroll your face above for Face + GPS check-in</span>
+                  )
                 )}
 
                 {/* Check Out Action Button */}
                 {todayRow.checkIn && !todayRow.checkOut && (
-                  <>
-                    {myProfile?.faceDescriptor?.length ? (
-                      <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckOut(todayRow.id)}>
-                        {gpsLoading ? 'Checking location…' : 'Check Out (Face + GPS)'}
-                      </button>
-                    ) : (
-                      <span className="muted-text">Enroll your face above for Face + GPS check-out</span>
-                    )}
-                    <button type="button" className="mini-btn" onClick={() => openQrCheckIn(todayRow.id, 'out')}>
-                      Scan Office QR
+                  faceEnrolled ? (
+                    <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckOut(todayRow.id)}>
+                      {gpsLoading ? 'Checking location…' : 'Check Out (Face + GPS)'}
                     </button>
-                  </>
+                  ) : (
+                    <span className="muted-text">Enroll your face above for Face + GPS check-out</span>
+                  )
                 )}
 
                 {todayRow.checkIn && todayRow.checkOut && (
@@ -502,7 +458,6 @@ export default function MyDashboard() {
       <FaceAttendanceModal
         open={faceModalOpen}
         action={faceAction}
-        profile={myProfile}
         onClose={handleFaceModalClose}
         onVerified={handleFaceVerified}
       />
@@ -511,11 +466,6 @@ export default function MyDashboard() {
         user={me}
         onClose={() => setFaceEnrollOpen(false)}
         onSave={handleSaveMyFace}
-      />
-      <QrCheckInModal
-        open={qrModalOpen}
-        onClose={() => { setQrModalOpen(false); setPendingRowId(null); }}
-        onScanSuccess={handleQrScanSuccess}
       />
     </div>
   );

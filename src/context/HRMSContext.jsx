@@ -3,9 +3,10 @@ import {
   loadAll, resetDB, reloadFromDisk, DB_STORAGE_KEY,
   employeesApi, leavesApi, attendanceApi, payrollApi,
   celebrationsApi, recruitmentApi, settingsApi, holidaysApi, reviewsApi,
-  expensesApi, assetsApi, jobsApi, authApi, geofenceApi,
+  expensesApi, assetsApi, jobsApi, authApi, geofenceApi, faceApi,
 } from '../data/store';
 import { setAccessToken } from '../lib/apiClient';
+import { getDeviceId } from '../lib/deviceId';
 import { uid, daysBetween, todayISO } from '../lib/helpers';
 import { resolveShiftForToday, isLate as isLateForShift } from '../lib/shifts';
 
@@ -36,6 +37,7 @@ export function HRMSProvider({ children }) {
   const [booting, setBooting] = useState(true);
   const [loading, setLoading] = useState(true);
   const [authUser, setAuthUser] = useState(null);
+  const [faceEnrolled, setFaceEnrolled] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [leaves, setLeaves] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -49,6 +51,7 @@ export function HRMSProvider({ children }) {
   const [jobs, setJobs] = useState([]);
   const [settings, setSettings] = useState({});
   const currentUser = useMemo(() => (authUser ? {
+    id: authUser.id,
     name: authUser.name,
     role: authUser.role,
     initials: authUser.initials,
@@ -107,10 +110,11 @@ export function HRMSProvider({ children }) {
     setLastSyncedAt(Date.now());
   }, []);
 
-  const loadAuthenticatedData = useCallback(async () => {
+  const loadAuthenticatedData = useCallback(async (userId) => {
     setLoading(true);
-    const all = await loadAll();
+    const [all, faceStatus] = await Promise.all([loadAll(), faceApi.status(userId)]);
     hydrate(all);
+    setFaceEnrolled(faceStatus.enrolled);
     setLoading(false);
   }, [hydrate]);
 
@@ -132,7 +136,7 @@ export function HRMSProvider({ children }) {
   const finishLogin = useCallback(async (accessToken, user) => {
     setAccessToken(accessToken);
     setAuthUser(user);
-    await loadAuthenticatedData();
+    await loadAuthenticatedData(user.id);
     toast('success', `Welcome back, <strong>${user.name.split(' ')[0]}</strong>`);
   }, [loadAuthenticatedData, toast]);
 
@@ -141,6 +145,7 @@ export function HRMSProvider({ children }) {
     setAuthUser(null);
     setEmployees([]);
     setAttendance([]);
+    setFaceEnrolled(false);
     toast('info', 'Signed out');
   }, [toast]);
 
@@ -153,7 +158,7 @@ export function HRMSProvider({ children }) {
       if (!alive) return;
       if (user) {
         setAuthUser(user);
-        await loadAuthenticatedData();
+        await loadAuthenticatedData(user.id);
       } else {
         setLoading(false);
       }
@@ -375,15 +380,31 @@ export function HRMSProvider({ children }) {
   // itself holds (server/src/routes/attendance.js), so a modified client
   // can't just assert `faceVerified: true` or a fabricated GPS distance.
   // `locationData` here is only ever the raw, unverified inputs.
-  const checkIn = async (id, locationData = null) => {
-    const payload = {
+  // `locationData.photo`, when present (a captured selfie Blob), makes this
+  // a multipart request — the server re-detects and re-matches the face in
+  // that photo itself rather than trusting any client-reported result.
+  const buildPunchPayload = (locationData) => {
+    if (locationData?.photo) {
+      const form = new FormData();
+      if (locationData.lat != null) form.append('lat', locationData.lat);
+      if (locationData.lng != null) form.append('lng', locationData.lng);
+      if (locationData.accuracy != null) form.append('accuracy', locationData.accuracy);
+      if (locationData.timestamp != null) form.append('timestamp', locationData.timestamp);
+      form.append('deviceId', getDeviceId());
+      form.append('photo', locationData.photo, 'checkin.jpg');
+      return form;
+    }
+    return {
       lat: locationData?.lat, lng: locationData?.lng,
       accuracy: locationData?.accuracy, timestamp: locationData?.timestamp,
-      faceVerified: locationData?.faceVerified, qrVerified: locationData?.qrVerified,
+      deviceId: getDeviceId(),
     };
+  };
+
+  const checkIn = async (id, locationData = null) => {
     let updated;
     try {
-      updated = await attendanceApi.checkIn(id, payload);
+      updated = await attendanceApi.checkIn(id, buildPunchPayload(locationData));
     } catch (err) {
       toast('error', err.message || 'Check-in failed.');
       throw err;
@@ -395,14 +416,9 @@ export function HRMSProvider({ children }) {
   };
 
   const checkOut = async (id, locationData = null) => {
-    const payload = {
-      lat: locationData?.lat, lng: locationData?.lng,
-      accuracy: locationData?.accuracy, timestamp: locationData?.timestamp,
-      faceVerified: locationData?.faceVerified, qrVerified: locationData?.qrVerified,
-    };
     let updated;
     try {
-      updated = await attendanceApi.checkOut(id, payload);
+      updated = await attendanceApi.checkOut(id, buildPunchPayload(locationData));
     } catch (err) {
       toast('error', err.message || 'Check-out failed.');
       throw err;
@@ -411,6 +427,17 @@ export function HRMSProvider({ children }) {
     audit('Attendance check-out', updated.name, `${updated.checkOut}${updated.checkOutDetails ? ` (${updated.checkOutDetails}${updated.checkOutLoc ? `: ${updated.checkOutLoc}` : ''})` : ''}`);
     toast('info', `<strong>${updated.name}</strong> checked out · ${updated.checkOut}`);
     return updated;
+  };
+
+  // Uploads a captured selfie for server-side enrollment — the server
+  // computes and stores the 128-d descriptor itself; the client never
+  // computes or transmits one. `targetUserId` lets HR enroll on behalf of
+  // another account (Settings > Users); omitted, it enrolls the caller.
+  const enrollFace = async (photoBlob, targetUserId) => {
+    const result = await faceApi.enroll(photoBlob, targetUserId);
+    if (!targetUserId || targetUserId === currentUser.id) setFaceEnrolled(true);
+    toast('success', `Face enrolled for <strong>${result.enrolledFor}</strong>`);
+    return result;
   };
 
   // Used by the biometric-device reconciliation flow (Integrations page):
@@ -729,7 +756,7 @@ export function HRMSProvider({ children }) {
     // leave
     addLeave, approveLeave, declineLeave, deleteLeave,
     // attendance
-    checkIn, checkOut, setAttendanceStatus, recordPunch,
+    checkIn, checkOut, setAttendanceStatus, recordPunch, enrollFace, faceEnrolled,
     // payroll
     processPayroll, markPaid, updatePayrollStructure,
     // celebrations

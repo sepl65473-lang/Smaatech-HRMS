@@ -20,13 +20,14 @@ export class ApiError extends Error {
 }
 
 async function rawRequest(path, { method = 'GET', body, skipAuth = false } = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+  const isFormData = body instanceof FormData;
+  const headers = isFormData ? {} : { 'Content-Type': 'application/json' };
   if (!skipAuth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
     credentials: 'include',
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: isFormData ? body : (body !== undefined ? JSON.stringify(body) : undefined),
   });
   let data = null;
   try { data = await res.json(); } catch { /* no/invalid JSON body */ }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
-import { loadFaceModels, detectFaceDescriptor, matchFace } from '../lib/faceAuth';
+import { loadFaceModels, detectFaceDescriptor } from '../lib/faceAuth';
 
 const SCAN_INTERVAL_MS = 700;
 const MAX_SCAN_MS = 15000;
@@ -13,14 +13,18 @@ const ERROR_MESSAGES = {
   NotReadableError: 'The camera is in use by another app or browser tab. Close it and try again.',
 };
 
-export default function FaceAttendanceModal({ open, action, profile, onClose, onVerified }) {
+// Client-side detection here is UX-only — framing/liveness feedback so the
+// user knows when to hold still. It does NOT decide pass/fail: once a face
+// is visible, this captures a photo and hands it to the caller, which
+// uploads it to the server; the server independently re-detects and matches
+// it against the enrolled descriptor, and that response is what actually
+// records (or rejects) the check-in/out.
+export default function FaceAttendanceModal({ open, action, onClose, onVerified }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
   const scanStartRef = useRef(0);
-  const noFaceCountRef = useRef(0);
-  const mismatchCountRef = useRef(0);
-  const [status, setStatus] = useState('loading'); // loading | scanning | matched | mismatch | no-face-timeout | error | not-enrolled
+  const [status, setStatus] = useState('loading'); // loading | scanning | captured | no-face-timeout | error | verifying
   const [error, setError] = useState('');
   const [retryToken, setRetryToken] = useState(0);
   const [hasStream, setHasStream] = useState(false);
@@ -37,27 +41,28 @@ export default function FaceAttendanceModal({ open, action, profile, onClose, on
     setHasStream(false);
   };
 
+  const captureFrame = () => new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.92);
+  });
+
   useEffect(() => {
     if (!open) {
       stopResources();
       return undefined;
     }
 
-    if (!profile?.faceDescriptor?.length) {
-      setStatus('not-enrolled');
-      return undefined;
-    }
-
     let cancelled = false;
     setStatus('loading');
     setError('');
-    noFaceCountRef.current = 0;
-    mismatchCountRef.current = 0;
 
     const scan = async () => {
       if (cancelled || !videoRef.current) return;
       if (Date.now() - scanStartRef.current > MAX_SCAN_MS) {
-        setStatus(mismatchCountRef.current > noFaceCountRef.current ? 'mismatch' : 'no-face-timeout');
+        setStatus('no-face-timeout');
         stopResources();
         return;
       }
@@ -65,17 +70,13 @@ export default function FaceAttendanceModal({ open, action, profile, onClose, on
         const descriptor = await detectFaceDescriptor(videoRef.current);
         if (cancelled) return;
         if (descriptor) {
-          const match = await matchFace(descriptor, [profile]);
+          setStatus('captured');
+          const photo = await captureFrame();
           if (cancelled) return;
-          if (match) {
-            setStatus('matched');
-            stopResources();
-            setTimeout(() => { if (!cancelled) onVerified(); }, 400);
-            return;
-          }
-          mismatchCountRef.current += 1;
-        } else {
-          noFaceCountRef.current += 1;
+          stopResources();
+          setStatus('verifying');
+          onVerified(photo);
+          return;
         }
       } catch {
         // transient detection error — keep looping
@@ -125,7 +126,7 @@ export default function FaceAttendanceModal({ open, action, profile, onClose, on
       footer={
         <div style={{ display: 'flex', width: '100%', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          {(status === 'mismatch' || status === 'no-face-timeout' || status === 'error') && (
+          {(status === 'no-face-timeout' || status === 'error') && (
             <button className="btn" onClick={tryAgain}>Try Again</button>
           )}
         </div>
@@ -148,15 +149,9 @@ export default function FaceAttendanceModal({ open, action, profile, onClose, on
         </div>
 
         <div style={{ textAlign: 'center', width: '100%' }}>
-          {status === 'not-enrolled' && (
-            <div className="muted-text">You haven't enrolled your face yet. Close this and use <strong>Enroll my face</strong> on your dashboard first.</div>
-          )}
           {status === 'loading' && <div className="muted-text">Loading camera &amp; face verification model…</div>}
-          {status === 'scanning' && <div style={{ color: '#3b7ddd', fontWeight: 500 }}>Verifying your identity…</div>}
-          {status === 'matched' && <div style={{ color: '#10b981', fontWeight: 600 }}>Face verified ✓ Recording attendance…</div>}
-          {status === 'mismatch' && (
-            <div className="muted-text">Face detected but it didn't match your enrolled profile. Make sure it's really you, or re-enroll your face from the dashboard if your appearance has changed.</div>
-          )}
+          {status === 'scanning' && <div style={{ color: '#3b7ddd', fontWeight: 500 }}>Looking for your face…</div>}
+          {(status === 'captured' || status === 'verifying') && <div style={{ color: '#10b981', fontWeight: 600 }}>Photo captured — verifying with the server…</div>}
           {status === 'no-face-timeout' && (
             <div className="muted-text">We couldn't clearly detect a face. Make sure you're well-lit, centered, and looking at the camera.</div>
           )}

@@ -29,6 +29,10 @@ export function isLate(checkInTime, shift) {
   return checkInTime > shiftCutoff(shift);
 }
 
+export function isEarlyExit(checkOutTime, shift) {
+  return checkOutTime < shift.end;
+}
+
 // Matches the frontend's nowTime() (src/context/HRMSContext.jsx), pinned to
 // IST explicitly since the server may not run in the same timezone as the office.
 export function nowTimeIST() {

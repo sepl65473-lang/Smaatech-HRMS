@@ -3,6 +3,7 @@ import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import Modal from '../components/Modal';
 import RosterPlanner from '../components/RosterPlanner';
+import { IconInfo } from '../components/Icons';
 import { DEPARTMENTS } from '../lib/helpers';
 import { resolveShiftForToday } from '../lib/shifts';
 import { downloadCSV } from '../lib/exportCsv';
@@ -14,6 +15,7 @@ const STATUS = {
   late:    { label: 'Late',    cls: 'status-late' },
   absent:  { label: 'Absent',  cls: 'status-absent' },
   leave:   { label: 'On leave', cls: 'status-leave' },
+  'early-exit': { label: 'Early exit', cls: 'status-late' },
 };
 
 const EXPORT_COLUMNS = [
@@ -47,6 +49,7 @@ export default function Attendance() {
   const [dept, setDept] = useState('All');
   const [status, setStatus] = useState('all');
   const [tab, setTab] = useState('roster');
+  const [detailsRow, setDetailsRow] = useState(null);
 
   // Dynamic QR Code Display State
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -183,7 +186,22 @@ export default function Attendance() {
                     </td>
                     <td>{a.dept}</td>
                     <td className="muted-text">{shiftNameFor(a.empId)}</td>
-                    <td className="mono">{a.checkIn || '—'}</td>
+                    <td className="mono">
+                      {a.checkIn || '—'}
+                      {(a.checkIn || a.checkOut) && (
+                        <button
+                          className="icon-btn sm"
+                          title="View check-in/out details"
+                          style={{ marginLeft: 6 }}
+                          onClick={() => setDetailsRow(a)}
+                        >
+                          <IconInfo width="13" height="13" />
+                        </button>
+                      )}
+                      {a.anomalyFlags?.length > 0 && (
+                        <span className="status-dot status-late" title={`Flagged: ${a.anomalyFlags.join(', ')}`} style={{ marginLeft: 6 }} />
+                      )}
+                    </td>
                     <td className="mono">{a.checkOut || '—'}</td>
                     <td>
                       <label className="status-control">
@@ -313,6 +331,45 @@ export default function Attendance() {
             SEPL-ATT-{qrToken}
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(detailsRow)}
+        title={detailsRow ? `${detailsRow.name} — attendance detail` : ''}
+        subtitle={detailsRow?.date}
+        onClose={() => setDetailsRow(null)}
+        width={520}
+      >
+        {detailsRow && (
+          <div className="form-grid" style={{ gap: 14 }}>
+            {detailsRow.anomalyFlags?.length > 0 && (
+              <div style={{ padding: '8px 12px', background: 'rgba(220,53,69,0.08)', borderRadius: 8, fontSize: 12.5, color: '#dc3545' }}>
+                Flagged for review: {detailsRow.anomalyFlags.join(', ')}
+              </div>
+            )}
+            {['checkIn', 'checkOut'].map((dir) => {
+              const label = dir === 'checkIn' ? 'Check-in' : 'Check-out';
+              const time = detailsRow[dir];
+              if (!time) return null;
+              const cap = dir === 'checkIn' ? 'CheckIn' : 'CheckOut';
+              const device = detailsRow[`${cap}Device`];
+              return (
+                <div key={dir} className="card" style={{ padding: 14 }}>
+                  <div className="card-title" style={{ fontSize: 13, marginBottom: 8 }}>{label} · {time}</div>
+                  <div className="muted-text" style={{ fontSize: 12.5, lineHeight: 1.8 }}>
+                    <div><strong>Method:</strong> {detailsRow[`${cap}Details`] || '—'}</div>
+                    <div><strong>Coordinates:</strong> {detailsRow[`${cap}Loc`] || '—'} {detailsRow[`${cap}Accuracy`] != null ? `(±${Math.round(detailsRow[`${cap}Accuracy`])}m)` : ''}</div>
+                    <div><strong>Address:</strong> {detailsRow[`${cap}Address`] || 'Not available'}</div>
+                    <div><strong>Device:</strong> {device ? `${device.name} · ${device.browser} · ${device.os}` : '—'}</div>
+                    <div><strong>IP address:</strong> {detailsRow[`${cap}Ip`] || '—'}</div>
+                    <div><strong>Device ID:</strong> {detailsRow[`${cap}DeviceId`] || '—'}</div>
+                    <div><strong>Face match confidence:</strong> {detailsRow[`${cap}FaceConfidence`] != null ? `${Math.round(detailsRow[`${cap}FaceConfidence`])}%` : 'Not available yet'}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Modal>
     </div>
   );

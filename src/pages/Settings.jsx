@@ -81,7 +81,7 @@ function ChipManager({ label, sub, items, onAdd, onRemove, placeholder }) {
 }
 
 export default function Settings() {
-  const { settings, employees, currentUser, updateSettings, toggleSetting, resetDatabase, auditLog, toast } = useHRMS();
+  const { settings, employees, currentUser, updateSettings, toggleSetting, resetDatabase, auditLog, toast, enrollFace } = useHRMS();
   const [orgName, setOrgName] = useState('');
   const [workWeek, setWorkWeek] = useState('5-day');
   const [totalLeaveDays, setTotalLeaveDays] = useState(24);
@@ -132,11 +132,8 @@ export default function Settings() {
     setConfirmRemoveUser(null);
   };
 
-  const saveFaceDescriptor = (descriptor) => {
-    updateSettings({
-      loginProfiles: users.map((u) => (u.id === faceEnrollUser.id ? { ...u, faceDescriptor: descriptor } : u)),
-    }, false);
-    toast('success', `Face enrolled for <strong>${faceEnrollUser.name}</strong>`);
+  const saveFaceDescriptor = async (photoBlob) => {
+    await enrollFace(photoBlob, faceEnrollUser.email);
     setFaceEnrollUser(null);
   };
 
@@ -526,14 +523,12 @@ export default function Settings() {
                   <td className="mono">{u.email}</td>
                   <td>{u.scope}</td>
                   <td>
-                    {u.faceDescriptor?.length
-                      ? <span className="state-badge approved">Enrolled</span>
-                      : <span className="muted-text">Not enrolled</span>}
+                    <span className="muted-text">Managed on server</span>
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div className="row-actions">
                       <button className="mini-btn" onClick={() => setFaceEnrollUser(u)}>
-                        {u.faceDescriptor?.length ? 'Re-enroll face' : 'Enroll face'}
+                        Enroll / re-enroll face
                       </button>
                       <button className="icon-btn sm" title="Edit" onClick={() => openEditUser(u)}>
                         <IconEdit width="14" height="14" />

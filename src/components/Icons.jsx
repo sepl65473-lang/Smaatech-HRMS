@@ -80,6 +80,9 @@ export const IconEye = (p) => (
 export const IconEyeOff = (p) => (
   <svg {...base} {...p}><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a17.6 17.6 0 0 1-2.69 3.66M6.6 6.6C4.27 8.2 2.5 10.4 1 11.5c0 0 4 7 11 7a10.9 10.9 0 0 0 5.4-1.4M9.9 14.2a3 3 0 0 0 4.24-4.24" /><path d="M1 1l22 22" /></svg>
 );
+export const IconInfo = (p) => (
+  <svg {...base} {...p}><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
+);
 export const IconFaceScan = (p) => (
   <svg {...base} {...p}><path d="M4 9V6a2 2 0 0 1 2-2h3M4 15v3a2 2 0 0 0 2 2h3M20 9V6a2 2 0 0 0-2-2h-3M20 15v3a2 2 0 0 1-2 2h-3" /><circle cx="9" cy="10" r="1" /><circle cx="15" cy="10" r="1" /><path d="M9 15c.8.7 1.9 1 3 1s2.2-.3 3-1" /></svg>
 );

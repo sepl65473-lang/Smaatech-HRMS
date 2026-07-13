@@ -5,15 +5,15 @@ import { loadFaceModels, detectFaceDescriptor } from '../lib/faceAuth';
 export default function FaceEnrollModal({ open, user, onClose, onSave }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const [status, setStatus] = useState('loading'); // loading | ready | capturing | captured | error
+  const [status, setStatus] = useState('loading'); // loading | ready | capturing | captured | saving | error
   const [error, setError] = useState('');
-  const [descriptor, setDescriptor] = useState(null);
+  const [photoBlob, setPhotoBlob] = useState(null);
 
   useEffect(() => {
     if (!open) return undefined;
     let cancelled = false;
     setStatus('loading');
-    setDescriptor(null);
+    setPhotoBlob(null);
     setError('');
 
     (async () => {
@@ -42,6 +42,9 @@ export default function FaceEnrollModal({ open, user, onClose, onSave }) {
     };
   }, [open]);
 
+  // Client-side detection here is only a quick "is a face even visible"
+  // sanity check for UX — the server independently re-detects and computes
+  // the real enrollment descriptor from the uploaded photo itself.
   const capture = async () => {
     if (!videoRef.current) return;
     setStatus('capturing');
@@ -51,13 +54,25 @@ export default function FaceEnrollModal({ open, user, onClose, onSave }) {
       setStatus('ready');
       return;
     }
-    setError('');
-    setDescriptor(result);
-    setStatus('captured');
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    canvas.toBlob((blob) => {
+      setError('');
+      setPhotoBlob(blob);
+      setStatus('captured');
+    }, 'image/jpeg', 0.92);
   };
 
-  const save = () => {
-    onSave(descriptor);
+  const save = async () => {
+    setStatus('saving');
+    try {
+      await onSave(photoBlob);
+    } catch (err) {
+      setError(err.message || 'Could not save face — try capturing again.');
+      setStatus('captured');
+    }
   };
 
   return (
@@ -70,8 +85,8 @@ export default function FaceEnrollModal({ open, user, onClose, onSave }) {
       footer={(
         <>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          {status === 'captured'
-            ? <button className="btn" onClick={save}>Save face</button>
+          {status === 'captured' || status === 'saving'
+            ? <button className="btn" disabled={status === 'saving'} onClick={save}>{status === 'saving' ? 'Saving…' : 'Save face'}</button>
             : <button className="btn" disabled={status !== 'ready'} onClick={capture}>Capture face</button>}
         </>
       )}

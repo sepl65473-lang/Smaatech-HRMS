@@ -151,6 +151,22 @@ export const attendanceApi = {
   checkOut: (id, payload) => apiFetch(`/attendance/${id}/check-out`, { method: 'POST', body: payload }),
 };
 
+// Server-side face enrollment — uploads the captured photo; the server
+// computes and stores the descriptor itself (never a client-computed value).
+export const faceApi = {
+  // `target` may be a server User id, an email (for admin-assisted
+  // enrollment from Settings > Users, whose local records only carry an
+  // email), or omitted to enroll the caller's own account.
+  enroll: (photoBlob, target) => {
+    const form = new FormData();
+    form.append('photo', photoBlob, 'enroll.jpg');
+    if (target?.includes('@')) form.append('email', target);
+    else if (target) form.append('userId', target);
+    return apiFetch('/face/enroll', { method: 'POST', body: form });
+  },
+  status: (userId) => apiFetch(`/face/status/${userId}`),
+};
+
 // Server-authoritative geofence + shift config (the subset of "settings"
 // attendance verification depends on — see server/src/models/Settings.js).
 export const geofenceApi = {
