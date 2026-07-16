@@ -31,6 +31,115 @@ const EMP_SEED = [
   { name: 'Tanmay Verma',   role: 'QA Engineer',       dept: 'Engineering',  loc: 'Hyderabad', status: 'active',   join: '2022-09-19', salary: 130000, rating: 4.0 },
 ];
 
+// ── Programmatic generator: expands the 14 hand-written employees above to
+// ~150 total, so the dashboard's charts/lists look like a real mid-size org
+// instead of a sparse demo roster. ──────────────────────────────────────
+const FIRST_NAMES = [
+  'Aarav', 'Vivaan', 'Aditya', 'Vihaan', 'Arnav', 'Sai', 'Reyansh', 'Krishna', 'Ishaan', 'Rohan',
+  'Kabir', 'Aryan', 'Dhruv', 'Karthik', 'Nikhil', 'Yash', 'Aman', 'Rahul', 'Varun', 'Siddharth',
+  'Ananya', 'Diya', 'Aadhya', 'Myra', 'Anika', 'Riya', 'Ira', 'Saanvi', 'Navya', 'Ishita',
+  'Meera', 'Priya', 'Sneha', 'Neha', 'Divya', 'Shruti', 'Tanvi', 'Anjali', 'Kritika', 'Nisha',
+  'Ritika', 'Simran', 'Tara', 'Zara', 'Isha', 'Bhavya', 'Charu', 'Esha', 'Falak', 'Gauri',
+];
+const LAST_NAMES = [
+  'Nair', 'Menon', 'Reddy', 'Gupta', 'Singh', 'Bhatt', 'Sharma', 'Kumar', 'Iyer', 'Malhotra',
+  'Desai', 'Kapoor', 'Rao', 'Verma', 'Patel', 'Joshi', 'Mehta', 'Agarwal', 'Choudhary', 'Krishnan',
+  'Pillai', 'Saxena', 'Chatterjee', 'Banerjee', 'Mukherjee', 'Das', 'Bose', 'Ghosh', 'Chauhan', 'Yadav',
+  'Naidu', 'Rana', 'Bajwa', 'Kulkarni', 'Deshpande', 'Rathore', 'Chopra', 'Khanna', 'Sethi', 'Bhatia',
+];
+const GEN_LOCATIONS = ['Bengaluru', 'Mumbai', 'Hyderabad', 'Delhi NCR', 'Pune', 'Chennai', 'Remote'];
+
+const ROLES_BY_DEPT = {
+  Engineering: ['Software Engineer', 'Backend Engineer', 'Frontend Engineer', 'QA Engineer', 'DevOps Engineer', 'Full Stack Developer', 'Mobile Engineer', 'Site Reliability Engineer', 'Engineering Manager'],
+  Design: ['UI/UX Designer', 'Product Designer', 'Graphic Designer', 'Visual Designer', 'Motion Designer', 'Design Lead'],
+  Marketing: ['Marketing Executive', 'Content Writer', 'SEO Specialist', 'Social Media Manager', 'Growth Marketer', 'Brand Executive'],
+  Sales: ['Sales Executive', 'Account Executive', 'Business Development Manager', 'Inside Sales Rep', 'Sales Manager'],
+  Operations: ['Operations Executive', 'Operations Analyst', 'Process Coordinator', 'Facilities Executive', 'Logistics Coordinator'],
+  'Finance & HR': ['Finance Analyst', 'HR Executive', 'Payroll Specialist', 'Talent Acquisition Specialist', 'Accounts Executive', 'Compliance Officer'],
+};
+const INTERN_ROLE_BY_DEPT = {
+  Engineering: 'Engineering Intern', Design: 'Design Intern', Marketing: 'Marketing Intern',
+  Sales: 'Sales Intern', Operations: 'Operations Intern', 'Finance & HR': 'HR Intern',
+};
+const SALARY_RANGE_BY_DEPT = {
+  Engineering: [90000, 260000], Design: [80000, 220000], Marketing: [65000, 180000],
+  Sales: [60000, 200000], Operations: [65000, 190000], 'Finance & HR': [70000, 190000],
+};
+const EMP_TYPE_SALARY_FACTOR = { 'Full-time': 1, 'Part-time': 0.5, Contract: 1.05 };
+const INTERN_SALARY_RANGE = [15000, 30000];
+
+// Deterministic target counts (not pure random) so the dashboard's donut
+// charts show clean, intentional percentages rather than noisy ones.
+const DEPT_COUNTS_EXTRA = { Engineering: 37, Design: 28, Marketing: 21, Sales: 17, Operations: 17, 'Finance & HR': 16 };
+const EMPTYPE_COUNTS_EXTRA = { 'Full-time': 91, 'Part-time': 21, Contract: 15, Intern: 9 };
+const DEPT_LEAD = {
+  Engineering: 'Ananya Nair', Design: 'Vikram Menon', Marketing: 'Kavya Reddy',
+  Sales: 'Karan Malhotra', Operations: 'Meera Singh', 'Finance & HR': 'Aditi Rao',
+};
+
+const expandCounts = (map) => Object.entries(map).flatMap(([k, n]) => Array(n).fill(k));
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+const randInt = (min, max) => Math.floor(min + Math.random() * (max - min));
+
+function salaryFor(dept, employmentType) {
+  if (employmentType === 'Intern') return Math.round(randInt(...INTERN_SALARY_RANGE) / 500) * 500;
+  const [min, max] = SALARY_RANGE_BY_DEPT[dept];
+  const factor = EMP_TYPE_SALARY_FACTOR[employmentType] ?? 1;
+  return Math.round((randInt(min, max) * factor) / 500) * 500;
+}
+function weightedStatus() { // 85% active / 10% remote / 5% on-leave
+  const r = Math.random();
+  return r < 0.85 ? 'active' : r < 0.95 ? 'remote' : 'on-leave';
+}
+function randomJoinDate() { // 0-10yr ago, biased toward recent years
+  const daysAgo = Math.floor((Math.random() ** 1.6) * 3650);
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
+function generateExtraEmployees(count) {
+  const deptSlots = shuffle(expandCounts(DEPT_COUNTS_EXTRA));
+  const empTypeSlots = shuffle(expandCounts(EMPTYPE_COUNTS_EXTRA));
+  const usedNames = new Set(EMP_SEED.map((e) => e.name));
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    let name;
+    do {
+      const first = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
+      const last = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
+      name = `${first} ${last}`;
+    } while (usedNames.has(name));
+    usedNames.add(name);
+
+    const dept = deptSlots[i];
+    const employmentType = empTypeSlots[i];
+    const role = employmentType === 'Intern'
+      ? INTERN_ROLE_BY_DEPT[dept]
+      : ROLES_BY_DEPT[dept][Math.floor(Math.random() * ROLES_BY_DEPT[dept].length)];
+
+    rows.push({
+      name, role, dept,
+      loc: GEN_LOCATIONS[Math.floor(Math.random() * GEN_LOCATIONS.length)],
+      status: weightedStatus(),
+      join: randomJoinDate(),
+      salary: salaryFor(dept, employmentType),
+      rating: Number((3.5 + Math.random() * 1.5).toFixed(1)),
+      employmentType,
+    });
+  }
+  return rows;
+}
+
+const ALL_EMP_SEED = [...EMP_SEED, ...generateExtraEmployees(136)];
+
 const MANAGER_OF = {
   'Arjun Bhatt': 'Ananya Nair', 'Priya Sharma': 'Ananya Nair',
   'Ishaan Kapoor': 'Ananya Nair', 'Tanmay Verma': 'Ananya Nair',
@@ -57,17 +166,20 @@ async function run() {
     Settings.deleteMany({}),
   ]);
 
-  const employees = await Employee.insertMany(EMP_SEED.map((e, i) => ({
+  const employees = await Employee.insertMany(ALL_EMP_SEED.map((e, i) => ({
     name: e.name, role: e.role, dept: e.dept, loc: e.loc,
     email: emailOf(e.name), phone: phoneOf(i), status: e.status,
     joinDate: e.join, salary: e.salary, rating: e.rating,
+    employmentType: e.employmentType || 'Full-time',
   })));
 
   const byName = (n) => employees.find((e) => e.name === n);
   await Promise.all(employees.map((e) => {
-    const managerName = MANAGER_OF[e.name];
+    const managerName = MANAGER_OF[e.name] || (e.name !== DEPT_LEAD[e.dept] ? DEPT_LEAD[e.dept] : null);
     if (!managerName) return null;
-    e.managerId = byName(managerName)._id;
+    const manager = byName(managerName);
+    if (!manager) return null;
+    e.managerId = manager._id;
     return e.save();
   }));
 

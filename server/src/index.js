@@ -6,6 +6,7 @@ import { connectDB } from './db.js';
 import { initFaceEngine } from './lib/faceEngine.js';
 import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
+import usersRoutes from './routes/users.js';
 import attendanceRoutes from './routes/attendance.js';
 import settingsRoutes from './routes/settings.js';
 import faceRoutes from './routes/face.js';
@@ -19,6 +20,7 @@ app.use(cookieParser());
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/employees', employeesRoutes);
+app.use('/api/v1/users', usersRoutes);
 app.use('/api/v1/attendance', attendanceRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/face', faceRoutes);

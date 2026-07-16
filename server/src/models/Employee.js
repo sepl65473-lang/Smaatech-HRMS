@@ -11,6 +11,7 @@ const employeeSchema = new mongoose.Schema({
   joinDate: String,
   salary: Number,
   rating: Number,
+  employmentType: { type: String, default: 'Full-time' }, // Full-time | Part-time | Contract | Intern
   managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   bankAccount: { type: String, default: '' },
   ifsc: { type: String, default: '' },

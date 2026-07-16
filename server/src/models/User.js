@@ -7,6 +7,11 @@ const userSchema = new mongoose.Schema({
   role: { type: String, required: true }, // HR Director | HR Manager | Finance Lead | Employee
   initials: String,
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
+  active: { type: Boolean, default: true },
+  // Hashed (never plaintext) one-time code for password reset, emailed to
+  // the real address — replaces the old client-simulated toast.
+  otpHash: { type: String, default: null },
+  otpExpiresAt: { type: Date, default: null },
 }, { timestamps: true });
 
 userSchema.set('toJSON', {
@@ -17,6 +22,8 @@ userSchema.set('toJSON', {
     delete ret._id;
     delete ret.__v;
     delete ret.passwordHash;
+    delete ret.otpHash;
+    delete ret.otpExpiresAt;
   },
 });
 

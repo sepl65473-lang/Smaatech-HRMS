@@ -8,15 +8,19 @@ Production-ready HRMS dashboard. Original static HTML prototype ko **React.js** 
 
 ## 🚀 Quick start
 
+Repo `client/` (frontend) aur `server/` (backend) do alag folders me hai, root sirf dono ko orchestrate karta hai:
+
 ```bash
-npm install      # dependencies install karo
-npm run dev      # dev server start (http://localhost:5173)
+npm install                  # root orchestrator deps (concurrently)
+npm --prefix client install  # frontend deps
+npm --prefix server install  # backend deps
+npm run dev                  # client (http://localhost:5173) + server (http://localhost:4000) dono start
 ```
 
 Production build:
 
 ```bash
-npm run build    # dist/ folder me optimized build
+npm run build    # client/dist/ me optimized build
 npm run preview  # build ko locally preview karo
 ```
 
