@@ -38,13 +38,13 @@ export default function LoginScreen() {
     }, 450);
   };
 
-  const proceedAfterAuth = ({ accessToken, user, requiresTwoFactor }) => {
+  const proceedAfterAuth = async ({ accessToken, user, requiresTwoFactor }) => {
     if (requiresTwoFactor) {
       setPendingAuth({ accessToken, user });
       setOtpMode(true);
       sendOtpSim(user);
     } else {
-      finishLogin(accessToken, user);
+      await finishLogin(accessToken, user);
     }
   };
 
@@ -52,16 +52,16 @@ export default function LoginScreen() {
     try {
       const result = await login(email.trim(), password);
       setError('');
-      proceedAfterAuth(result);
+      await proceedAfterAuth(result);
     } catch {
       setError('Invalid email or password.');
     }
   };
 
-  const verifyOtp = () => {
+  const verifyOtp = async () => {
     if (otpCode.trim() === generatedOtp) {
       setOtpMode(false);
-      finishLogin(pendingAuth.accessToken, pendingAuth.user);
+      await finishLogin(pendingAuth.accessToken, pendingAuth.user);
       setPendingAuth(null);
     } else {
       setOtpError('Incorrect code. Check simulated code in notification toast.');
@@ -326,7 +326,7 @@ export default function LoginScreen() {
         onMatch={async (profile) => {
           setFaceOpen(false);
           try {
-            proceedAfterAuth(await loginWithFace(profile.email));
+            await proceedAfterAuth(await loginWithFace(profile.email));
           } catch (err) {
             toast('error', err.message || 'Face sign-in failed.');
           }

@@ -115,10 +115,15 @@ export function HRMSProvider({ children }) {
 
   const loadAuthenticatedData = useCallback(async (userId) => {
     setLoading(true);
-    const [all, faceStatus] = await Promise.all([loadAll(), faceApi.status(userId)]);
-    hydrate(all);
-    setFaceEnrolled(faceStatus.enrolled);
-    setLoading(false);
+    try {
+      const [all, faceStatus] = await Promise.all([loadAll(), faceApi.status(userId)]);
+      hydrate(all);
+      setFaceEnrolled(faceStatus.enrolled);
+    } finally {
+      // Always clear the loading gate — even on failure — so a flaky request
+      // can't leave Layout.jsx stuck on "Loading workspace…" forever.
+      setLoading(false);
+    }
   }, [hydrate]);
 
   // Auth is now a real server session (JWT access token in memory + httpOnly
@@ -139,8 +144,14 @@ export function HRMSProvider({ children }) {
   const finishLogin = useCallback(async (accessToken, user) => {
     setAccessToken(accessToken);
     setAuthUser(user);
-    await loadAuthenticatedData(user.id);
-    toast('success', `Welcome back, <strong>${user.name.split(' ')[0]}</strong>`);
+    try {
+      await loadAuthenticatedData(user.id);
+      toast('success', `Welcome back, <strong>${user.name.split(' ')[0]}</strong>`);
+    } catch {
+      // The session itself is valid (setAuthUser already ran) — only the
+      // initial data fetch failed, so let the user retry instead of hanging.
+      toast('error', 'Signed in, but some data failed to load — try refreshing the page.');
+    }
   }, [loadAuthenticatedData, toast]);
 
   const logout = useCallback(async () => {

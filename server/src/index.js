@@ -21,6 +21,19 @@ import assetsRoutes from './routes/assets.js';
 import jobsRoutes from './routes/jobs.js';
 import celebrationsRoutes from './routes/celebrations.js';
 
+// Route handlers here are bare `async (req, res) => {...}` with no
+// try/catch, and Express 4 doesn't forward a rejected handler promise to the
+// error middleware below on its own — so an unhandled rejection (e.g. a
+// Mongoose CastError from a malformed :id) reaches Node directly, which by
+// default terminates the whole process. That took the entire server down
+// once already; log-and-continue instead of crashing on every request.
+process.on('unhandledRejection', (err) => {
+  console.error('[server] unhandled rejection:', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaught exception:', err);
+});
+
 const app = express();
 
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173', credentials: true }));
