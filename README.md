@@ -4,18 +4,18 @@ Production HRMS dashboard. Two workspaces: **`client/`** (React + Vite frontend)
 
 ---
 
-## 🔑 Demo login accounts
+## 🔑 Demo login accounts (local dev only)
 
-Seeded by `server/src/seed.js` (`npm run seed:server` from the repo root). Use any of these on the login screen:
+`npm run seed:server` creates 4 demo accounts (HR Director, HR Manager, Finance Lead, Employee) so you have something to log in with on a fresh local database — see `server/src/seed.js` for their exact emails/passwords rather than duplicating them here.
 
-| Role | Email | Password |
-|---|---|---|
-| HR Director (admin) | `admin@smaatech.co` | `Admin@123` |
-| HR Manager | `hr.manager@smaatech.co` | `Manager@123` |
-| Finance Lead | `finance.lead@smaatech.co` | `Finance@123` |
-| Employee | `priya.sharma@smaatech.co` | `Employee@123` |
+> **These are dev-only placeholder credentials, not a real login system.** Don't rely on them past initial setup: create your own account (below) and deactivate or delete the seed accounts from **Settings → Users & role access** once you have one. Re-running the seed script also **wipes and recreates** the demo employee roster — don't run it against a database with real data you want to keep.
 
-> Re-running the seed script **wipes and recreates** these accounts (and the demo employee roster) — don't run it against a database with real data you want to keep.
+### Creating a real login
+
+1. Sign in once with the seeded HR Director demo account (just to get in the door).
+2. Go to **Settings → Users & role access → Add user**. Enter your own name, a real email you control, a strong password, and the role you want (HR Director for full access).
+3. Sign out and sign back in with that new account to confirm it works.
+4. Go back to **Settings → Users & role access**, open each of the 4 seed accounts, and either toggle them **inactive** or delete them — this is the step that actually matters if this repo or the deployed app is ever made public, since `server/src/seed.js` (source code) has the demo passwords in plain text regardless of whether they're written here in the README.
 
 ---
 
