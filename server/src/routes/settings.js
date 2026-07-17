@@ -6,7 +6,7 @@ const router = Router();
 
 const SERVER_OWNED_KEYS = [
   'gpsCheckInEnabled', 'geofenceLat', 'geofenceLng', 'geofenceRadius',
-  'shifts', 'roster', 'employeeShifts',
+  'shifts', 'roster', 'employeeShifts', 'approvalWorkflows',
 ];
 
 export async function getSettingsDoc() {

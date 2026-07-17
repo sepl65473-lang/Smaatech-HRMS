@@ -10,6 +10,16 @@ const expenseSchema = new mongoose.Schema({
   receiptUrl: { type: String, default: '' },
   status: { type: String, default: 'pending' }, // pending | approved | declined
   reason: { type: String, default: '' },
+  // Multi-stage approval (see routes/expenses.js) — approvalStages is a
+  // snapshot of Settings.approvalWorkflows.expense at creation time, so
+  // editing the workflow config later doesn't change requests already in flight.
+  approvalStages: { type: [String], default: undefined },
+  currentStage: { type: Number, default: 0 },
+  approvals: [{
+    role: String,
+    decision: String, // approved | declined
+    at: { type: Date, default: Date.now },
+  }],
 }, { timestamps: true });
 
 expenseSchema.set('toJSON', {

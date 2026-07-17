@@ -10,7 +10,12 @@ import { getDeviceId } from '../lib/deviceId';
 import { uid, daysBetween, todayISO } from '../lib/helpers';
 import { resolveShiftForToday, isLate as isLateForShift } from '../lib/shifts';
 
-const GEOFENCE_KEYS = ['gpsCheckInEnabled', 'geofenceLat', 'geofenceLng', 'geofenceRadius', 'shifts', 'roster', 'employeeShifts'];
+// Settings fields the server is authoritative for — everything else in
+// "settings" stays local (see updateSettings below and data/store.js).
+const SERVER_SETTINGS_KEYS = [
+  'gpsCheckInEnabled', 'geofenceLat', 'geofenceLng', 'geofenceRadius',
+  'shifts', 'roster', 'employeeShifts', 'approvalWorkflows',
+];
 
 const HRMSContext = createContext(null);
 const AUDIT_KEY = 'Smaatech_hrms_audit_log';
@@ -375,10 +380,15 @@ export function HRMSProvider({ children }) {
     return created;
   };
 
-  const setLeaveStatus = async (id, status) => {
-    const updated = await leavesApi.update(id, { status });
+  // Goes through the server's stage-aware approve/decline endpoints (see
+  // routes/leave.js) rather than a plain status PATCH — the server checks
+  // the caller's role against the request's current approval stage, and
+  // `updated.status` only actually becomes 'approved' once every configured
+  // stage (Settings > Workflows) has signed off.
+  const setLeaveStatus = async (id, action) => {
+    const updated = action === 'approved' ? await leavesApi.approve(id) : await leavesApi.decline(id);
     setLeaves((list) => list.map((l) => (l.id === id ? updated : l)));
-    if (status === 'approved' && updated.empId) {
+    if (updated.status === 'approved' && updated.empId) {
       const today = todayISO();
       const activeToday = updated.start <= today && updated.end >= today;
       const linkedAttendance = attendance.filter((a) => a.empId === updated.empId && a.date === today);
@@ -397,9 +407,15 @@ export function HRMSProvider({ children }) {
         )));
       }
     }
-    toast(status === 'approved' ? 'success' : 'info',
-      `Leave <strong>${status}</strong> for ${updated.name}`);
-    audit(`Leave ${status}`, updated.name, `${updated.start} to ${updated.end}`);
+    if (action === 'declined') {
+      toast('info', `Leave <strong>declined</strong> for ${updated.name}`);
+    } else if (updated.status === 'approved') {
+      toast('success', `Leave <strong>approved</strong> for ${updated.name}`);
+    } else {
+      const nextRole = updated.approvalStages?.[updated.currentStage];
+      toast('info', `Stage approved for ${updated.name}${nextRole ? ` — awaiting <strong>${nextRole}</strong>` : ''}`);
+    }
+    audit(`Leave ${action === 'declined' ? 'declined' : (updated.status === 'approved' ? 'approved' : 'stage approved')}`, updated.name, `${updated.start} to ${updated.end}`);
     return updated;
   };
   const approveLeave = (id) => setLeaveStatus(id, 'approved');
@@ -696,11 +712,23 @@ export function HRMSProvider({ children }) {
     return created;
   };
 
+  // Same stage-aware approve/decline pattern as leave (see setLeaveStatus) —
+  // goes through routes/expenses.js's dedicated endpoints instead of a plain
+  // status PATCH, so the server can enforce Settings > Workflows.
   const updateExpenseStatus = async (id, status, reason = '') => {
-    const updated = await expensesApi.update(id, { status, reason });
+    const updated = status === 'approved' ? await expensesApi.approve(id) : await expensesApi.decline(id, reason);
     setExpenses((list) => list.map((e) => (e.id === id ? updated : e)));
-    audit(`Expense claim ${status}`, updated.name, `₹${updated.amount}`);
-    toast(status === 'approved' ? 'success' : 'info', `Expense claim for ${updated.name} has been <strong>${status}</strong>.`);
+    if (status === 'declined') {
+      audit('Expense claim declined', updated.name, `₹${updated.amount}`);
+      toast('info', `Expense claim for ${updated.name} has been <strong>declined</strong>.`);
+    } else if (updated.status === 'approved') {
+      audit('Expense claim approved', updated.name, `₹${updated.amount}`);
+      toast('success', `Expense claim for ${updated.name} has been <strong>approved</strong>.`);
+    } else {
+      const nextRole = updated.approvalStages?.[updated.currentStage];
+      audit('Expense claim stage approved', updated.name, `₹${updated.amount}`);
+      toast('info', `Stage approved for ${updated.name}'s claim${nextRole ? ` — awaiting <strong>${nextRole}</strong>` : ''}`);
+    }
     return updated;
   };
 
@@ -747,14 +775,14 @@ export function HRMSProvider({ children }) {
   // ════════════════════════════════════════════════════════════
   //  SETTINGS
   // ════════════════════════════════════════════════════════════
-  // Geofence/shift fields are server-authoritative (never trust a client
-  // write for the values attendance verification depends on) — everything
-  // else in "settings" stays local, same as before.
+  // Geofence/shift/workflow fields are server-authoritative (never trust a
+  // client write for values attendance verification or approval routing
+  // depend on) — everything else in "settings" stays local, same as before.
   const updateSettings = async (patch, notify = true) => {
     const localPatch = {};
     const serverPatch = {};
     for (const [key, value] of Object.entries(patch)) {
-      (GEOFENCE_KEYS.includes(key) ? serverPatch : localPatch)[key] = value;
+      (SERVER_SETTINGS_KEYS.includes(key) ? serverPatch : localPatch)[key] = value;
     }
     let merged = settings;
     if (Object.keys(localPatch).length) {

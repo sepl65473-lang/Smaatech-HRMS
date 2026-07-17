@@ -98,12 +98,22 @@ export const employeesApi = restResource('employees');
 // every other role; fetched lazily from the Settings page instead.
 export const usersApi = restResource('users');
 
-export const leavesApi = restResource('leaves');
+export const leavesApi = {
+  ...restResource('leaves'),
+  // Stage-aware approve/decline (see server/src/routes/leave.js) — the
+  // server checks the caller's role against the request's current stage.
+  approve: (id) => apiFetch(`/leaves/${id}/approve`, { method: 'POST' }),
+  decline: (id) => apiFetch(`/leaves/${id}/decline`, { method: 'POST' }),
+};
 export const payrollApi = restResource('payroll');
 export const holidaysApi = restResource('holidays');
 export const recruitmentApi = restResource('recruitment');
 export const reviewsApi = restResource('reviews');
-export const expensesApi = restResource('expenses');
+export const expensesApi = {
+  ...restResource('expenses'),
+  approve: (id) => apiFetch(`/expenses/${id}/approve`, { method: 'POST' }),
+  decline: (id, reason) => apiFetch(`/expenses/${id}/decline`, { method: 'POST', body: { reason } }),
+};
 export const assetsApi = restResource('assets');
 export const jobsApi = restResource('jobs');
 

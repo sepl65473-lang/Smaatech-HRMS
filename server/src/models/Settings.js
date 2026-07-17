@@ -17,6 +17,11 @@ const settingsSchema = new mongoose.Schema({
   shifts: { type: mongoose.Schema.Types.Mixed, default: undefined },
   roster: { type: mongoose.Schema.Types.Mixed, default: undefined },
   employeeShifts: { type: mongoose.Schema.Types.Mixed, default: undefined },
+  // Ordered role sequence each leave/expense request must clear before it's
+  // fully approved (see routes/leave.js, routes/expenses.js) — configured
+  // from Settings > Workflows. Authoritative here so the server can actually
+  // enforce it, not just display it.
+  approvalWorkflows: { type: mongoose.Schema.Types.Mixed, default: undefined },
 });
 
 settingsSchema.set('toJSON', {

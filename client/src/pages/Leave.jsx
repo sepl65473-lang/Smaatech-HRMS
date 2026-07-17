@@ -7,9 +7,10 @@ import { IconPlus, IconTrash } from '../components/Icons';
 import { formatDate, daysBetween, leaveTagClass, leaveTagLabel } from '../lib/helpers';
 
 const FILTERS = ['Pending', 'Approved', 'Declined', 'All'];
+const DEFAULT_STAGES = ['HR Manager', 'HR Director']; // mirrors server/src/routes/leave.js's fallback
 
 export default function Leave() {
-  const { leaves, employees, settings, addLeave, approveLeave, declineLeave, deleteLeave } = useHRMS();
+  const { leaves, employees, settings, currentUser, addLeave, approveLeave, declineLeave, deleteLeave } = useHRMS();
   const [filter, setFilter] = useState('Pending');
   const [formOpen, setFormOpen] = useState(false);
   const [confirm, setConfirm] = useState(null);
@@ -95,18 +96,36 @@ export default function Leave() {
                 </div>
                 {l.reason && <div className="leave-reason">“{l.reason}”</div>}
                 <span className={`leave-tag ${leaveTagClass(l.type)}`}>{leaveTagLabel(l.type)}</span>
-                <div className="leave-actions">
-                  {l.status === 'pending' ? (
+                {l.status === 'pending' && (() => {
+                  const stages = l.approvalStages?.length ? l.approvalStages : DEFAULT_STAGES;
+                  const stage = l.currentStage || 0;
+                  const requiredRole = stages[stage] || stages[stages.length - 1];
+                  const canAct = currentUser.role === 'HR Director' || currentUser.role === requiredRole;
+                  return (
                     <>
-                      <button className="mini-btn approve" onClick={() => approveLeave(l.id)}>Approve</button>
-                      <button className="mini-btn" onClick={() => declineLeave(l.id)}>Decline</button>
+                      <div className="leave-meta" style={{ marginTop: 2 }}>
+                        Stage {stage + 1} of {stages.length} — awaiting <strong>{requiredRole}</strong>
+                      </div>
+                      <div className="leave-actions">
+                        {canAct ? (
+                          <>
+                            <button className="mini-btn approve" onClick={() => approveLeave(l.id)}>Approve</button>
+                            <button className="mini-btn" onClick={() => declineLeave(l.id)}>Decline</button>
+                          </>
+                        ) : (
+                          <span className="muted-text">Waiting on {requiredRole}</span>
+                        )}
+                      </div>
                     </>
-                  ) : (
+                  );
+                })()}
+                {l.status !== 'pending' && (
+                  <div className="leave-actions">
                     <button className="mini-btn danger" onClick={() => setConfirm(l)}>
                       <IconTrash width="12" height="12" /> Delete
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           ))}

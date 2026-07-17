@@ -4,6 +4,8 @@ import Avatar from '../components/Avatar';
 import Modal from '../components/Modal';
 import { formatINR } from '../lib/helpers';
 
+const DEFAULT_STAGES = ['Finance Lead', 'HR Director']; // mirrors server/src/routes/expenses.js's fallback
+
 export default function Expenses() {
   const { expenses, currentUser, employees, addExpense, updateExpenseStatus } = useHRMS();
   
@@ -166,19 +168,36 @@ export default function Expenses() {
                       <span className={`state-badge ${exp.status}`}>
                         {exp.status}
                       </span>
+                      {exp.status === 'pending' && (() => {
+                        const stages = exp.approvalStages?.length ? exp.approvalStages : DEFAULT_STAGES;
+                        const stage = exp.currentStage || 0;
+                        const requiredRole = stages[stage] || stages[stages.length - 1];
+                        return (
+                          <div className="muted-text" style={{ fontSize: 11, marginTop: 2 }}>
+                            Stage {stage + 1}/{stages.length} — {requiredRole}
+                          </div>
+                        );
+                      })()}
                     </td>
                     {!isEmployee && (
                       <td style={{ textAlign: 'right' }}>
-                        {exp.status === 'pending' ? (
-                          <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
-                            <button className="mini-btn approve" onClick={() => setActionClaim({ claim: exp, status: 'approved' })}>
-                              Approve
-                            </button>
-                            <button className="mini-btn danger" onClick={() => setActionClaim({ claim: exp, status: 'declined' })}>
-                              Decline
-                            </button>
-                          </div>
-                        ) : (
+                        {exp.status === 'pending' ? (() => {
+                          const stages = exp.approvalStages?.length ? exp.approvalStages : DEFAULT_STAGES;
+                          const requiredRole = stages[exp.currentStage || 0] || stages[stages.length - 1];
+                          const canAct = currentUser.role === 'HR Director' || currentUser.role === requiredRole;
+                          return canAct ? (
+                            <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
+                              <button className="mini-btn approve" onClick={() => setActionClaim({ claim: exp, status: 'approved' })}>
+                                Approve
+                              </button>
+                              <button className="mini-btn danger" onClick={() => setActionClaim({ claim: exp, status: 'declined' })}>
+                                Decline
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="muted-text">Waiting on {requiredRole}</span>
+                          );
+                        })() : (
                           <span className="muted-text">—</span>
                         )}
                       </td>
