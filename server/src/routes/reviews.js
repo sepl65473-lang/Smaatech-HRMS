@@ -5,8 +5,9 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', async (_req, res) => {
-  const rows = await Review.find().sort({ createdAt: -1 });
+router.get('/', async (req, res) => {
+  const isManager = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
+  const rows = await Review.find(isManager ? {} : { empId: req.auth.employeeId }).sort({ createdAt: -1 });
   res.json(rows);
 });
 

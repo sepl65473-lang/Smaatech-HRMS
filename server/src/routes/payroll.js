@@ -5,8 +5,9 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', async (_req, res) => {
-  const rows = await Payroll.find().sort({ createdAt: -1 });
+router.get('/', async (req, res) => {
+  const canSeeAll = ['HR Director', 'HR Manager', 'Finance Lead'].includes(req.auth.role);
+  const rows = await Payroll.find(canSeeAll ? {} : { empId: req.auth.employeeId }).sort({ createdAt: -1 });
   res.json(rows);
 });
 

@@ -5,8 +5,9 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', async (_req, res) => {
-  const rows = await Expense.find().sort({ createdAt: -1 });
+router.get('/', async (req, res) => {
+  const canActForOthers = ['HR Director', 'HR Manager', 'Finance Lead'].includes(req.auth.role);
+  const rows = await Expense.find(canActForOthers ? {} : { empId: req.auth.employeeId }).sort({ createdAt: -1 });
   res.json(rows);
 });
 
@@ -17,12 +18,19 @@ router.get('/:id', async (req, res) => {
 
 // Any authenticated user may file their own expense claim; only
 // HR Manager/Finance Lead/Director can file one on someone else's behalf.
+// Self-service claims are always created 'pending' — `status` is never
+// taken from the request body, so an employee can't self-approve.
 router.post('/', async (req, res) => {
   const canActForOthers = ['HR Director', 'HR Manager', 'Finance Lead'].includes(req.auth.role);
-  if (!canActForOthers && req.body?.empId !== req.auth.employeeId) {
+  const { empId, name, category, amount, date, description } = req.body || {};
+  if (!canActForOthers && empId !== req.auth.employeeId) {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'You can only file expenses for yourself.' } });
   }
-  const created = await Expense.create({ status: 'pending', reason: '', ...req.body });
+  const created = await Expense.create({
+    status: 'pending', reason: '',
+    empId, name, category, amount, date, description,
+    ...(canActForOthers ? { status: req.body?.status } : {}),
+  });
   res.status(201).json(created);
 });
 
