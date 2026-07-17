@@ -2,7 +2,10 @@
 // token in memory only (never localStorage) and transparently retries once
 // via the httpOnly refresh cookie on a 401, mirroring how a native app would
 // eventually use the same endpoints with a bearer token.
-const API_BASE = '/api/v1';
+// In dev this stays relative and rides the Vite proxy (see vite.config.js).
+// In production (client and server on separate domains) VITE_API_BASE_URL
+// points straight at the deployed server, e.g. https://xyz.onrender.com/api/v1.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 let accessToken = null;
 let refreshingPromise = null;

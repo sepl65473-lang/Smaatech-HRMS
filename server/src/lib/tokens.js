@@ -32,7 +32,11 @@ export function refreshCookieOptions() {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    // 'None' is required for the refresh cookie to survive cross-site fetch()
+    // calls once the client (Vercel) and server (Render) live on different
+    // domains — browsers won't attach a 'Lax' cookie to those requests.
+    // Always paired with secure:true above, since SameSite=None requires it.
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge: REFRESH_TOKEN_TTL_MS,
     path: '/api/v1/auth',
   };

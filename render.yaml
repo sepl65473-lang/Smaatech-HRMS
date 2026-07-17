@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: smaatech-hrms-api
+    runtime: node
+    plan: free
+    buildCommand: npm --prefix server install
+    startCommand: npm --prefix server start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render assigns PORT itself; server/src/index.js already reads
+      # process.env.PORT, so nothing else to configure for that one.
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      # Set this to the deployed Vercel URL (e.g. https://smaatech-hrms.vercel.app)
+      # once the client is deployed — see README.md for the full order of steps.
+      - key: CLIENT_ORIGIN
+        sync: false

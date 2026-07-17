@@ -1,20 +1,20 @@
 import { buildSeed } from './seed';
-import { uid } from '../lib/helpers';
 import { apiFetch, setAccessToken } from '../lib/apiClient';
 
 // ─────────────────────────────────────────────────────────────
 //  DATA LAYER
 //
-//  Employees, Attendance, and the geofence/shift subset of Settings now
-//  live on the real backend (server/) — see authApi/employeesApi/
-//  attendanceApi/geofenceApi below, which call the REST API directly.
-//  Everything else (Leave, Payroll, Celebrations, Recruitment, Reviews,
-//  Expenses, Assets, Jobs, and the rest of Settings) still persists to
-//  localStorage, same as before, and is still swappable to a real API
-//  later the same way this file has always documented:
+//  Employees, Attendance, Users, Leave, Payroll, Celebrations, Holidays,
+//  Recruitment, Reviews, Expenses, Assets, Jobs, and the geofence/shift
+//  subset of Settings all live on the real backend (server/) now — see
+//  the "Real backend resources" section below, which calls the REST API
+//  directly via restResource()/apiFetch.
 //
-//  ➜ replace the bodies of the methods in `createResource` with `fetch()`
-//    calls to your REST API. Nothing else in the app has to change.
+//  Only the rest of Settings (org config, notification templates, gateway
+//  credential placeholders, departments/designations) still persists to
+//  localStorage — see `settingsApi` below, still swappable to a real API
+//  the same way this file has always documented: replace its method bodies
+//  with fetch() calls. Nothing else in the app has to change.
 // ─────────────────────────────────────────────────────────────
 
 const DB_KEY = 'Smaatech_hrms_db_v1';
@@ -62,56 +62,6 @@ async function ensureDB(employeesHint) {
   return dbReady;
 }
 
-// Generic collection resource (local-only collections): list / get / create / update / remove
-function createResource(collection) {
-  return {
-    async list() {
-      await ensureDB();
-      return wait(clone(db[collection]));
-    },
-    async get(id) {
-      await ensureDB();
-      return wait(clone(db[collection].find((x) => x.id === id) || null));
-    },
-    async create(data) {
-      await ensureDB();
-      const record = { id: uid(collection.slice(0, 3)), ...data };
-      db[collection] = [record, ...db[collection]];
-      saveDB(db);
-      return wait(clone(record));
-    },
-    async update(id, patch) {
-      await ensureDB();
-      let updated = null;
-      db[collection] = db[collection].map((x) => {
-        if (x.id === id) {
-          updated = { ...x, ...patch };
-          return updated;
-        }
-        return x;
-      });
-      saveDB(db);
-      return wait(clone(updated));
-    },
-    async remove(id) {
-      await ensureDB();
-      db[collection] = db[collection].filter((x) => x.id !== id);
-      saveDB(db);
-      return { id };
-    },
-  };
-}
-
-export const leavesApi      = createResource('leaves');
-export const payrollApi     = createResource('payroll');
-export const celebrationsApi = createResource('celebrations');
-export const holidaysApi    = createResource('holidays');
-export const recruitmentApi = createResource('recruitment');
-export const reviewsApi      = createResource('reviews');
-export const expensesApi     = createResource('expenses');
-export const assetsApi       = createResource('assets');
-export const jobsApi         = createResource('jobs');
-
 // Local-only settings (org config, login profiles/face descriptors,
 // notification templates, gateway credentials, etc). The geofence/shift
 // subset that attendance verification depends on lives server-side instead —
@@ -147,6 +97,21 @@ export const employeesApi = restResource('employees');
 // deliberately not part of loadAll()/hydrate, since GET /users would 403 for
 // every other role; fetched lazily from the Settings page instead.
 export const usersApi = restResource('users');
+
+export const leavesApi = restResource('leaves');
+export const payrollApi = restResource('payroll');
+export const holidaysApi = restResource('holidays');
+export const recruitmentApi = restResource('recruitment');
+export const reviewsApi = restResource('reviews');
+export const expensesApi = restResource('expenses');
+export const assetsApi = restResource('assets');
+export const jobsApi = restResource('jobs');
+
+// Celebrations is computed server-side from real Employee dob/joinDate
+// (see server/src/routes/celebrations.js) rather than a stored collection —
+// only GET (list) and PATCH (send wish) are meaningful, but restResource's
+// shape is a safe superset since nothing calls create/remove on it.
+export const celebrationsApi = restResource('celebrations');
 
 export const attendanceApi = {
   ...restResource('attendance'),
@@ -217,19 +182,32 @@ export const authApi = {
 };
 
 // Load everything at once for the app shell. Requires an authenticated
-// session (employees/attendance/geofence are all behind requireAuth) — only
-// call this after authApi has established a session.
+// session (employees/attendance/geofence and all 9 modules below are behind
+// requireAuth) — only call this after authApi has established a session.
 export async function loadAll() {
   const employees = await employeesApi.list();
-  const [attendance, local, geofence] = await Promise.all([
+  const [
+    attendance, leaves, payroll, celebrations, holidays,
+    recruitment, reviews, expenses, assets, jobs,
+    local, geofence,
+  ] = await Promise.all([
     attendanceApi.list(),
+    leavesApi.list(),
+    payrollApi.list(),
+    celebrationsApi.list(),
+    holidaysApi.list(),
+    recruitmentApi.list(),
+    reviewsApi.list(),
+    expensesApi.list(),
+    assetsApi.list(),
+    jobsApi.list(),
     ensureDB(employees),
     geofenceApi.get(),
   ]);
   const localClone = clone(local);
   return {
-    employees,
-    attendance,
+    employees, attendance, leaves, payroll, celebrations, holidays,
+    recruitment, reviews, expenses, assets, jobs,
     ...localClone,
     settings: { ...localClone.settings, ...geofence },
   };
@@ -248,8 +226,10 @@ export async function reloadFromDisk() {
 export const DB_STORAGE_KEY = DB_KEY;
 
 // Wipe the LOCAL (non-backend) collections and rebuild from seed, linked to
-// whichever employees currently exist on the server. Employees/Attendance
-// themselves live in MongoDB now and are not affected by this (Settings →
+// whichever employees currently exist on the server. Only `settings` is
+// local now — Employees, Attendance, and all 9 previously-local modules
+// (Leave, Payroll, Celebrations, Holidays, Recruitment, Reviews, Expenses,
+// Assets, Jobs) live in MongoDB and are unaffected by this (Settings →
 // Danger Zone reset was always scoped to this app's own demo data, not a
 // shared server database).
 export async function resetDB() {

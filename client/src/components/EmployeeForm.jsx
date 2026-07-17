@@ -7,7 +7,7 @@ import { ROLES } from '../lib/permissions';
 
 const emptyForm = (depts) => ({
   name: '', role: '', dept: depts[0], loc: LOCATIONS[0],
-  email: '', phone: '', status: 'active', joinDate: '', salary: '',
+  email: '', phone: '', status: 'active', joinDate: '', dob: '', salary: '',
   bankAccount: '', ifsc: '', managerId: '', photo: '',
   employmentType: 'Full-time',
 });
@@ -210,6 +210,9 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
         </Field>
         <Field label="Joining date">
           <input type="date" className="input" value={form.joinDate} onChange={set('joinDate')} />
+        </Field>
+        <Field label="Date of birth">
+          <input type="date" className="input" value={form.dob} onChange={set('dob')} />
         </Field>
         <Field label="Monthly gross (₹)" error={errors.salary}>
           <input type="number" className="input" value={form.salary} onChange={set('salary')} placeholder="0" />

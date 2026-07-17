@@ -11,6 +11,15 @@ import attendanceRoutes from './routes/attendance.js';
 import settingsRoutes from './routes/settings.js';
 import faceRoutes from './routes/face.js';
 import filesRoutes from './routes/files.js';
+import leaveRoutes from './routes/leave.js';
+import payrollRoutes from './routes/payroll.js';
+import holidaysRoutes from './routes/holidays.js';
+import recruitmentRoutes from './routes/recruitment.js';
+import reviewsRoutes from './routes/reviews.js';
+import expensesRoutes from './routes/expenses.js';
+import assetsRoutes from './routes/assets.js';
+import jobsRoutes from './routes/jobs.js';
+import celebrationsRoutes from './routes/celebrations.js';
 
 const app = express();
 
@@ -25,6 +34,15 @@ app.use('/api/v1/attendance', attendanceRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/face', faceRoutes);
 app.use('/api/v1/files', filesRoutes);
+app.use('/api/v1/leaves', leaveRoutes);
+app.use('/api/v1/payroll', payrollRoutes);
+app.use('/api/v1/holidays', holidaysRoutes);
+app.use('/api/v1/recruitment', recruitmentRoutes);
+app.use('/api/v1/reviews', reviewsRoutes);
+app.use('/api/v1/expenses', expensesRoutes);
+app.use('/api/v1/assets', assetsRoutes);
+app.use('/api/v1/jobs', jobsRoutes);
+app.use('/api/v1/celebrations', celebrationsRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

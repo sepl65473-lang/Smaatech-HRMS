@@ -1,120 +1,111 @@
-# Smaatech HRMS — People Operations (React + Vite)
+# Smaatech HRMS — People Operations (React + Express + MongoDB)
 
-Production-ready HRMS dashboard. Original static HTML prototype ko **React.js** app me port kiya gaya hai with **real CRUD operations** (Create, Read, Update, Delete) jo data ko persist karte hain.
-
-> Design 1:1 same rakha gaya hai — wahi warm "paper" aesthetic (Fraunces + Geist + JetBrains Mono).
+Production HRMS dashboard. Two workspaces: **`client/`** (React + Vite frontend) and **`server/`** (Express + MongoDB backend with real JWT auth and server-side face verification). The root `package.json` just orchestrates both.
 
 ---
 
-## 🚀 Quick start
+## 🔑 Demo login accounts
 
-Repo `client/` (frontend) aur `server/` (backend) do alag folders me hai, root sirf dono ko orchestrate karta hai:
+Seeded by `server/src/seed.js` (`npm run seed:server` from the repo root). Use any of these on the login screen:
+
+| Role | Email | Password |
+|---|---|---|
+| HR Director (admin) | `admin@smaatech.co` | `Admin@123` |
+| HR Manager | `hr.manager@smaatech.co` | `Manager@123` |
+| Finance Lead | `finance.lead@smaatech.co` | `Finance@123` |
+| Employee | `priya.sharma@smaatech.co` | `Employee@123` |
+
+> Re-running the seed script **wipes and recreates** these accounts (and the demo employee roster) — don't run it against a database with real data you want to keep.
+
+---
+
+## 🚀 Local dev
 
 ```bash
 npm install                  # root orchestrator deps (concurrently)
 npm --prefix client install  # frontend deps
 npm --prefix server install  # backend deps
-npm run dev                  # client (http://localhost:5173) + server (http://localhost:4000) dono start
+
+cp server/.env.example server/.env   # fill in MONGODB_URI, JWT secrets, SMTP creds
+npm run seed:server                  # first time only — creates the demo accounts above
+
+npm run dev                  # client (http://localhost:5173) + server (http://localhost:4000)
 ```
 
-Production build:
-
-```bash
-npm run build    # client/dist/ me optimized build
-npm run preview  # build ko locally preview karo
-```
-
-> **Node 18+** chahiye.
-
----
-
-## ✨ Features (sab functional, sirf UI nahi)
-
-| Module | CRUD operations |
-|---|---|
-| **Employees** | Add / Edit / Delete + search + department filter (full validation) |
-| **Attendance** | Check-in / Check-out, late detection (>09:30), status update |
-| **Leave** | New request, Approve / Decline, Delete history, status filters |
-| **Payroll** | Process payroll, Mark as paid, auto gross/deduction/net calc |
-| **Celebrations** | Send wishes (persist + counter), holidays list |
-| **Recruitment** | Kanban — candidate add/delete, stage move (Applied→Hired) |
-| **Performance** | Live rating adjust (saved), auto-sorted leaderboard |
-| **Settings** | Org config, notification/security toggles, **reset all data** |
-| **Dashboard** | Live stats from actual data, attendance chart, quick actions |
-
-Saara data **localStorage** me persist hota hai — refresh karne par bhi bana rehta hai. Settings → Danger Zone se reset kar sakte ho (fresh seed reload).
+Requires **Node 18+**. The client dev server proxies `/api/*` to `localhost:4000` automatically (`client/vite.config.js`) — no extra config needed locally.
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-src/
-├── main.jsx                # BrowserRouter > HRMSProvider > App
-├── App.jsx                 # Routes (react-router-dom v6)
-├── index.css               # Original design verbatim + supplemental styles
-│
-├── data/
-│   ├── seed.js             # Coherent demo dataset (14 employees + sab linked data)
-│   └── store.js            # ⭐ DATA LAYER — async REST-jaisa API (localStorage)
-│
-├── context/
-│   └── HRMSContext.jsx     # Saara state + CRUD actions + toast system (useHRMS hook)
-│
-├── lib/helpers.js          # initials, formatINR, dates, leave types, etc.
-│
-├── components/             # Sidebar, Topbar, Layout, Modal, Forms, Avatar, Toasts...
-└── pages/                  # Dashboard, Employees, Attendance, Leave, Payroll...
+client/                     # React 18 + Vite — talks to the server over /api/v1
+├── src/lib/apiClient.js    # fetch wrapper: JWT access token in memory, httpOnly refresh cookie
+├── src/data/store.js       # REST calls for server-backed resources + localStorage for local-only settings
+├── src/context/HRMSContext.jsx
+└── src/pages/, src/components/
+
+server/                     # Express + Mongoose, MongoDB Atlas
+├── src/index.js            # app wiring, mounts all /api/v1/* routers
+├── src/routes/             # auth, employees, attendance, leave, payroll, recruitment, ...
+├── src/models/             # Mongoose schemas
+└── src/lib/faceEngine.js   # loads face-api.js models from public/models at boot
+
+public/models/               # face-api.js model weights (shared by client UX + server verification)
 ```
 
-### Data flow
-```
-Page  →  useHRMS() action  →  store.js API (async)  →  localStorage
-                ↓                                          ↓
-          React state update  ←──────────── persisted data
-```
+Employees, attendance, leave, payroll, recruitment, reviews, expenses, assets, jobs, holidays and celebrations all live in MongoDB via the server's REST API. Only org-level `Settings` (branding, notification templates, login-profile face descriptors) still persists client-side in `localStorage`.
+
+Auth: password (or face) login returns a short-lived JWT access token (kept in memory only) plus an httpOnly refresh cookie; `apiClient.js` retries once via `/auth/refresh` on a 401.
 
 ---
 
-## 🔌 Real backend kaise lagayein
+## ☁️ Deploying (Vercel + Render)
 
-Poora data layer **ek hi jagah** isolated hai: `src/data/store.js`.
+The server needs a persistent Node process (it loads face-api.js/TensorFlow models at startup and keeps refresh-token sessions), so it can't run on Vercel's serverless functions. Split deploy:
 
-Har collection ka API same shape follow karta hai:
+- **Server → [Render](https://render.com)** (free tier, persistent web service)
+- **Client → [Vercel](https://vercel.com)** (static Vite build)
+- **Database → MongoDB Atlas** (already set up — reuse the same `MONGODB_URI` you use locally so the demo accounts above carry over)
 
-```js
-employeesApi.list()          // GET    /employees
-employeesApi.get(id)         // GET    /employees/:id
-employeesApi.create(data)    // POST   /employees
-employeesApi.update(id, data)// PATCH  /employees/:id
-employeesApi.remove(id)      // DELETE /employees/:id
-```
+### 1. Deploy the server to Render
+1. In the Render dashboard: **New → Blueprint**, connect the `sepl65473-lang/Smaatech-HRMS` GitHub repo. Render reads `render.yaml` at the repo root and proposes a `smaatech-hrms-api` web service.
+2. Fill in the prompted environment variables (values from your local `server/.env`): `MONGODB_URI`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `SMTP_USER`, `SMTP_PASS`. Leave `CLIENT_ORIGIN` for step 3.
+3. Deploy. Note the resulting URL, e.g. `https://smaatech-hrms-api.onrender.com`.
+4. **MongoDB Atlas → Network Access → Add IP Address → Allow Access from Anywhere (`0.0.0.0/0`)** — Render's free tier has no static IP, so Atlas needs to accept connections from any IP.
 
-Sab functions already **async (Promise-based)** hain. REST backend pe shift karne ke liye sirf `store.js` ke andar `localStorage` calls ko `fetch()` se replace karo — **baaki poori app same rahegi**, kyunki context aur pages already async await karte hain.
+### 2. Deploy the client to Vercel
+1. In the Vercel dashboard: **Add New → Project**, import the same GitHub repo.
+2. Set **Root Directory** to `client`. Vercel auto-detects Vite; `client/vercel.json` adds the SPA fallback rewrite (needed because the app uses client-side routing) — no extra config needed.
+3. Add an environment variable: `VITE_API_BASE_URL` = `https://smaatech-hrms-api.onrender.com/api/v1` (your Render URL from step 1, with `/api/v1` appended).
+4. Deploy. Note the resulting URL, e.g. `https://smaatech-hrms.vercel.app`.
 
-Example:
-```js
-// abhi (localStorage):
-async list() { return readDB()[collection]; }
+### 3. Connect them
+1. Back in Render, set the server's `CLIENT_ORIGIN` env var to your Vercel URL from step 2 (e.g. `https://smaatech-hrms.vercel.app`), then let it redeploy/restart.
+2. Open the Vercel URL and log in with a demo account above.
 
-// baad me (real API):
-async list() { return (await fetch(`/api/${collection}`)).json(); }
-```
+> **Render free tier spins down after ~15 min idle.** The first request after a while can take 30–60 seconds to wake back up — if login seems to hang right after opening the site cold, that's the server waking up, not a bug. Subsequent requests are fast.
+
+---
+
+## ✨ Features
+
+| Module | CRUD operations |
+|---|---|
+| **Employees** | Add / Edit / Delete + search + department filter (full validation) |
+| **Attendance** | Check-in / Check-out with geofence + face verification, late detection |
+| **Leave** | New request, Approve / Decline, delete history, status filters |
+| **Payroll** | Process payroll, mark as paid, auto gross/deduction/net calc |
+| **Celebrations** | Send wishes, birthday/anniversary detection from real employee data |
+| **Recruitment** | Kanban — candidate add/delete, stage move (Applied → Hired) |
+| **Performance** | Reviews + ratings, auto-sorted leaderboard |
+| **Expenses / Assets / Jobs** | Full CRUD, status workflows |
+| **Settings** | Org config, users & role access, geofence/shift config, notification toggles |
+| **Dashboard** | Live stats from real data, attendance chart, quick actions |
 
 ---
 
 ## 🛠️ Tech stack
 
-- **React 18** + **Vite 5** (fast dev + optimized build)
-- **react-router-dom v6** (client-side routing)
-- **Context API** (global state — koi external state lib nahi)
-- **localStorage** persistence (swappable data layer)
-- Zero UI framework — original CSS verbatim preserve kiya hua
-
----
-
-## 📝 Notes
-
-- StrictMode on hai (double-invoke safe).
-- Demo dataset Indian context me hai (INR salary, IST names/locations).
-- Pehli baar app khulte hi seed data auto-load ho jaata hai.
+- **Client**: React 18, Vite 5, react-router-dom v6, Context API
+- **Server**: Express 4, Mongoose 8 (MongoDB Atlas), JWT auth (jsonwebtoken + bcryptjs), face-api.js + TensorFlow.js (WASM) for server-side face verification, Nodemailer (OTP emails)
