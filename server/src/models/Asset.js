@@ -8,6 +8,7 @@ const assetSchema = new mongoose.Schema({
   assignedToEmpId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   assignedToEmpName: { type: String, default: '' },
   assignedDate: { type: String, default: '' },
+  company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
 assetSchema.set('toJSON', {

@@ -1,0 +1,210 @@
+{
+  "info": {
+    "name": "Smaatech HRMS API",
+    "description": "Local dev API for the HRMS backend (server/). Run 'npm run dev' first so the server is listening on http://localhost:4000.\n\nHow to use:\n1. Import this file into Postman (Import button -> select this file).\n2. Open the 'Auth' folder and run any one of the 'Login' requests -- it automatically saves the access token into this collection's `accessToken` variable, and every other request in this collection uses it automatically.\n3. Tokens expire after 15 minutes -- just run a Login request again.\n\nBase URL, access token, and a few example IDs are collection variables (see the Variables tab on the collection) -- edit `employeeId` there if you want to test against a different employee.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000/api/v1" },
+    { "key": "accessToken", "value": "" },
+    { "key": "employeeId", "value": "", "description": "Seeded demo employee (Priya Sharma) -- run 'List employees' once and paste an _id here, or leave as-is if your DB still has the seed data with this id." },
+    { "key": "leaveId", "value": "" },
+    { "key": "expenseId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login - HR Director (admin)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const data = pm.response.json();",
+            "if (data.accessToken) { pm.collectionVariables.set('accessToken', data.accessToken); }",
+            "if (data.user?.employeeId) { pm.collectionVariables.set('employeeId', data.user.employeeId); }"
+          ] } }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@smaatech.co\",\n  \"password\": \"Admin@123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Login - HR Manager",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const data = pm.response.json();",
+            "if (data.accessToken) { pm.collectionVariables.set('accessToken', data.accessToken); }"
+          ] } }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"hr.manager@smaatech.co\",\n  \"password\": \"Manager@123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Login - Finance Lead",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const data = pm.response.json();",
+            "if (data.accessToken) { pm.collectionVariables.set('accessToken', data.accessToken); }"
+          ] } }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"finance.lead@smaatech.co\",\n  \"password\": \"Finance@123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Login - Employee",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const data = pm.response.json();",
+            "if (data.accessToken) { pm.collectionVariables.set('accessToken', data.accessToken); }",
+            "if (data.user?.employeeId) { pm.collectionVariables.set('employeeId', data.user.employeeId); }"
+          ] } }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"priya.sharma@smaatech.co\",\n  \"password\": \"Employee@123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Me (current session)",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth", "me"] } }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "url": { "raw": "{{baseUrl}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["auth", "logout"] } }
+        }
+      ]
+    },
+    {
+      "name": "Employees",
+      "item": [
+        {
+          "name": "List employees",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/employees", "host": ["{{baseUrl}}"], "path": ["employees"] } }
+        }
+      ]
+    },
+    {
+      "name": "Leaves",
+      "item": [
+        {
+          "name": "List leaves (own if Employee, all if HR/Director)",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/leaves", "host": ["{{baseUrl}}"], "path": ["leaves"] } }
+        },
+        {
+          "name": "File a leave request",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const data = pm.response.json();",
+            "if (data.id) { pm.collectionVariables.set('leaveId', data.id); }"
+          ] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"empId\": \"{{employeeId}}\",\n  \"type\": \"casual\",\n  \"start\": \"2026-09-01\",\n  \"end\": \"2026-09-02\",\n  \"reason\": \"Testing from Postman\"\n}" },
+            "url": { "raw": "{{baseUrl}}/leaves", "host": ["{{baseUrl}}"], "path": ["leaves"] },
+            "description": "Log in as the Employee (or as HR/Director) first. Saves the new leave's id into {{leaveId}} for the Approve/Decline requests below."
+          }
+        },
+        {
+          "name": "Approve leave (current stage)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/leaves/{{leaveId}}/approve", "host": ["{{baseUrl}}"], "path": ["leaves", "{{leaveId}}", "approve"] },
+            "description": "Must be logged in as whichever role the leave's current stage needs (see Settings > Workflows / GET /settings) -- or as HR Director, who can always approve any stage. 403 means you're logged in as the wrong role for this stage."
+          }
+        },
+        {
+          "name": "Decline leave (current stage)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/leaves/{{leaveId}}/decline", "host": ["{{baseUrl}}"], "path": ["leaves", "{{leaveId}}", "decline"] }
+          }
+        },
+        {
+          "name": "Delete leave (HR Manager/Director only)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/leaves/{{leaveId}}", "host": ["{{baseUrl}}"], "path": ["leaves", "{{leaveId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Expenses",
+      "item": [
+        {
+          "name": "List expenses (own if Employee, all if HR/Finance/Director)",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/expenses", "host": ["{{baseUrl}}"], "path": ["expenses"] } }
+        },
+        {
+          "name": "File an expense claim",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const data = pm.response.json();",
+            "if (data.id) { pm.collectionVariables.set('expenseId', data.id); }"
+          ] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"empId\": \"{{employeeId}}\",\n  \"category\": \"Travel\",\n  \"amount\": 1200,\n  \"date\": \"2026-09-01\",\n  \"description\": \"Testing from Postman\"\n}" },
+            "url": { "raw": "{{baseUrl}}/expenses", "host": ["{{baseUrl}}"], "path": ["expenses"] },
+            "description": "Saves the new claim's id into {{expenseId}} for the Approve/Decline requests below."
+          }
+        },
+        {
+          "name": "Approve expense (current stage)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/expenses/{{expenseId}}/approve", "host": ["{{baseUrl}}"], "path": ["expenses", "{{expenseId}}", "approve"] },
+            "description": "Must be logged in as whichever role the claim's current stage needs -- or as HR Director. 403 means wrong role for this stage."
+          }
+        },
+        {
+          "name": "Decline expense (current stage)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Missing receipt\"\n}" },
+            "url": { "raw": "{{baseUrl}}/expenses/{{expenseId}}/decline", "host": ["{{baseUrl}}"], "path": ["expenses", "{{expenseId}}", "decline"] }
+          }
+        },
+        {
+          "name": "Delete expense (HR Manager/Finance/Director only)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/expenses/{{expenseId}}", "host": ["{{baseUrl}}"], "path": ["expenses", "{{expenseId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Settings",
+      "item": [
+        {
+          "name": "Get settings (geofence, shifts, approval workflows)",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/settings", "host": ["{{baseUrl}}"], "path": ["settings"] } }
+        },
+        {
+          "name": "Update approval workflows (HR Manager/Director only)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"approvalWorkflows\": {\n    \"leave\": [\"HR Manager\", \"HR Director\"],\n    \"expense\": [\"Finance Lead\", \"HR Director\"]\n  }\n}" },
+            "url": { "raw": "{{baseUrl}}/settings", "host": ["{{baseUrl}}"], "path": ["settings"] }
+          }
+        }
+      ]
+    }
+  ]
+}

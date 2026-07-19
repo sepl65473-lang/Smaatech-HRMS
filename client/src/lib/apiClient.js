@@ -1,10 +1,5 @@
-// Thin fetch wrapper for the real backend (server/). Holds the JWT access
-// token in memory only (never localStorage) and transparently retries once
-// via the httpOnly refresh cookie on a 401, mirroring how a native app would
-// eventually use the same endpoints with a bearer token.
-// In dev this stays relative and rides the Vite proxy (see vite.config.js).
-// In production (client and server on separate domains) VITE_API_BASE_URL
-// points straight at the deployed server, e.g. https://xyz.onrender.com/api/v1.
+import axios from 'axios';
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 let accessToken = null;
@@ -22,43 +17,96 @@ export class ApiError extends Error {
   }
 }
 
-async function rawRequest(path, { method = 'GET', body, skipAuth = false } = {}) {
-  const isFormData = body instanceof FormData;
-  const headers = isFormData ? {} : { 'Content-Type': 'application/json' };
-  if (!skipAuth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    credentials: 'include',
-    body: isFormData ? body : (body !== undefined ? JSON.stringify(body) : undefined),
-  });
-  let data = null;
-  try { data = await res.json(); } catch { /* no/invalid JSON body */ }
-  if (!res.ok) {
-    throw new ApiError(res.status, data?.error?.code, data?.error?.message || `Request failed (${res.status})`);
-  }
-  return data;
-}
+// Shared Axios Instance
+export const axiosInstance = axios.create({
+  baseURL: API_BASE,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Request Interceptor: attach Bearer token
+axiosInstance.interceptors.request.use(
+  (config) => {
+    if (accessToken && !config.skipAuth) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 async function refreshAccessToken() {
   if (!refreshingPromise) {
-    refreshingPromise = rawRequest('/auth/refresh', { method: 'POST', skipAuth: true })
-      .then((data) => { accessToken = data.accessToken; return data; })
-      .catch((err) => { accessToken = null; throw err; })
-      .finally(() => { refreshingPromise = null; });
+    refreshingPromise = axiosInstance
+      .post('/auth/refresh', {}, { skipAuth: true })
+      .then((res) => {
+        accessToken = res.data.accessToken;
+        return res.data;
+      })
+      .catch((err) => {
+        accessToken = null;
+        throw err;
+      })
+      .finally(() => {
+        refreshingPromise = null;
+      });
   }
   return refreshingPromise;
 }
 
-export async function apiFetch(path, opts = {}) {
-  try {
-    return await rawRequest(path, opts);
-  } catch (err) {
-    const isAuthRoute = path.startsWith('/auth/');
-    if (err instanceof ApiError && err.status === 401 && !opts.skipAuth && !isAuthRoute) {
-      await refreshAccessToken();
-      return rawRequest(path, opts);
+// Response Interceptor: handle 401 & retry
+axiosInstance.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    const isAuthRoute = originalRequest.url && originalRequest.url.startsWith('/auth/');
+    
+    if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.skipAuth && !isAuthRoute) {
+      originalRequest._retry = true;
+      try {
+        await refreshAccessToken();
+        if (accessToken) {
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        }
+        return axiosInstance(originalRequest);
+      } catch (refreshErr) {
+        return Promise.reject(refreshErr);
+      }
     }
-    throw err;
+
+    const status = error.response?.status || 500;
+    const code = error.response?.data?.error?.code || 'UNKNOWN_ERROR';
+    const message = error.response?.data?.error?.message || error.message || 'Request failed';
+
+    return Promise.reject(new ApiError(status, code, message));
   }
+);
+
+// Backwards-compatible helper
+export async function apiFetch(path, opts = {}) {
+  const method = (opts.method || 'GET').toLowerCase();
+  const isFormData = opts.body instanceof FormData;
+  
+  const config = {
+    method,
+    url: path,
+    data: opts.body,
+    skipAuth: opts.skipAuth,
+    headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : opts.headers,
+  };
+
+  const response = await axiosInstance(config);
+  return response.data;
+}
+
+export async function apiFetchBlob(path, opts = {}) {
+  const response = await axiosInstance({
+    method: 'GET',
+    url: path,
+    responseType: 'blob',
+    ...opts,
+  });
+  return response.data;
 }

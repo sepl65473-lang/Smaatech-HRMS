@@ -6,11 +6,9 @@ import RosterPlanner from '../components/RosterPlanner';
 import {
   IconInfo, IconPresent, IconCalendar, IconX, IconLeave,
 } from '../components/Icons';
-import { DEPARTMENTS } from '../lib/helpers';
+import { DEPARTMENTS, todayISO } from '../lib/helpers';
 import { resolveShiftForToday } from '../lib/shifts';
 import { downloadCSV } from '../lib/exportCsv';
-// xlsx/jspdf are heavy (~700KB combined) — loaded on demand only when the
-// user actually exports, so the Attendance page chunk stays light on mobile.
 
 const STATUS = {
   present: { label: 'Present', cls: 'status-active' },
@@ -38,7 +36,7 @@ function LiveIndicator({ lastSyncedAt }) {
   const secondsAgo = Math.max(0, Math.round((now - lastSyncedAt) / 1000));
   const label = secondsAgo < 2 ? 'just now' : secondsAgo < 60 ? `${secondsAgo}s ago` : `${Math.round(secondsAgo / 60)}m ago`;
   return (
-    <span className="muted-text" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }} title="Refreshes from the server on load and across tabs of this browser — other devices pick up changes on their next refresh.">
+    <span className="muted-text" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }} title="Refreshes from the server on load and across tabs of this browser.">
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--sage)', display: 'inline-block', animation: 'pulse 1.6s ease-in-out infinite' }} />
       Live · updated {label}
     </span>
@@ -46,7 +44,11 @@ function LiveIndicator({ lastSyncedAt }) {
 }
 
 export default function Attendance() {
-  const { attendance, settings, checkIn, checkOut, setAttendanceStatus, lastSyncedAt } = useHRMS();
+  const {
+    attendance, settings, checkIn, checkOut, setAttendanceStatus, lastSyncedAt,
+    attendanceCorrections, requestCorrection, approveCorrection, rejectCorrection, currentUser, employees, toast
+  } = useHRMS();
+
   const departments = settings.departments?.length ? settings.departments : DEPARTMENTS;
   const [dept, setDept] = useState('All');
   const [status, setStatus] = useState('all');
@@ -57,6 +59,12 @@ export default function Attendance() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [qrToken, setQrToken] = useState(() => Math.random().toString(36).substring(2, 10).toUpperCase());
   const [timeLeft, setTimeLeft] = useState(10);
+
+  // Correction Modal States
+  const [corrModalOpen, setCorrModalOpen] = useState(false);
+  const [corrForm, setCorrForm] = useState({ date: '', checkIn: '', checkOut: '', reason: '' });
+
+  const isHR = ['HR Director', 'HR Manager'].includes(currentUser.role);
 
   useEffect(() => {
     if (!qrModalOpen) return undefined;
@@ -81,7 +89,10 @@ export default function Attendance() {
 
   const counts = useMemo(() => {
     const c = { present: 0, late: 0, absent: 0, leave: 0 };
-    filtered.forEach((a) => { c[a.status] = (c[a.status] || 0) + 1; });
+    filtered.forEach((a) => {
+      const st = a.status === 'early-exit' ? 'late' : a.status;
+      c[st] = (c[st] || 0) + 1;
+    });
     return c;
   }, [filtered]);
 
@@ -112,147 +123,257 @@ export default function Attendance() {
     downloadPDF('attendance-roster', 'Attendance Roster', exportRows, EXPORT_COLUMNS);
   };
 
+  const handleRequestCorrection = async () => {
+    if (!corrForm.date || !corrForm.checkIn || !corrForm.checkOut || !corrForm.reason) {
+      toast('error', 'Please fill in all details.');
+      return;
+    }
+    const emp = employees.find(e => e.id === currentUser.empId);
+    if (!emp) return;
+
+    await requestCorrection({
+      employeeId: emp.id,
+      employeeName: emp.name,
+      date: corrForm.date,
+      requestedCheckIn: corrForm.checkIn,
+      requestedCheckOut: corrForm.checkOut,
+      reason: corrForm.reason,
+    });
+
+    setCorrForm({ date: '', checkIn: '', checkOut: '', reason: '' });
+    setCorrModalOpen(false);
+  };
+
+  const myCorrections = useMemo(() => {
+    if (isHR) return attendanceCorrections;
+    return attendanceCorrections.filter(c => c.employeeId === currentUser.empId);
+  }, [attendanceCorrections, isHR, currentUser.empId]);
+
   return (
     <div className="page-wrap active">
       <div className="list-toolbar" style={{ marginBottom: 4 }}>
         <div className="filter-chips">
           <button className={`chip ${tab === 'roster' ? 'active' : ''}`} onClick={() => setTab('roster')}>Today's roster</button>
-          <button className={`chip ${tab === 'planning' ? 'active' : ''}`} onClick={() => setTab('planning')}>Shifts & planning</button>
+          {isHR && (
+            <button className={`chip ${tab === 'planning' ? 'active' : ''}`} onClick={() => setTab('planning')}>Shifts & planning</button>
+          )}
+          <button className={`chip ${tab === 'corrections' ? 'active' : ''}`} onClick={() => setTab('corrections')}>
+            Corrections ({myCorrections.filter(c => c.status === 'Pending').length} pending)
+          </button>
         </div>
         <LiveIndicator lastSyncedAt={lastSyncedAt} />
       </div>
 
-      {tab === 'planning' ? (
+      {tab === 'planning' && isHR && (
         <RosterPlanner />
-      ) : (
-      <>
-      <div className="stats">
-        <div className="stat">
-          <div className="stat-icon tone-sage"><IconPresent width="16" height="16" /></div>
-          <div className="stat-label">Present</div><div className="stat-value">{counts.present}</div><div className="stat-meta">checked in on time</div>
-        </div>
-        <div className="stat">
-          <div className="stat-icon tone-gold"><IconCalendar width="16" height="16" /></div>
-          <div className="stat-label">Late</div><div className="stat-value">{counts.late}</div><div className="stat-meta">past shift start + grace</div>
-        </div>
-        <div className="stat">
-          <div className="stat-icon tone-red"><IconX width="16" height="16" /></div>
-          <div className="stat-label">Absent</div><div className="stat-value">{counts.absent}</div><div className="stat-meta">no check-in yet</div>
-        </div>
-        <div className="stat">
-          <div className="stat-icon tone-teal"><IconLeave width="16" height="16" /></div>
-          <div className="stat-label">On leave</div><div className="stat-value">{counts.leave}</div><div className="stat-meta">approved leave</div>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          <div>
-            <div className="card-title">Today’s roster</div>
-            <div className="card-sub">{filtered.length} of {attendance.length} people shown</div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-ghost" onClick={exportCsv}>Export CSV</button>
-            <button type="button" className="btn btn-ghost" onClick={exportXlsx}>Export Excel</button>
-            <button type="button" className="btn btn-ghost" onClick={exportPdf}>Export PDF</button>
-            <button type="button" className="btn" onClick={() => setQrModalOpen(true)}>
-              Display Office QR
-            </button>
-          </div>
-        </div>
-
-        <div className="list-toolbar">
-          <div className="filter-chips">
-            {['All', ...departments].map((d) => (
-              <button key={d} className={`chip ${dept === d ? 'active' : ''}`} onClick={() => setDept(d)}>{d}</button>
-            ))}
-          </div>
-          <label className="inline-select">
-            <span>Status</span>
-            <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="all">All</option>
-              <option value="present">Present</option>
-              <option value="late">Late</option>
-              <option value="absent">Absent</option>
-              <option value="leave">On leave</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Employee</th><th>Department</th><th>Shift</th><th>Check-in</th>
-                <th>Check-out</th><th>Status</th><th style={{ textAlign: 'right' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((a) => {
-                const s = STATUS[a.status] || STATUS.absent;
-                return (
-                  <tr key={a.id}>
-                    <td>
-                      <div className="emp-cell">
-                        <Avatar name={a.name} size={30} />
-                        <div className="emp-name">{a.name}</div>
-                      </div>
-                    </td>
-                    <td>{a.dept}</td>
-                    <td className="muted-text">{shiftNameFor(a.empId)}</td>
-                    <td className="mono">
-                      {a.checkIn || '—'}
-                      {(a.checkIn || a.checkOut) && (
-                        <button
-                          className="icon-btn sm"
-                          title="View check-in/out details"
-                          style={{ marginLeft: 6 }}
-                          onClick={() => setDetailsRow(a)}
-                        >
-                          <IconInfo width="13" height="13" />
-                        </button>
-                      )}
-                      {a.anomalyFlags?.length > 0 && (
-                        <span className="status-dot status-late" title={`Flagged: ${a.anomalyFlags.join(', ')}`} style={{ marginLeft: 6 }} />
-                      )}
-                    </td>
-                    <td className="mono">{a.checkOut || '—'}</td>
-                    <td>
-                      <label className="status-control">
-                        <span className={`status-dot ${s.cls}`} />
-                        <select
-                          className="input compact"
-                          value={a.status}
-                          onChange={(e) => setAttendanceStatus(a.id, e.target.value)}
-                        >
-                          <option value="present">Present</option>
-                          <option value="late">Late</option>
-                          <option value="absent">Absent</option>
-                          <option value="leave">On leave</option>
-                        </select>
-                      </label>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {a.status === 'leave' ? (
-                        <span className="muted-text">—</span>
-                      ) : !a.checkIn ? (
-                        <button className="mini-btn approve" onClick={() => checkIn(a.id)}>Check in</button>
-                      ) : !a.checkOut ? (
-                        <button className="mini-btn" onClick={() => checkOut(a.id)}>Check out</button>
-                      ) : (
-                        <span className="muted-text">Done</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      </>
       )}
 
+      {tab === 'roster' && (
+        <>
+          <div className="stats">
+            <div className="stat">
+              <div className="stat-icon tone-sage"><IconPresent width="16" height="16" /></div>
+              <div className="stat-label">Present</div><div className="stat-value">{counts.present}</div><div className="stat-meta">checked in on time</div>
+            </div>
+            <div className="stat">
+              <div className="stat-icon tone-gold"><IconCalendar width="16" height="16" /></div>
+              <div className="stat-label">Late</div><div className="stat-value">{counts.late}</div><div className="stat-meta">past shift start + grace</div>
+            </div>
+            <div className="stat">
+              <div className="stat-icon tone-red"><IconX width="16" height="16" /></div>
+              <div className="stat-label">Absent</div><div className="stat-value">{counts.absent}</div><div className="stat-meta">no check-in yet</div>
+            </div>
+            <div className="stat">
+              <div className="stat-icon tone-teal"><IconLeave width="16" height="16" /></div>
+              <div className="stat-label">On leave</div><div className="stat-value">{counts.leave}</div><div className="stat-meta">approved leave</div>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 18 }}>
+            <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+              <div>
+                <div className="card-title">Today’s roster</div>
+                <div className="card-sub">{filtered.length} of {attendance.length} people shown</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-ghost" onClick={exportCsv}>Export CSV</button>
+                <button type="button" className="btn btn-ghost" onClick={exportXlsx}>Export Excel</button>
+                <button type="button" className="btn btn-ghost" onClick={exportPdf}>Export PDF</button>
+                {isHR && (
+                  <button type="button" className="btn" onClick={() => setQrModalOpen(true)}>
+                    Display Office QR
+                  </button>
+                )}
+                {!isHR && (
+                  <button type="button" className="btn" onClick={() => setCorrModalOpen(true)}>
+                    Request Correction
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="list-toolbar">
+              <div className="filter-chips">
+                {['All', ...departments].map((d) => (
+                  <button key={d} className={`chip ${dept === d ? 'active' : ''}`} onClick={() => setDept(d)}>{d}</button>
+                ))}
+              </div>
+              <label className="inline-select">
+                <span>Status</span>
+                <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+                  <option value="all">All</option>
+                  <option value="present">Present</option>
+                  <option value="late">Late</option>
+                  <option value="absent">Absent</option>
+                  <option value="leave">On leave</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Employee</th><th>Department</th><th>Shift</th><th>Check-in</th>
+                    <th>Check-out</th><th>Status</th>
+                    {isHR && <th style={{ textAlign: 'right' }}>Action</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((a) => {
+                    const s = STATUS[a.status] || STATUS.absent;
+                    return (
+                      <tr key={a.id}>
+                        <td>
+                          <div className="emp-cell">
+                            <Avatar name={a.name} size={30} />
+                            <div className="emp-name">{a.name}</div>
+                          </div>
+                        </td>
+                        <td>{a.dept}</td>
+                        <td className="muted-text">{shiftNameFor(a.empId)}</td>
+                        <td className="mono">
+                          {a.checkIn || '—'}
+                          {(a.checkIn || a.checkOut) && (
+                            <button
+                              className="icon-btn sm"
+                              title="View check-in/out details"
+                              style={{ marginLeft: 6 }}
+                              onClick={() => setDetailsRow(a)}
+                            >
+                              <IconInfo width="13" height="13" />
+                            </button>
+                          )}
+                          {a.anomalyFlags?.length > 0 && (
+                            <span className="status-dot status-late" title={`Flagged: ${a.anomalyFlags.join(', ')}`} style={{ marginLeft: 6 }} />
+                          )}
+                        </td>
+                        <td className="mono">{a.checkOut || '—'}</td>
+                        <td>
+                          {isHR ? (
+                            <label className="status-control">
+                              <span className={`status-dot ${s.cls}`} />
+                              <select
+                                className="input compact"
+                                value={a.status}
+                                onChange={(e) => setAttendanceStatus(a.id, e.target.value)}
+                              >
+                                <option value="present">Present</option>
+                                <option value="late">Late</option>
+                                <option value="absent">Absent</option>
+                                <option value="leave">On leave</option>
+                              </select>
+                            </label>
+                          ) : (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              <span className={`status-dot ${s.cls}`} />
+                              <span style={{ fontSize: 13, textTransform: 'capitalize' }}>{a.status}</span>
+                            </div>
+                          )}
+                        </td>
+                        {isHR && (
+                          <td style={{ textAlign: 'right' }}>
+                            {a.status === 'leave' ? (
+                              <span className="muted-text">—</span>
+                            ) : !a.checkIn ? (
+                              <button className="mini-btn approve" onClick={() => checkIn(a.id)}>Check in</button>
+                            ) : !a.checkOut ? (
+                              <button className="mini-btn" onClick={() => checkOut(a.id)}>Check out</button>
+                            ) : (
+                              <span className="muted-text">Done</span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === 'corrections' && (
+        <div className="card">
+          <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div className="card-title">Attendance Correction Requests</div>
+              <div className="card-sub">{isHR ? 'Review and approve manual attendance corrections' : 'My submitted requests'}</div>
+            </div>
+            {!isHR && (
+              <button className="btn" onClick={() => setCorrModalOpen(true)}>Request Correction</button>
+            )}
+          </div>
+
+          {myCorrections.length === 0 ? (
+            <div className="empty">No correction requests found.</div>
+          ) : (
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Employee</th><th>Date</th><th>Requested Times</th><th>Reason</th><th>Status</th>
+                    {isHR && <th style={{ textAlign: 'right' }}>Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {myCorrections.map(c => (
+                    <tr key={c.id}>
+                      <td><strong>{c.employeeName}</strong></td>
+                      <td className="mono">{c.date}</td>
+                      <td>
+                        <span className="state-badge approved" style={{ marginRight: 6 }}>In: {c.requestedCheckIn}</span>
+                        <span className="state-badge approved">Out: {c.requestedCheckOut}</span>
+                      </td>
+                      <td><span style={{ fontStyle: 'italic', fontSize: 13 }}>"{c.reason}"</span></td>
+                      <td>
+                        <span className={`state-badge ${c.status === 'Approved' ? 'approved' : c.status === 'Rejected' ? 'declined' : 'pending'}`}>
+                          {c.status}
+                        </span>
+                      </td>
+                      {isHR && (
+                        <td style={{ textAlign: 'right' }}>
+                          {c.status === 'Pending' ? (
+                            <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
+                              <button className="btn btn-compact approve" onClick={() => approveCorrection(c.id)}>Approve</button>
+                              <button className="btn btn-compact btn-ghost" style={{ color: 'var(--declined)' }} onClick={() => rejectCorrection(c.id)}>Reject</button>
+                            </div>
+                          ) : (
+                            <span className="muted-text">—</span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Office QR Code Modal */}
       <Modal
         open={qrModalOpen}
         title="Office Wall QR Code"
@@ -272,34 +393,23 @@ export default function Attendance() {
             justifyContent: 'center',
             position: 'relative'
           }}>
-            {/* Custom SVG QR Code Generator */}
             <svg width="220" height="220" viewBox="0 0 220 220" style={{ background: '#fff' }}>
-              {/* Corner Finder Patterns */}
-              {/* Top Left */}
               <rect x="10" y="10" width="50" height="50" fill="#0f172a" rx="4" />
               <rect x="20" y="20" width="30" height="30" fill="#fff" rx="2" />
               <rect x="27" y="27" width="16" height="16" fill="#4a6fa5" rx="1" />
-              
-              {/* Top Right */}
               <rect x="160" y="10" width="50" height="50" fill="#0f172a" rx="4" />
               <rect x="170" y="20" width="30" height="30" fill="#fff" rx="2" />
               <rect x="177" y="27" width="16" height="16" fill="#4a6fa5" rx="1" />
-
-              {/* Bottom Left */}
               <rect x="10" y="160" width="50" height="50" fill="#0f172a" rx="4" />
               <rect x="20" y="170" width="30" height="30" fill="#fff" rx="2" />
               <rect x="27" y="177" width="16" height="16" fill="#4a6fa5" rx="1" />
-
-              {/* Alignment Marker Bottom Right */}
               <rect x="165" y="165" width="20" height="20" fill="#0f172a" rx="2" />
               <rect x="170" y="170" width="10" height="10" fill="#fff" rx="1" />
               <rect x="174" y="174" width="2" height="2" fill="#0f172a" />
-
               <path d="M 80,20 h 10 v 10 h -10 z M 100,20 h 20 v 10 h -20 z M 130,20 h 10 v 30 h -10 z M 80,40 h 30 v 10 h -30 z M 120,40 h 10 v 10 h -10 z M 80,60 h 10 v 20 h -10 z M 100,60 h 40 v 10 h -40 z M 150,60 h 10 v 10 h -10 z" fill="#0f172a" />
               <path d="M 20,80 h 30 v 10 h -30 z M 60,80 h 10 v 20 h -10 z M 80,80 h 20 v 10 h -20 z M 120,80 h 10 v 10 h -10 z M 140,80 h 30 v 10 h -30 z M 180,80 h 20 v 30 h -20 z M 20,100 h 10 v 10 h -10 z M 40,100 h 10 v 30 h -10 z M 90,100 h 20 v 10 h -20 z M 120,100 h 20 v 10 h -20 z" fill="#0f172a" />
               <path d="M 80,120 h 10 v 10 h -10 z M 100,120 h 30 v 10 h -30 z M 140,120 h 10 v 20 h -10 z M 160,120 h 20 v 10 h -20 z M 190,120 h 10 v 20 h -10 z M 80,140 h 20 v 10 h -20 z M 110,140 h 10 v 30 h -10 z M 130,140 h 10 v 10 h -10 z M 150,140 h 30 v 10 h -30 z" fill="#0f172a" />
               <path d="M 80,160 h 10 v 20 h -10 z M 100,160 h 20 v 10 h -20 z M 130,160 h 20 v 10 h -20 z M 80,190 h 30 v 10 h -30 z M 120,190 h 20 v 10 h -20 z M 150,190 h 10 v 10 h -10 z" fill="#0f172a" />
-
               {qrToken.split('').map((char, index) => {
                 const charCode = char.charCodeAt(0);
                 const x = 70 + (charCode % 11) * 10;
@@ -317,36 +427,22 @@ export default function Attendance() {
               })}
             </svg>
           </div>
-
           <div style={{ width: '100%', maxWidth: '250px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#666', marginBottom: 6 }}>
               <span>Rotating secure token...</span>
               <span className="mono" style={{ fontWeight: 600 }}>{timeLeft}s</span>
             </div>
             <div style={{ width: '100%', height: '5px', background: '#eee', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{
-                width: `${(timeLeft / 10) * 100}%`,
-                height: '100%',
-                background: 'var(--accent)',
-                transition: 'width 1s linear'
-              }} />
+              <div style={{ width: `${(timeLeft / 10) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 1s linear' }} />
             </div>
           </div>
-
-          <div style={{
-            fontSize: '12px',
-            color: '#666',
-            background: 'var(--bg-2)',
-            padding: '6px 12px',
-            borderRadius: '6px',
-            fontFamily: 'monospace',
-            border: '1px dashed #ccc'
-          }}>
+          <div style={{ fontSize: '12px', color: '#666', background: 'var(--bg-2)', padding: '6px 12px', borderRadius: '6px', fontFamily: 'monospace', border: '1px dashed #ccc' }}>
             SEPL-ATT-{qrToken}
           </div>
         </div>
       </Modal>
 
+      {/* Attendance Detail Info Modal */}
       <Modal
         open={Boolean(detailsRow)}
         title={detailsRow ? `${detailsRow.name} — attendance detail` : ''}
@@ -384,6 +480,46 @@ export default function Attendance() {
             })}
           </div>
         )}
+      </Modal>
+
+      {/* Attendance Correction Modal */}
+      <Modal
+        open={corrModalOpen}
+        title="Request Attendance Correction"
+        subtitle="Submit manual punch overrides for HR approval"
+        onClose={() => setCorrModalOpen(false)}
+        width={420}
+        footer={(
+          <>
+            <button className="btn btn-ghost" onClick={() => setCorrModalOpen(false)}>Cancel</button>
+            <button className="btn approve" onClick={handleRequestCorrection}>Submit Request</button>
+          </>
+        )}
+      >
+        <div className="form-grid">
+          <label className="field field-full">
+            <span className="field-label">Date to Correct</span>
+            <input type="date" className="input" max={todayISO()} value={corrForm.date} onChange={(e) => setCorrForm(prev => ({ ...prev, date: e.target.value }))} />
+          </label>
+          <label className="field">
+            <span className="field-label">Check-in Time (24h)</span>
+            <input type="time" className="input" value={corrForm.checkIn} onChange={(e) => setCorrForm(prev => ({ ...prev, checkIn: e.target.value }))} />
+          </label>
+          <label className="field">
+            <span className="field-label">Check-out Time (24h)</span>
+            <input type="time" className="input" value={corrForm.checkOut} onChange={(e) => setCorrForm(prev => ({ ...prev, checkOut: e.target.value }))} />
+          </label>
+          <label className="field field-full">
+            <span className="field-label">Reason / Justification</span>
+            <textarea
+              placeholder="e.g. Forgot check-in due to client visit"
+              className="input"
+              value={corrForm.reason}
+              onChange={(e) => setCorrForm(prev => ({ ...prev, reason: e.target.value }))}
+              style={{ height: 80, padding: 8 }}
+            />
+          </label>
+        </div>
       </Modal>
     </div>
   );

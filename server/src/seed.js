@@ -9,6 +9,9 @@ import Employee from './models/Employee.js';
 import User from './models/User.js';
 import Attendance from './models/Attendance.js';
 import Settings from './models/Settings.js';
+import Role from './models/Role.js';
+import MasterCategory from './models/MasterCategory.js';
+import MasterValue from './models/MasterValue.js';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const emailOf = (name) => `${name.toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.')}@smaatech.co`;
@@ -149,12 +152,24 @@ const MANAGER_OF = {
   'Pooja Desai': 'Aditi Rao',
 };
 
+// Demo passwords are read from environment variables or fall back to safe defaults.
+const DEFAULT_PASSWORDS = {
+  SEED_ADMIN_PASS: 'Admin@123',
+  SEED_HR_PASS: 'Manager@123',
+  SEED_FINANCE_PASS: 'Finance@123',
+  SEED_EMPLOYEE_PASS: 'Employee@123',
+};
+
 const DEMO_ACCOUNTS = [
-  { name: 'Admin', role: 'HR Director', initials: 'AD', email: 'admin@smaatech.co', password: 'Admin@123' },
-  { name: 'Nisha Rao', role: 'HR Manager', initials: 'NR', email: 'hr.manager@smaatech.co', password: 'Manager@123' },
-  { name: 'Kabir Mehta', role: 'Finance Lead', initials: 'KM', email: 'finance.lead@smaatech.co', password: 'Finance@123' },
-  { name: 'Priya Sharma', role: 'Employee', initials: 'PS', email: 'priya.sharma@smaatech.co', password: 'Employee@123', empName: 'Priya Sharma' },
-];
+  { name: 'Admin', role: 'HR Director', initials: 'AD', email: 'admin@smaatech.co', envKey: 'SEED_ADMIN_PASS' },
+  { name: 'Nisha Rao', role: 'HR Manager', initials: 'NR', email: 'hr.manager@smaatech.co', envKey: 'SEED_HR_PASS' },
+  { name: 'Kabir Mehta', role: 'Finance Lead', initials: 'KM', email: 'finance.lead@smaatech.co', envKey: 'SEED_FINANCE_PASS' },
+  { name: 'Priya Sharma', role: 'Employee', initials: 'PS', email: 'priya.sharma@smaatech.co', envKey: 'SEED_EMPLOYEE_PASS', empName: 'Priya Sharma' },
+].map(acc => {
+  const password = process.env[acc.envKey] || DEFAULT_PASSWORDS[acc.envKey];
+  const { envKey, ...rest } = acc;
+  return { ...rest, password };
+});
 
 async function run() {
   await connectDB();
@@ -164,6 +179,97 @@ async function run() {
     User.deleteMany({}),
     Attendance.deleteMany({}),
     Settings.deleteMany({}),
+    Role.deleteMany({}),
+    MasterCategory.deleteMany({}),
+    MasterValue.deleteMany({}),
+  ]);
+
+  const seededCategories = await MasterCategory.insertMany([
+    { name: 'Locations', code: 'locations' },
+    { name: 'Departments', code: 'departments' },
+    { name: 'Document Types', code: 'document_types' },
+    { name: 'Genders', code: 'genders' },
+    { name: 'Blood Groups', code: 'blood_groups' },
+    { name: 'Leave Types', code: 'leave_types' },
+    { name: 'Marital Status', code: 'marital_status' },
+  ]);
+
+  const catMap = {};
+  seededCategories.forEach((c) => { catMap[c.code] = c._id; });
+
+  const valuesToSeed = [
+    // Locations
+    { categoryId: catMap['locations'], value: 'Bengaluru' },
+    { categoryId: catMap['locations'], value: 'Mumbai' },
+    { categoryId: catMap['locations'], value: 'Hyderabad' },
+    { categoryId: catMap['locations'], value: 'Delhi NCR' },
+    { categoryId: catMap['locations'], value: 'Pune' },
+    { categoryId: catMap['locations'], value: 'Chennai' },
+    { categoryId: catMap['locations'], value: 'Remote' },
+    // Departments
+    { categoryId: catMap['departments'], value: 'Engineering' },
+    { categoryId: catMap['departments'], value: 'Design' },
+    { categoryId: catMap['departments'], value: 'Marketing' },
+    { categoryId: catMap['departments'], value: 'Sales' },
+    { categoryId: catMap['departments'], value: 'Operations' },
+    { categoryId: catMap['departments'], value: 'Finance & HR' },
+    // Document Types
+    { categoryId: catMap['document_types'], value: 'PDF' },
+    { categoryId: catMap['document_types'], value: 'DOC' },
+    { categoryId: catMap['document_types'], value: 'IMG' },
+    { categoryId: catMap['document_types'], value: 'XLS' },
+    // Genders
+    { categoryId: catMap['genders'], value: 'Male' },
+    { categoryId: catMap['genders'], value: 'Female' },
+    { categoryId: catMap['genders'], value: 'Other' },
+    // Blood Groups
+    { categoryId: catMap['blood_groups'], value: 'A+' },
+    { categoryId: catMap['blood_groups'], value: 'A-' },
+    { categoryId: catMap['blood_groups'], value: 'B+' },
+    { categoryId: catMap['blood_groups'], value: 'B-' },
+    { categoryId: catMap['blood_groups'], value: 'AB+' },
+    { categoryId: catMap['blood_groups'], value: 'AB-' },
+    { categoryId: catMap['blood_groups'], value: 'O+' },
+    { categoryId: catMap['blood_groups'], value: 'O-' },
+    // Leave Types
+    { categoryId: catMap['leave_types'], value: 'sick' },
+    { categoryId: catMap['leave_types'], value: 'casual' },
+    { categoryId: catMap['leave_types'], value: 'earned' },
+    // Marital Status
+    { categoryId: catMap['marital_status'], value: 'Single' },
+    { categoryId: catMap['marital_status'], value: 'Married' },
+    { categoryId: catMap['marital_status'], value: 'Divorced' },
+    { categoryId: catMap['marital_status'], value: 'Widowed' },
+  ];
+
+  await MasterValue.insertMany(valuesToSeed);
+
+
+  const seededRoles = await Role.insertMany([
+    {
+      name: 'HR Director',
+      description: 'Full workspace access & administrator privileges',
+      allowedPaths: ['*'],
+      allowedActions: ['manageEmployees', 'manageAttendance', 'manageLeave', 'manageRecruitment', 'managePayroll', 'manageDocuments'],
+    },
+    {
+      name: 'HR Manager',
+      description: 'Manage employee directory, shifts, leaves, recruitment, and reviews',
+      allowedPaths: ['/', '/employees', '/org-chart', '/attendance', '/leave', '/holidays', '/celebrations', '/recruitment', '/performance', '/analytics', '/integrations', '/expenses', '/assets', '/workflows'],
+      allowedActions: ['manageEmployees', 'manageAttendance', 'manageLeave', 'manageRecruitment'],
+    },
+    {
+      name: 'Finance Lead',
+      description: 'Manage payroll run, payslips, assets, expenses, and documents',
+      allowedPaths: ['/', '/payroll', '/documents', '/analytics', '/integrations', '/expenses', '/assets'],
+      allowedActions: ['managePayroll', 'manageDocuments'],
+    },
+    {
+      name: 'Employee',
+      description: 'Employee self-service dashboard, leave applications, documents, and profile',
+      allowedPaths: ['/', '/ess', '/holidays', '/org-chart', '/documents', '/expenses'],
+      allowedActions: [],
+    },
   ]);
 
   const employees = await Employee.insertMany(ALL_EMP_SEED.map((e, i) => ({

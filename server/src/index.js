@@ -2,6 +2,13 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import mongoSanitize from 'express-mongo-sanitize';
+import rateLimit from 'express-rate-limit';
+import compression from 'compression';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './lib/swagger.js';
+import logger from './lib/logger.js';
 import { connectDB } from './db.js';
 import { initFaceEngine } from './lib/faceEngine.js';
 import authRoutes from './routes/auth.js';
@@ -20,26 +27,47 @@ import expensesRoutes from './routes/expenses.js';
 import assetsRoutes from './routes/assets.js';
 import jobsRoutes from './routes/jobs.js';
 import celebrationsRoutes from './routes/celebrations.js';
+import rolesRoutes from './routes/roles.js';
+import masterDataRoutes from './routes/masterData.js';
+import auditLogsRoutes from './routes/auditLogs.js';
+import notificationsRoutes from './routes/notifications.js';
+import documentsRoutes from './routes/documents.js';
+import resignationsRoutes from './routes/resignations.js';
+import attendanceCorrectionsRoutes from './routes/attendanceCorrections.js';
+import { startDocumentExpiryScheduler } from './lib/documentExpiryJob.js';
 
-// Route handlers here are bare `async (req, res) => {...}` with no
-// try/catch, and Express 4 doesn't forward a rejected handler promise to the
-// error middleware below on its own — so an unhandled rejection (e.g. a
-// Mongoose CastError from a malformed :id) reaches Node directly, which by
-// default terminates the whole process. That took the entire server down
-// once already; log-and-continue instead of crashing on every request.
 process.on('unhandledRejection', (err) => {
-  console.error('[server] unhandled rejection:', err);
+  logger.error('[server] unhandled rejection: %o', err);
 });
 process.on('uncaughtException', (err) => {
-  console.error('[server] uncaught exception:', err);
+  logger.error('[server] uncaught exception: %o', err);
 });
 
 const app = express();
+
+// Security Middleware
+app.use(helmet({ contentSecurityPolicy: false })); // Disable CSP for API flexibility / Swagger UI
+app.use(mongoSanitize());
+app.use(compression());
+
+// Rate Limiter: max 300 requests per 15 minutes per IP
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many requests, please try again later.' } }
+});
+app.use('/api/', apiLimiter);
 
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173', credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
+// Swagger API Documentation Endpoint
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// API V1 Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/employees', employeesRoutes);
 app.use('/api/v1/users', usersRoutes);
@@ -56,17 +84,30 @@ app.use('/api/v1/expenses', expensesRoutes);
 app.use('/api/v1/assets', assetsRoutes);
 app.use('/api/v1/jobs', jobsRoutes);
 app.use('/api/v1/celebrations', celebrationsRoutes);
+app.use('/api/v1/roles', rolesRoutes);
+app.use('/api/v1/master-data', masterDataRoutes);
+app.use('/api/v1/audit-logs', auditLogsRoutes);
+app.use('/api/v1/notifications', notificationsRoutes);
+app.use('/api/v1/documents', documentsRoutes);
+app.use('/api/v1/resignations', resignationsRoutes);
+app.use('/api/v1/attendance-corrections', attendanceCorrectionsRoutes);
 
+// Error Handling Middleware
 app.use((err, _req, res, _next) => {
-  console.error(err);
+  logger.error('[Express Error Handler] %o', err);
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' } });
 });
 
 const PORT = process.env.PORT || 4000;
 
 Promise.all([connectDB(), initFaceEngine()]).then(() => {
-  app.listen(PORT, () => console.log(`[server] listening on http://localhost:${PORT}`));
+  app.listen(PORT, () => {
+    logger.info(`[server] listening on http://localhost:${PORT}`);
+    logger.info(`[server] Swagger API documentation available at http://localhost:${PORT}/api-docs`);
+    startDocumentExpiryScheduler();
+  });
 }).catch((err) => {
-  console.error('[server] failed to start:', err.message);
+  logger.error('[server] failed to start: %s', err.message);
   process.exit(1);
 });
+

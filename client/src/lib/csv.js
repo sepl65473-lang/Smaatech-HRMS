@@ -43,3 +43,35 @@ export function rowsToObjects(rows) {
     return obj;
   });
 }
+
+export function objectsToCSV(data, keys, headerLabels) {
+  const headerRow = (headerLabels || keys).join(',');
+  const dataRows = data.map((obj) =>
+    keys.map((key) => {
+      let val = obj[key] ?? '';
+      if (val === null) val = '';
+      if (typeof val === 'object') {
+        val = JSON.stringify(val);
+      }
+      val = String(val).replace(/"/g, '""');
+      if (val.includes(',') || val.includes('"') || val.includes('\n') || val.includes('\r')) {
+        val = `"${val}"`;
+      }
+      return val;
+    }).join(',')
+  );
+  return [headerRow, ...dataRows].join('\n');
+}
+
+export function downloadCSV(data, keys, filename, headerLabels) {
+  const csvContent = objectsToCSV(data, keys, headerLabels);
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+

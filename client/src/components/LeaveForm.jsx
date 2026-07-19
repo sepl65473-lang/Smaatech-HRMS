@@ -1,17 +1,30 @@
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
+import { useHRMS } from '../context/HRMSContext';
 import { LEAVE_TYPES, daysBetween } from '../lib/helpers';
 
 export default function LeaveForm({ open, employees, onClose, onSave }) {
+  const { getMasterValues } = useHRMS();
+  const leaveTypesFromDB = getMasterValues('leave_types');
+  const leaveTypes = leaveTypesFromDB.map((val) => {
+    const matching = LEAVE_TYPES.find((lt) => lt.value === val);
+    if (matching) return matching;
+    return {
+      value: val,
+      label: val.charAt(0).toUpperCase() + val.slice(1) + ' leave',
+      tag: `tag-${val.toLowerCase()}`,
+    };
+  });
+
   const [form, setForm] = useState({ empId: '', type: 'casual', start: '', end: '', reason: '' });
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
     if (open) {
-      setForm({ empId: employees[0]?.id || '', type: 'casual', start: '', end: '', reason: '' });
+      setForm({ empId: employees[0]?.id || '', type: leaveTypes[0]?.value || 'casual', start: '', end: '', reason: '' });
       setErrors({});
     }
-  }, [open, employees]);
+  }, [open, employees, leaveTypes]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -53,7 +66,7 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
         <label className="field field-full">
           <span className="field-label">Leave type</span>
           <select className="input" value={form.type} onChange={set('type')}>
-            {LEAVE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            {leaveTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </label>
         <label className="field">

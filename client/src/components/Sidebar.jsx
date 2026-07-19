@@ -1,13 +1,13 @@
 import { NavLink } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
-import { canAccess } from '../lib/permissions';
 import {
   IconDashboard, IconEmployees, IconCalendar, IconLeave, IconPayroll,
   IconCake, IconRecruit, IconPerformance, IconDocs, IconAnalytics, IconSettings, IconLogOut,
 } from './Icons';
 
-function Item({ to, icon: Icon, label, badge, badgeTone, onNavigate, role }) {
-  if (!canAccess(role, to)) return null;
+function Item({ to, icon: Icon, label, badge, badgeTone, onNavigate }) {
+  const { canAccess } = useHRMS();
+  if (!canAccess(to)) return null;
   return (
     <NavLink to={to} onClick={onNavigate} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
       <Icon className="nav-icon" />
@@ -44,6 +44,7 @@ export default function Sidebar({ onNavigate }) {
         <Item to="/holidays" icon={IconCalendar} label="Holidays" role={currentUser.role} onNavigate={onNavigate} />
         <Item to="/payroll" icon={IconPayroll} label="Payroll" role={currentUser.role} onNavigate={onNavigate} />
         <Item to="/celebrations" icon={IconCake} label="Celebrations" role={currentUser.role} badge={celebrations.length} onNavigate={onNavigate} />
+        <Item to="/resignations" icon={IconDocs} label="Exit & Clearance" role={currentUser.role} onNavigate={onNavigate} />
       </div>
 
       <div className="nav-section">

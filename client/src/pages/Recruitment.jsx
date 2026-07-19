@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Modal from '../components/Modal';
+import CsvImportModal from '../components/CsvImportModal';
+import { downloadCSV } from '../lib/csv';
 import { IconPlus, IconTrash } from '../components/Icons';
 
 const STAGES = ['Applied', 'Screening', 'Interview', 'Offer', 'Hired'];
@@ -16,6 +18,7 @@ export default function Recruitment() {
     jobs,
     addJob,
     updateJobStatus,
+    importJobs,
     employees,
     audit,
     toast
@@ -50,7 +53,15 @@ export default function Recruitment() {
 
   // Job Openings form modal
   const [jobOpen, setJobOpen] = useState(false);
+  const [importJobsOpen, setImportJobsOpen] = useState(false);
   const [jobForm, setJobForm] = useState({ title: '', department: 'Engineering', location: 'Bengaluru', type: 'Full-time', description: '' });
+
+  const handleExportJobsCsv = () => {
+    const keys = ['title', 'department', 'location', 'type', 'status', 'description'];
+    const labels = ['Job Title', 'Department', 'Location', 'Job Type', 'Status', 'Description'];
+    downloadCSV(jobs, keys, 'jobs.csv', labels);
+    toast('success', 'Jobs list exported successfully');
+  };
 
   const byStage = (s) => recruitment.filter((c) => c.stage === s);
 
@@ -176,9 +187,13 @@ export default function Recruitment() {
               <div className="card-title">Active Job Openings</div>
               <div className="card-sub">Manage job listings and track application status</div>
             </div>
-            <button className="btn" onClick={() => setJobOpen(true)}>
-              <IconPlus width="14" height="14" /> Create Job Posting
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost" onClick={handleExportJobsCsv}>Export CSV</button>
+              <button className="btn btn-ghost" onClick={() => setImportJobsOpen(true)}>Import CSV</button>
+              <button className="btn" onClick={() => setJobOpen(true)}>
+                <IconPlus width="14" height="14" /> Create Job Posting
+              </button>
+            </div>
           </div>
 
           <div className="table-scroll">
@@ -539,6 +554,36 @@ export default function Recruitment() {
           </label>
         </div>
       </Modal>
+
+      <CsvImportModal
+        open={importJobsOpen}
+        onClose={() => setImportJobsOpen(false)}
+        onImport={importJobs}
+        title="Import jobs from CSV"
+        subtitle="Bulk add job openings to list"
+        templateHeader="title,department,location,type,status,description"
+        templateSample="Product Manager,Product,Bengaluru,Full-time,Open,Own product roadmap\nHR Specialist,HR,Mumbai,Part-time,Open,Employee onboarding"
+        templateFileName="job-import-template.csv"
+        columns={[
+          { key: 'title', label: 'Job Title' },
+          { key: 'department', label: 'Department' },
+          { key: 'location', label: 'Location' },
+          { key: 'status', label: 'Status' },
+        ]}
+        validateRow={(row) => {
+          const errors = [];
+          if (!row.title) errors.push('Title is required');
+          return errors;
+        }}
+        mapRow={(r) => ({
+          title: r.title,
+          department: r.department || 'Engineering',
+          location: r.location || 'Bengaluru',
+          type: r.type || 'Full-time',
+          status: r.status || 'Open',
+          description: r.description || '',
+        })}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ const holidaySchema = new mongoose.Schema({
   name: { type: String, required: true },
   date: { type: String, required: true }, // display string, e.g. "7 Jun, Sun" — year-agnostic, recurs yearly
   type: { type: String, default: 'National' }, // National | Regional | Optional
+  company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
 holidaySchema.set('toJSON', {

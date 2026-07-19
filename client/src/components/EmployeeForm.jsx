@@ -2,11 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
 import Avatar from './Avatar';
 import { useHRMS } from '../context/HRMSContext';
-import { DEPARTMENTS, LOCATIONS } from '../lib/helpers';
 import { ROLES } from '../lib/permissions';
-
-const emptyForm = (depts) => ({
-  name: '', role: '', dept: depts[0], loc: LOCATIONS[0],
+const emptyForm = (depts, locs) => ({
+  name: '', role: '', dept: depts[0] || '', loc: locs[0] || '',
   email: '', phone: '', status: 'active', joinDate: '', dob: '', salary: '',
   bankAccount: '', ifsc: '', managerId: '', photo: '',
   employmentType: 'Full-time',
@@ -44,13 +42,14 @@ function resizePhoto(file) {
 }
 
 export default function EmployeeForm({ open, employee, onClose, onSave }) {
-  const { settings, employees, currentUser } = useHRMS();
-  const departments = settings.departments?.length ? settings.departments : DEPARTMENTS;
+  const { settings, employees, currentUser, getMasterValues } = useHRMS();
+  const departments = getMasterValues('departments');
+  const locations = getMasterValues('locations');
   const designations = settings.designations || [];
   const managerOptions = employees.filter((e) => e.id !== employee?.id);
   const isEdit = Boolean(employee);
   const canCreateLogin = !isEdit && currentUser.role === 'HR Director';
-  const [form, setForm] = useState(() => emptyForm(departments));
+  const [form, setForm] = useState(() => emptyForm(departments, locations));
   const [errors, setErrors] = useState({});
   const [photoError, setPhotoError] = useState('');
   const fileInputRef = useRef(null);
@@ -61,14 +60,14 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
 
   useEffect(() => {
     if (open) {
-      setForm(employee ? { ...emptyForm(departments), ...employee, salary: String(employee.salary ?? '') } : emptyForm(departments));
+      setForm(employee ? { ...emptyForm(departments, locations), ...employee, salary: String(employee.salary ?? '') } : emptyForm(departments, locations));
       setErrors({});
       setCreateLogin(false);
       setLoginEmail('');
       setLoginPassword('');
       setLoginRole('Employee');
     }
-  }, [open, employee]);
+  }, [open, employee, departments, locations]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -187,7 +186,7 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
         </Field>
         <Field label="Location">
           <select className="input" value={form.loc} onChange={set('loc')}>
-            {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
+            {locations.map((l) => <option key={l}>{l}</option>)}
           </select>
         </Field>
         <Field label="Status">

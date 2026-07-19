@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import Review from '../models/Review.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 
 const router = Router();
 router.use(requireAuth);
 
 router.get('/', async (req, res) => {
   const isManager = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
-  const rows = await Review.find(isManager ? {} : { empId: req.auth.employeeId }).sort({ createdAt: -1 });
+  const scope = { ...companyFilter(req), ...(isManager ? {} : { empId: req.auth.employeeId }) };
+  const rows = await Review.find(scope).sort({ createdAt: -1 });
   res.json(rows);
 });
 
@@ -18,7 +19,8 @@ router.get('/:id', async (req, res) => {
 
 // startReviewCycle calls this once per employee (no bulk endpoint needed).
 router.post('/', requireRole('HR Manager'), async (req, res) => {
-  const created = await Review.create(req.body || {});
+  const body = { ...(req.body || {}), company: req.auth.company };
+  const created = await Review.create(body);
   res.status(201).json(created);
 });
 

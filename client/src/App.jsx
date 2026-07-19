@@ -3,7 +3,6 @@ import { Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Placeholder from './pages/Placeholder';
 import { useHRMS } from './context/HRMSContext';
-import { canAccess } from './lib/permissions';
 
 // Code-split every page so the initial bundle stays small.
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -25,6 +24,7 @@ const Integrations = lazy(() => import('./pages/Integrations'));
 const Expenses = lazy(() => import('./pages/Expenses'));
 const Assets = lazy(() => import('./pages/Assets'));
 const Workflows = lazy(() => import('./pages/Workflows'));
+const Resignations = lazy(() => import('./pages/Resignations'));
 
 function PageLoader() {
   return (
@@ -37,8 +37,8 @@ function PageLoader() {
 }
 
 function Guard({ path, children }) {
-  const { currentUser } = useHRMS();
-  if (!canAccess(currentUser.role, path)) {
+  const { canAccess } = useHRMS();
+  if (!canAccess(path)) {
     return (
       <Placeholder
         title="Access restricted"
@@ -78,6 +78,7 @@ export default function App() {
           <Route path="expenses" element={<Guard path="/expenses"><Expenses /></Guard>} />
           <Route path="assets" element={<Guard path="/assets"><Assets /></Guard>} />
           <Route path="workflows" element={<Guard path="/workflows"><Workflows /></Guard>} />
+          <Route path="resignations" element={<Guard path="/resignations"><Resignations /></Guard>} />
           <Route path="*" element={<Placeholder title="Not found" note="This page doesn’t exist yet." />} />
         </Route>
       </Routes>

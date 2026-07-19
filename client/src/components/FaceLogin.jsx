@@ -14,9 +14,11 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
 
   const enrolledProfiles = profiles.filter((p) => p.faceDescriptor?.length);
   const enrolledRef = useRef(enrolledProfiles);
-  enrolledRef.current = enrolledProfiles;
   const onMatchRef = useRef(onMatch);
-  onMatchRef.current = onMatch;
+  useEffect(() => {
+    enrolledRef.current = enrolledProfiles;
+    onMatchRef.current = onMatch;
+  });
 
   // Cleanup function for stream and timers
   const stopResources = () => {

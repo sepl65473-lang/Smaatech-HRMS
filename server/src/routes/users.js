@@ -3,7 +3,8 @@ import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
+import { logAudit } from '../lib/auditLogger.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -14,8 +15,8 @@ const VALID_ROLES = ['HR Director', 'HR Manager', 'Finance Lead', 'Employee'];
 
 // requireRole() with no arguments only lets the built-in HR Director
 // superuser bypass through — login/user management is Director-only.
-router.get('/', requireRole(), async (_req, res) => {
-  const rows = await User.find().sort({ createdAt: 1 });
+router.get('/', requireRole(), async (req, res) => {
+  const rows = await User.find(companyFilter(req)).sort({ createdAt: 1 });
   res.json(rows);
 });
 
@@ -55,7 +56,9 @@ router.post('/', requireRole(), async (req, res) => {
       role,
       initials: initials || undefined,
       employeeId: empId,
+      company: req.auth.company,
     });
+    await logAudit(req, { action: 'Login created', subject: created.name, after: created });
     res.status(201).json(created);
   } catch (err) {
     if (err.code === 11000) {
@@ -93,13 +96,20 @@ router.patch('/:id', requireRole(), async (req, res) => {
     patch.passwordHash = await bcrypt.hash(password, 10);
   }
 
+  const before = await User.findById(req.params.id);
+  if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+
   const updated = await User.findByIdAndUpdate(req.params.id, patch, { new: true });
-  if (!updated) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+  await logAudit(req, { action: 'Login updated', subject: updated.name, before, after: updated });
   res.json(updated);
 });
 
 router.delete('/:id', requireRole(), async (req, res) => {
-  await User.findByIdAndDelete(req.params.id);
+  const before = await User.findById(req.params.id);
+  if (before) {
+    await User.findByIdAndDelete(req.params.id);
+    await logAudit(req, { action: 'Login removed', subject: before.name, before });
+  }
   res.json({ id: req.params.id });
 });
 

@@ -8,5 +8,9 @@ server/.env
 .claude/
 
 *.log
+logs/
+server/logs/
+server/uploads/
 .DS_Store
 Thumbs.db
+

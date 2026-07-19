@@ -1,14 +1,24 @@
 import { useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import Modal from '../components/Modal';
+import CsvImportModal from '../components/CsvImportModal';
+import { downloadCSV } from '../lib/csv';
 
 export default function Assets() {
-  const { assets, employees, addAsset, assignAsset, returnAsset } = useHRMS();
+  const { assets, employees, addAsset, assignAsset, returnAsset, importAssets, toast } = useHRMS();
   
   // Local state
   const [searchQuery, setSearchQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [newAsset, setNewAsset] = useState({ name: '', category: 'Laptop', serialNumber: '' });
+  const [importOpen, setImportOpen] = useState(false);
+
+  const handleExportCsv = () => {
+    const keys = ['name', 'category', 'serialNumber', 'status', 'assignedToEmpName', 'assignedDate'];
+    const labels = ['Asset Name', 'Category', 'Serial Number', 'Status', 'Assigned Owner', 'Assigned Date'];
+    downloadCSV(assets, keys, 'assets.csv', labels);
+    toast('success', 'Assets list exported successfully');
+  };
   
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null); // Asset row to assign
@@ -78,9 +88,11 @@ export default function Assets() {
             <div className="card-title">Assets Inventory</div>
             <div className="card-sub">Manage company hardware, assignments, & return status</div>
           </div>
-          <button className="btn" onClick={() => setAddOpen(true)}>
-            Add Asset
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={handleExportCsv}>Export CSV</button>
+            <button className="btn btn-ghost" onClick={() => setImportOpen(true)}>Import CSV</button>
+            <button className="btn" onClick={() => setAddOpen(true)}>Add Asset</button>
+          </div>
         </div>
 
         {/* Search and Toolbar */}
@@ -248,6 +260,34 @@ export default function Assets() {
           </label>
         </div>
       </Modal>
+
+      <CsvImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImport={importAssets}
+        title="Import assets from CSV"
+        subtitle="Bulk add assets to inventory"
+        templateHeader="name,category,serialNumber"
+        templateSample="HP Latitude Laptop,Laptop,HP-SN-87621"
+        templateFileName="asset-import-template.csv"
+        columns={[
+          { key: 'name', label: 'Asset Name' },
+          { key: 'category', label: 'Category' },
+          { key: 'serialNumber', label: 'Serial Number' },
+        ]}
+        validateRow={(row) => {
+          const errors = [];
+          if (!row.name) errors.push('Name is required');
+          const sn = row.serialnumber || row.serialNumber;
+          if (!sn) errors.push('Serial Number is required');
+          return errors;
+        }}
+        mapRow={(r) => ({
+          name: r.name,
+          category: r.category || 'Laptop',
+          serialNumber: r.serialnumber || r.serialNumber,
+        })}
+      />
     </div>
   );
 }

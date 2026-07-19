@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import Attendance from '../models/Attendance.js';
 import FaceDescriptor from '../models/FaceDescriptor.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { evaluateGeofence } from '../lib/geofence.js';
 import { resolveShiftForToday, isLate, isEarlyExit, nowTimeIST } from '../lib/shifts.js';
 import { parseDeviceInfo, clientIp } from '../lib/deviceInfo.js';
@@ -32,8 +32,8 @@ async function findSharedDeviceFlag(deviceId, empId, rowId) {
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', async (_req, res) => {
-  const rows = await Attendance.find().sort({ createdAt: 1 });
+router.get('/', async (req, res) => {
+  const rows = await Attendance.find(companyFilter(req)).sort({ createdAt: 1 });
   res.json(rows);
 });
 
@@ -46,7 +46,8 @@ router.get('/:id', async (req, res) => {
 // leave-approval side effects, employee add/remove cascades) — trusted callers
 // only, gated by role. Self check-in/out has its own verified path further down.
 router.post('/', requireRole('HR Manager'), async (req, res) => {
-  const created = await Attendance.create(req.body || {});
+  const body = { ...(req.body || {}), company: req.auth.company };
+  const created = await Attendance.create(body);
   res.status(201).json(created);
 });
 
@@ -104,7 +105,7 @@ async function handlePunch(req, res, direction) {
   // must keep working unconditionally.
   const isSelfService = !isAdmin;
 
-  const settings = await getSettingsDoc();
+  const settings = await getSettingsDoc(req.auth.company);
   const lat = req.body.lat != null ? Number(req.body.lat) : null;
   const lng = req.body.lng != null ? Number(req.body.lng) : null;
   const accuracy = req.body.accuracy != null ? Number(req.body.accuracy) : null;

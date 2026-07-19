@@ -8,16 +8,25 @@ export default function QrCheckInModal({ open, onClose, onScanSuccess }) {
   const [error, setError] = useState('');
   const [scanTimeLeft, setScanTimeLeft] = useState(3);
   const timerRef = useRef(null);
+  const [hasStream, setHasStream] = useState(false);
 
   const stopCamera = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    setHasStream(false);
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
     clearInterval(timerRef.current);
+  };
+
+  const handleSuccess = () => {
+    setStatus('success');
+    setTimeout(() => {
+      onScanSuccess({ time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) });
+    }, 800);
   };
 
   useEffect(() => {
@@ -34,6 +43,7 @@ export default function QrCheckInModal({ open, onClose, onScanSuccess }) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 320, facingMode: 'environment' } });
         streamRef.current = stream;
+        setHasStream(true);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
@@ -51,28 +61,17 @@ export default function QrCheckInModal({ open, onClose, onScanSuccess }) {
           }
         }, 1000);
 
-      } catch (err) {
+      } catch (_err) {
         // Fallback for no camera or blocked permission
         setStatus('scanning'); // Still enter scanning but show simulated bypass trigger
-        toastFallback();
       }
     })();
 
     return () => {
       stopCamera();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  const handleSuccess = () => {
-    setStatus('success');
-    setTimeout(() => {
-      onScanSuccess({ time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) });
-    }, 800);
-  };
-
-  const toastFallback = () => {
-    // Camera error won't block, we show a gorgeous mock scanning grid
-  };
 
   return (
     <Modal
@@ -153,7 +152,7 @@ export default function QrCheckInModal({ open, onClose, onScanSuccess }) {
           <div className="qr-target-brackets" />
           
           {/* Display camera feed or fallback animation */}
-          {streamRef.current ? (
+          {hasStream ? (
             <video
               ref={videoRef}
               muted
@@ -182,7 +181,7 @@ export default function QrCheckInModal({ open, onClose, onScanSuccess }) {
             </div>
           )}
 
-          {status === 'scanning' && streamRef.current && (
+          {status === 'scanning' && hasStream && (
             <div className="qr-countdown">Auto-capturing in {scanTimeLeft}s</div>
           )}
         </div>

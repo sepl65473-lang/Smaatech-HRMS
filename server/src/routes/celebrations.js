@@ -2,7 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import Employee from '../models/Employee.js';
 import Wish from '../models/Wish.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -39,8 +39,9 @@ function relativeDayText(diffDays, occurrence) {
 
 // Computed from real Employee data (dob + joinDate) rather than stored —
 // only the "already wished" acknowledgment is persisted, in Wish.
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   const employees = await Employee.find({
+    ...companyFilter(req),
     $or: [{ dob: { $nin: [null, ''] } }, { joinDate: { $nin: [null, ''] } }],
   });
   const today = new Date();

@@ -3,8 +3,7 @@ import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { IconEdit, IconTrash } from '../components/Icons';
-import { formatDate, formatINR } from '../lib/helpers';
-import { putFile, getFile, deleteFile, dataUrlToBlob } from '../lib/fileStore';
+import { formatDate, formatINR, todayISO } from '../lib/helpers';
 
 const FOLDERS = [
   { id: 'policies', name: 'Policies', type: 'Company' },
@@ -13,16 +12,7 @@ const FOLDERS = [
   { id: 'people', name: 'Employee files', type: 'People' },
 ];
 
-const UPLOAD_KEY = 'Smaatech_hrms_uploads';
-const MAX_FILE_SIZE = 2 * 1024 * 1024;
-const ACCEPTED_TYPES = {
-  PDF: ['application/pdf'],
-  DOC: ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-  IMG: ['image/png', 'image/jpeg', 'image/webp'],
-  XLS: ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-};
-
-const emptyUpload = { title: '', owner: '', folder: 'people', type: 'PDF', visibility: 'all', file: null };
+const emptyUpload = { title: '', owner: '', ownerId: '', folder: 'people', type: 'PDF', visibility: 'all', file: null, expiryDate: '' };
 
 const VISIBILITY = {
   all: { label: 'Everyone', cls: 'approved' },
@@ -74,50 +64,51 @@ const generatedHtml = (doc) => `<!doctype html>
 </html>`;
 
 export default function Documents() {
-  const { employees, payroll, leaves, settings, search, audit, toast, currentUser } = useHRMS();
+  const {
+    employees, payroll, leaves, settings, search, toast, currentUser, getMasterValues,
+    documents: dbDocs, addDocument, updateDocument, deleteDocument, downloadDocument
+  } = useHRMS();
+
+  const documentTypes = getMasterValues('document_types');
   const [folder, setFolder] = useState('all');
-  const [uploads, setUploads] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(UPLOAD_KEY) || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [statusFilter, setStatusFilter] = useState('all'); // all | active | warning | expired
   const [upload, setUpload] = useState(emptyUpload);
   const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    localStorage.setItem(UPLOAD_KEY, JSON.stringify(uploads));
-  }, [uploads]);
+  const isHR = ['HR Director', 'HR Manager'].includes(currentUser.role);
 
-  // One-time migration: move legacy base64 fileData out of localStorage into IndexedDB.
-  useEffect(() => {
-    const legacy = uploads.filter((u) => u.fileData);
-    if (legacy.length === 0) return;
-    (async () => {
-      for (const doc of legacy) {
-        try {
-          await putFile(doc.id, dataUrlToBlob(doc.fileData));
-        } catch (err) {
-          console.warn('File migration failed for', doc.id, err);
-          return; // keep legacy data so nothing is lost
-        }
-      }
-      setUploads((list) => list.map((u) => (
-        u.fileData ? { ...u, fileData: undefined, hasFile: true } : u
-      )));
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Computes document statuses (Active, Expiring Soon, Expired)
+  const getDocStatus = (doc) => {
+    if (!doc.expiryDate) return { label: 'Active', cls: 'approved', key: 'active' };
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const expiry = new Date(doc.expiryDate);
+    if (isNaN(expiry.getTime())) return { label: 'Active', cls: 'approved', key: 'active' };
+
+    const expiryDateOnly = new Date(expiry.getFullYear(), expiry.getMonth(), expiry.getDate());
+    if (expiryDateOnly < today) {
+      return { label: 'Expired', cls: 'declined', key: 'expired' };
+    }
+
+    const diffTime = expiryDateOnly - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays <= 30) {
+      return { label: `Expiring in ${diffDays}d`, cls: 'pending', key: 'warning' };
+    }
+
+    return { label: 'Active', cls: 'approved', key: 'active' };
+  };
 
   const documents = useMemo(() => {
-    const owner = settings.orgName || 'Organisation';
+    const orgOwner = settings.orgName || 'Organisation';
+    
+    // Legacy simulated documents
     const policyDocs = [
-      { id: 'pol_leave', folder: 'policies', title: 'Leave policy', owner, type: 'PDF', visibility: 'all', meta: `${leaves.length} requests tracked` },
-      { id: 'pol_payroll', folder: 'policies', title: 'Payroll handbook', owner, type: 'PDF', visibility: 'all', meta: `${payroll.length} salary slips linked` },
-      { id: 'pol_security', folder: 'policies', title: 'Security checklist', owner, type: 'DOC', visibility: 'all', meta: settings.twoFactor ? '2FA enabled' : '2FA optional' },
+      { id: 'pol_leave', folder: 'policies', title: 'Leave policy', owner: orgOwner, type: 'PDF', visibility: 'all', meta: `${leaves.length} requests tracked`, expiryDate: '' },
+      { id: 'pol_payroll', folder: 'policies', title: 'Payroll handbook', owner: orgOwner, type: 'PDF', visibility: 'all', meta: `${payroll.length} salary slips linked`, expiryDate: '' },
+      { id: 'pol_security', folder: 'policies', title: 'Security checklist', owner: orgOwner, type: 'DOC', visibility: 'all', meta: settings.twoFactor ? '2FA enabled' : '2FA optional', expiryDate: '' },
     ];
 
     const payslips = payroll.map((p) => ({
@@ -128,6 +119,7 @@ export default function Documents() {
       type: 'PDF',
       visibility: 'finance',
       meta: `${p.cycle} - ${formatINR(p.net)} - ${p.status}`,
+      expiryDate: ''
     }));
 
     const leaveDocs = leaves.map((l) => ({
@@ -138,6 +130,7 @@ export default function Documents() {
       type: 'REQ',
       visibility: 'hr',
       meta: `${formatDate(l.start)} to ${formatDate(l.end)} - ${l.status}`,
+      expiryDate: ''
     }));
 
     const peopleDocs = employees.map((e) => ({
@@ -148,16 +141,22 @@ export default function Documents() {
       type: 'FILE',
       visibility: 'hr',
       meta: `${e.dept} - ${e.role}`,
+      expiryDate: ''
     }));
 
-    return [...uploads, ...policyDocs, ...payslips, ...leaveDocs, ...peopleDocs];
-  }, [employees, leaves, payroll, settings, uploads]);
+    const normalizedDbDocs = dbDocs.map(d => ({
+      ...d,
+      meta: d.expiryDate ? `Expires: ${formatDate(d.expiryDate)}` : 'No expiry set',
+      hasFile: true
+    }));
+
+    return [...normalizedDbDocs, ...policyDocs, ...payslips, ...leaveDocs, ...peopleDocs];
+  }, [employees, leaves, payroll, settings, dbDocs]);
 
   const validateFile = (file, type) => {
     if (!file) return '';
+    const MAX_FILE_SIZE = 2 * 1024 * 1024;
     if (file.size > MAX_FILE_SIZE) return 'File must be 2 MB or smaller.';
-    const allowed = ACCEPTED_TYPES[type] || [];
-    if (allowed.length && !allowed.includes(file.type)) return `${type} upload expects a matching file type.`;
     return '';
   };
 
@@ -167,9 +166,13 @@ export default function Documents() {
     setError('');
   };
 
-  const saveUpload = () => {
+  const saveUpload = async () => {
     if (!upload.title.trim()) {
       setError('Document title is required.');
+      return;
+    }
+    if (!upload.ownerId) {
+      setError('Document owner is required.');
       return;
     }
     const fileError = validateFile(upload.file, upload.type);
@@ -177,59 +180,51 @@ export default function Documents() {
       setError(fileError);
       return;
     }
-    const owner = upload.owner.trim() || settings.orgName || 'Organisation';
-    const file = upload.file;
-    const id = editing?.id || `upload_${Date.now()}`;
 
-    const record = {
-      id,
-      folder: upload.folder,
-      title: upload.title.trim(),
-      owner,
-      type: upload.type,
-      visibility: upload.visibility || 'all',
-      meta: file ? `${file.name} - ${Math.ceil(file.size / 1024)} KB` : editing?.meta || 'Uploaded just now',
-      fileName: file?.name || editing?.fileName || '',
-      hasFile: Boolean(file) || Boolean(editing?.hasFile),
-    };
-
-    const commit = () => {
-      setUploads((list) => (
-        editing
-          ? list.map((item) => (item.id === editing.id ? record : item))
-          : [record, ...list]
-      ));
-      audit(editing ? 'Document updated' : 'Document uploaded', record.title, record.folder);
-      resetForm();
-    };
-
-    if (!file) {
-      commit();
-      return;
+    const formData = new FormData();
+    formData.append('title', upload.title.trim());
+    formData.append('owner', upload.owner);
+    formData.append('ownerId', upload.ownerId);
+    formData.append('folder', upload.folder);
+    formData.append('type', upload.type);
+    formData.append('visibility', upload.visibility);
+    formData.append('expiryDate', upload.expiryDate);
+    if (upload.file) {
+      formData.append('file', upload.file);
     }
 
-    // Store the actual file in IndexedDB — only metadata goes to localStorage.
-    putFile(id, file)
-      .then(commit)
-      .catch(() => setError('Could not store the file in this browser. Try again.'));
+    try {
+      if (editing) {
+        await updateDocument(editing.id, formData);
+      } else {
+        if (!upload.file) {
+          setError('A file attachment is required for new uploads.');
+          return;
+        }
+        await addDocument(formData);
+      }
+      resetForm();
+    } catch (err) {
+      setError(err.message || 'Failed to save document. Please try again.');
+    }
   };
 
   const openFile = async (doc) => {
     try {
-      const blob = doc.fileData ? dataUrlToBlob(doc.fileData) : await getFile(doc.id);
+      toast('info', 'Downloading file from server...');
+      const blob = await downloadDocument(doc.id);
       if (!blob) {
-        toast('error', 'File not found in this browser’s storage.');
+        toast('error', 'File not found on server.');
         return;
       }
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = doc.fileName || doc.title;
+      link.download = doc.title || 'download';
       document.body.appendChild(link);
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
-      audit('Document downloaded', doc.title, doc.folder);
     } catch {
       toast('error', 'Could not open this file.');
     }
@@ -240,9 +235,11 @@ export default function Documents() {
     setUpload({
       title: doc.title,
       owner: doc.owner,
+      ownerId: doc.ownerId || '',
       folder: doc.folder,
       type: doc.type,
       visibility: doc.visibility || 'all',
+      expiryDate: doc.expiryDate || '',
       file: null,
     });
     setError('');
@@ -250,17 +247,18 @@ export default function Documents() {
 
   const deleteUpload = async () => {
     if (!confirm) return;
-    setUploads((list) => list.filter((doc) => doc.id !== confirm.id));
-    deleteFile(confirm.id).catch(() => {});
-    audit('Document deleted', confirm.title, confirm.folder);
-    toast('info', 'Document deleted');
-    setConfirm(null);
-    if (editing?.id === confirm.id) resetForm();
+    try {
+      await deleteDocument(confirm.id);
+      setConfirm(null);
+      if (editing?.id === confirm.id) resetForm();
+    } catch (err) {
+      toast('error', 'Failed to delete document.');
+    }
   };
 
   const downloadGenerated = (doc) => {
     downloadTextFile(doc, generatedHtml(doc));
-    audit('Generated document downloaded', doc.title, doc.folder);
+    toast('info', 'Generating simulated document...');
   };
 
   const visible = useMemo(
@@ -272,27 +270,43 @@ export default function Documents() {
     const q = search.trim().toLowerCase();
     return visible.filter((doc) => {
       const matchFolder = folder === 'all' || doc.folder === folder;
+      
+      const docStatus = getDocStatus(doc);
+      const matchStatus = statusFilter === 'all' || docStatus.key === statusFilter;
+
       const matchQ = !q
         || doc.title.toLowerCase().includes(q)
         || doc.owner.toLowerCase().includes(q)
         || doc.meta.toLowerCase().includes(q);
-      return matchFolder && matchQ;
+      
+      return matchFolder && matchStatus && matchQ;
     });
-  }, [visible, folder, search]);
+  }, [visible, folder, statusFilter, search]);
 
   const counts = useMemo(() => {
-    const base = { all: visible.length };
-    FOLDERS.forEach((f) => { base[f.id] = visible.filter((d) => d.folder === f.id).length; });
+    const base = {
+      all: visible.length,
+      active: visible.filter(d => getDocStatus(d).key === 'active').length,
+      warning: visible.filter(d => getDocStatus(d).key === 'warning').length,
+      expired: visible.filter(d => getDocStatus(d).key === 'expired').length,
+    };
+    FOLDERS.forEach((f) => {
+      base[f.id] = visible.filter((d) => d.folder === f.id).length;
+    });
     return base;
   }, [visible]);
+
+  const isRealUpload = (doc) => {
+    return !doc.id.startsWith('pol_') && !doc.id.startsWith('pay_') && !doc.id.startsWith('leave_') && !doc.id.startsWith('emp_');
+  };
 
   return (
     <div className="page-wrap active">
       <div className="stats">
-        <div className="stat"><div className="stat-label">Total files</div><div className="stat-value">{documents.length}</div><div className="stat-meta">generated from HR data</div></div>
-        <div className="stat"><div className="stat-label">Payslips</div><div className="stat-value">{counts.payslips}</div><div className="stat-meta">current payroll cycle</div></div>
-        <div className="stat"><div className="stat-label">Leave records</div><div className="stat-value">{counts.leave}</div><div className="stat-meta">requests and approvals</div></div>
-        <div className="stat"><div className="stat-label">Employee files</div><div className="stat-value">{counts.people}</div><div className="stat-meta">live people directory</div></div>
+        <div className="stat"><div className="stat-label">Total files</div><div className="stat-value">{counts.all}</div><div className="stat-meta">active documents</div></div>
+        <div className="stat"><div className="stat-label">Active / Valid</div><div className="stat-value">{counts.active}</div><div className="stat-meta">clean documents</div></div>
+        <div className="stat"><div className="stat-label">Expiring Soon</div><div className="stat-value" style={{ color: 'var(--pending)' }}>{counts.warning}</div><div className="stat-meta">expires in 30 days</div></div>
+        <div className="stat"><div className="stat-label">Expired</div><div className="stat-value" style={{ color: 'var(--declined)' }}>{counts.expired}</div><div className="stat-meta">action required</div></div>
       </div>
 
       <div className="grid" style={{ alignItems: 'start' }}>
@@ -300,19 +314,36 @@ export default function Documents() {
           <div className="card-head">
             <div>
               <div className="card-title">Document library</div>
-              <div className="card-sub">{filtered.length} files shown from live workspace data</div>
+              <div className="card-sub">{filtered.length} files shown from live database</div>
             </div>
           </div>
 
-          <div className="filter-chips" style={{ marginBottom: 16 }}>
-            <button className={`chip ${folder === 'all' ? 'active' : ''}`} onClick={() => setFolder('all')}>
-              All <span className="chip-count">{counts.all}</span>
-            </button>
-            {FOLDERS.map((f) => (
-              <button key={f.id} className={`chip ${folder === f.id ? 'active' : ''}`} onClick={() => setFolder(f.id)}>
-                {f.name} <span className="chip-count">{counts[f.id]}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <div className="filter-chips" style={{ margin: 0 }}>
+              <button className={`chip ${folder === 'all' ? 'active' : ''}`} onClick={() => setFolder('all')}>
+                All Folders <span className="chip-count">{counts.all}</span>
               </button>
-            ))}
+              {FOLDERS.map((f) => (
+                <button key={f.id} className={`chip ${folder === f.id ? 'active' : ''}`} onClick={() => setFolder(f.id)}>
+                  {f.name} <span className="chip-count">{counts[f.id]}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="filter-chips" style={{ margin: 0 }}>
+              <button className={`chip ${statusFilter === 'all' ? 'active' : ''}`} onClick={() => setStatusFilter('all')}>
+                All Status
+              </button>
+              <button className={`chip ${statusFilter === 'active' ? 'active' : ''}`} onClick={() => setStatusFilter('active')}>
+                Active ({counts.active})
+              </button>
+              <button className={`chip ${statusFilter === 'warning' ? 'active' : ''}`} onClick={() => setStatusFilter('warning')}>
+                Expiring ({counts.warning})
+              </button>
+              <button className={`chip ${statusFilter === 'expired' ? 'active' : ''}`} onClick={() => setStatusFilter('expired')}>
+                Expired ({counts.expired})
+              </button>
+            </div>
           </div>
 
           {filtered.length === 0 ? (
@@ -322,130 +353,133 @@ export default function Documents() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Document</th><th>Owner</th><th>Type</th><th>Visible to</th><th>Details</th><th style={{ textAlign: 'right' }}>Action</th>
+                    <th>Document</th><th>Owner</th><th>Type</th><th>Visible to</th><th>Status</th><th>Expiry Date</th><th style={{ textAlign: 'right' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((doc) => (
-                    <tr key={doc.id}>
-                      <td><strong>{doc.title}</strong></td>
-                      <td>
-                        <div className="emp-cell">
-                          <Avatar name={doc.owner} size={28} />
-                          <span>{doc.owner}</span>
-                        </div>
-                      </td>
-                      <td><span className="state-badge approved">{doc.type}</span></td>
-                      <td><span className={`state-badge ${VISIBILITY[doc.visibility]?.cls || 'approved'}`}>{VISIBILITY[doc.visibility]?.label || 'Everyone'}</span></td>
-                      <td>{doc.meta}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
-                          {(doc.hasFile || doc.fileData) ? (
-                            <button className="mini-btn" onClick={() => openFile(doc)}>Open</button>
-                          ) : (
-                            <button className="mini-btn" onClick={() => downloadGenerated(doc)}>Download</button>
-                          )}
-                          {doc.id.startsWith('upload_') && (
-                            <>
-                              <button className="icon-btn sm" title="Edit" onClick={() => startEdit(doc)}>
-                                <IconEdit width="13" height="13" />
-                              </button>
-                              <button className="icon-btn sm danger" title="Delete" onClick={() => setConfirm(doc)}>
-                                <IconTrash width="13" height="13" />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {filtered.map((doc) => {
+                    const status = getDocStatus(doc);
+                    return (
+                      <tr key={doc.id}>
+                        <td><strong>{doc.title}</strong></td>
+                        <td>
+                          <div className="emp-cell">
+                            <Avatar name={doc.owner} size={28} />
+                            <span>{doc.owner}</span>
+                          </div>
+                        </td>
+                        <td><span className="state-badge approved">{doc.type}</span></td>
+                        <td><span className={`state-badge ${VISIBILITY[doc.visibility]?.cls || 'approved'}`}>{VISIBILITY[doc.visibility]?.label || 'Everyone'}</span></td>
+                        <td><span className={`state-badge ${status.cls}`}>{status.label}</span></td>
+                        <td className="mono">{doc.expiryDate ? formatDate(doc.expiryDate) : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
+                            {isRealUpload(doc) ? (
+                              <button className="mini-btn" onClick={() => openFile(doc)}>Open</button>
+                            ) : (
+                              <button className="mini-btn" onClick={() => downloadGenerated(doc)}>Download</button>
+                            )}
+                            {isRealUpload(doc) && isHR && (
+                              <>
+                                <button className="icon-btn sm" title="Edit" onClick={() => startEdit(doc)}>
+                                  <IconEdit width="13" height="13" />
+                                </button>
+                                <button className="icon-btn sm danger" title="Delete" onClick={() => setConfirm(doc)}>
+                                  <IconTrash width="13" height="13" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div className="card">
-            <div className="card-head">
-              <div>
-                <div className="card-title">Folders</div>
-                <div className="card-sub">Counts update as data changes</div>
+        {isHR && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <div className="card">
+              <div className="card-head">
+                <div>
+                  <div className="card-title">{editing ? 'Edit document' : 'Upload document'}</div>
+                  <div className="card-sub">{editing ? 'Update document credentials' : 'Adds a new secure document to database'}</div>
+                </div>
+              </div>
+              <div className="form-grid">
+                <label className="field field-full">
+                  <span className="field-label">Document title</span>
+                  <input className="input" value={upload.title} onChange={(e) => setUpload((u) => ({ ...u, title: e.target.value }))} placeholder="e.g. Appointment letter" />
+                  {error && <span className="field-error" style={{ color: 'var(--declined)' }}>{error}</span>}
+                </label>
+                <label className="field field-full">
+                  <span className="field-label">Document Owner (Employee)</span>
+                  <select
+                    className="input"
+                    value={upload.ownerId}
+                    onChange={(e) => {
+                      const emp = employees.find(x => x.id === e.target.value);
+                      setUpload(u => ({
+                        ...u,
+                        ownerId: e.target.value,
+                        owner: emp ? emp.name : ''
+                      }));
+                    }}
+                  >
+                    <option value="">-- Choose Employee --</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{e.name} · {e.role}</option>)}
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="field-label">Folder</span>
+                  <select className="input" value={upload.folder} onChange={(e) => setUpload((u) => ({ ...u, folder: e.target.value }))}>
+                    {FOLDERS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="field-label">Type</span>
+                  <select className="input" value={upload.type} onChange={(e) => setUpload((u) => ({ ...u, type: e.target.value }))}>
+                    {documentTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </label>
+                <label className="field field-full">
+                  <span className="field-label">Expiry Date (Leave empty if no expiry)</span>
+                  <input type="date" className="input" value={upload.expiryDate} onChange={(e) => setUpload((u) => ({ ...u, expiryDate: e.target.value }))} />
+                </label>
+                <label className="field field-full">
+                  <span className="field-label">Visible to</span>
+                  <select className="input" value={upload.visibility} onChange={(e) => setUpload((u) => ({ ...u, visibility: e.target.value }))}>
+                    <option value="all">Everyone with Documents access</option>
+                    <option value="hr">HR only</option>
+                    <option value="finance">Finance only</option>
+                  </select>
+                </label>
+                <label className="field field-full">
+                  <span className="field-label">File</span>
+                  <input
+                    type="file"
+                    className="input"
+                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.xls,.xlsx"
+                    onChange={(e) => setUpload((u) => ({ ...u, file: e.target.files?.[0] || null }))}
+                  />
+                </label>
+              </div>
+              <div className="modal-actions" style={{ marginTop: 16 }}>
+                {editing && <button className="btn btn-ghost" onClick={resetForm}>Cancel</button>}
+                <button className="btn" onClick={saveUpload}>{editing ? 'Save document' : 'Add document'}</button>
               </div>
             </div>
-            <div className="folder-grid">
-              {FOLDERS.map((f) => (
-                <button key={f.id} className="folder" onClick={() => setFolder(f.id)}>
-                  <span className="folder-icon" />
-                  <span className="folder-name">{f.name}</span>
-                  <span className="folder-count">{counts[f.id]} {f.type} files</span>
-                </button>
-              ))}
-            </div>
           </div>
-
-          <div className="card">
-            <div className="card-head">
-              <div>
-                <div className="card-title">{editing ? 'Edit document' : 'Upload document'}</div>
-                <div className="card-sub">{editing ? 'Update uploaded file details' : 'Adds a new file to this frontend workspace'}</div>
-              </div>
-            </div>
-          <div className="form-grid">
-            <label className="field field-full">
-              <span className="field-label">Document title</span>
-              <input className="input" value={upload.title} onChange={(e) => setUpload((u) => ({ ...u, title: e.target.value }))} placeholder="e.g. Appointment letter" />
-              {error && <span className="field-error">{error}</span>}
-            </label>
-            <label className="field field-full">
-              <span className="field-label">Owner</span>
-              <input className="input" value={upload.owner} onChange={(e) => setUpload((u) => ({ ...u, owner: e.target.value }))} placeholder="Employee or organisation" />
-            </label>
-            <label className="field">
-              <span className="field-label">Folder</span>
-              <select className="input" value={upload.folder} onChange={(e) => setUpload((u) => ({ ...u, folder: e.target.value }))}>
-                {FOLDERS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">Type</span>
-              <select className="input" value={upload.type} onChange={(e) => setUpload((u) => ({ ...u, type: e.target.value }))}>
-                <option>PDF</option>
-                <option>DOC</option>
-                <option>IMG</option>
-                <option>XLS</option>
-              </select>
-            </label>
-            <label className="field field-full">
-              <span className="field-label">Visible to</span>
-              <select className="input" value={upload.visibility} onChange={(e) => setUpload((u) => ({ ...u, visibility: e.target.value }))}>
-                <option value="all">Everyone with Documents access</option>
-                <option value="hr">HR only</option>
-                <option value="finance">Finance only</option>
-              </select>
-            </label>
-            <label className="field field-full">
-              <span className="field-label">File</span>
-              <input
-                type="file"
-                className="input"
-                accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.xls,.xlsx"
-                onChange={(e) => setUpload((u) => ({ ...u, file: e.target.files?.[0] || null }))}
-              />
-            </label>
-          </div>
-          <div className="modal-actions" style={{ marginTop: 16 }}>
-            {editing && <button className="btn btn-ghost" onClick={resetForm}>Cancel</button>}
-            <button className="btn" onClick={saveUpload}>{editing ? 'Save document' : 'Add document'}</button>
-          </div>
-          </div>
-        </div>
+        )}
       </div>
 
       <ConfirmDialog
         open={Boolean(confirm)}
         title="Delete document"
-        message={confirm ? `Delete ${confirm.title}? This only removes the uploaded local copy.` : ''}
+        message={confirm ? `Delete ${confirm.title}? This will permanently remove the file from the database server.` : ''}
         confirmLabel="Delete"
         onCancel={() => setConfirm(null)}
         onConfirm={deleteUpload}

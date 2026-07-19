@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
+import CsvImportModal from '../components/CsvImportModal';
+import { downloadCSV } from '../lib/csv';
 import { IconPlus, IconTrash } from '../components/Icons';
 import { MONTH_NAMES, parseHolidayDay } from '../lib/helpers';
 
@@ -9,13 +11,21 @@ const TYPES = ['National', 'Regional', 'Optional'];
 const TYPE_CLASS = { National: 'tag-earned', Regional: 'tag-casual', Optional: 'tag-sick' };
 
 export default function Holidays() {
-  const { holidays, addHoliday, deleteHoliday } = useHRMS();
+  const { holidays, addHoliday, deleteHoliday, importHolidays, toast } = useHRMS();
   const today = new Date();
   const [year] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [formOpen, setFormOpen] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [form, setForm] = useState({ name: '', day: '', month: today.getMonth(), type: 'National' });
+
+  const handleExportCsv = () => {
+    const keys = ['name', 'date', 'type'];
+    const labels = ['Holiday Name', 'Date', 'Type'];
+    downloadCSV(holidays, keys, 'holidays.csv', labels);
+    toast('success', 'Holidays calendar exported successfully');
+  };
 
   const byDay = useMemo(() => {
     const map = {};
@@ -70,6 +80,8 @@ export default function Holidays() {
             <select className="input" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
               {MONTH_NAMES.map((m, i) => <option key={m} value={i}>{m} {year}</option>)}
             </select>
+            <button className="btn btn-ghost" onClick={handleExportCsv}>Export CSV</button>
+            <button className="btn btn-ghost" onClick={() => setImportOpen(true)}>Import CSV</button>
             <button className="btn" onClick={openAdd}><IconPlus width="14" height="14" /> Add holiday</button>
           </div>
         </div>
@@ -173,6 +185,45 @@ export default function Holidays() {
         confirmLabel="Remove"
         onCancel={() => setConfirm(null)}
         onConfirm={async () => { await deleteHoliday(confirm.id); setConfirm(null); }}
+      />
+
+      <CsvImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImport={importHolidays}
+        title="Import holidays from CSV"
+        subtitle="Bulk add holidays to calendar"
+        templateHeader="name,date,type"
+        templateSample="Independence Day,15 Aug,National\nChristmas,2026-12-25,National"
+        templateFileName="holiday-import-template.csv"
+        columns={[
+          { key: 'name', label: 'Holiday Name' },
+          { key: 'date', label: 'Date' },
+          { key: 'type', label: 'Type' },
+        ]}
+        validateRow={(row) => {
+          const errors = [];
+          if (!row.name) errors.push('Name is required');
+          if (!row.date) errors.push('Date is required');
+          return errors;
+        }}
+        mapRow={(r) => {
+          let dateVal = r.date || '';
+          if (/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+            const d = new Date(dateVal);
+            if (!isNaN(d.getTime())) {
+              const day = d.getDate();
+              const monthName = MONTH_NAMES[d.getMonth()];
+              const weekday = d.toLocaleDateString('en-IN', { weekday: 'short' });
+              dateVal = `${day} ${monthName}, ${weekday}`;
+            }
+          }
+          return {
+            name: r.name,
+            date: dateVal,
+            type: r.type || 'National',
+          };
+        }}
       />
     </div>
   );

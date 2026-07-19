@@ -18,6 +18,7 @@ const payrollSchema = new mongoose.Schema({
     },
     default: undefined,
   },
+  company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
 payrollSchema.set('toJSON', {

@@ -12,6 +12,7 @@ const candidateSchema = new mongoose.Schema({
   stage: { type: String, default: 'Applied' }, // Applied | Screening | Interview | Offer | Hired
   meta: { type: String, default: '' },
   onboarding: { type: [onboardingItemSchema], default: undefined },
+  company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
 candidateSchema.set('toJSON', {

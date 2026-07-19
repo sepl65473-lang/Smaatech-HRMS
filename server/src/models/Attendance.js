@@ -35,6 +35,7 @@ const attendanceSchema = new mongoose.Schema({
   checkInFaceConfidence: { type: Number, default: null },
   checkOutFaceConfidence: { type: Number, default: null },
   anomalyFlags: { type: [String], default: [] },
+  company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
 attendanceSchema.set('toJSON', {

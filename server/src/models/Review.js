@@ -17,6 +17,7 @@ const reviewSchema = new mongoose.Schema({
   managerRating: { type: Number, default: null },
   managerComments: { type: String, default: '' },
   goals: { type: [goalSchema], default: [] },
+  company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
 reviewSchema.set('toJSON', {

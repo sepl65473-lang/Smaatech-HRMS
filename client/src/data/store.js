@@ -1,5 +1,5 @@
 import { buildSeed } from './seed';
-import { apiFetch, setAccessToken } from '../lib/apiClient';
+import { apiFetch, apiFetchBlob, setAccessToken } from '../lib/apiClient';
 
 // ─────────────────────────────────────────────────────────────
 //  DATA LAYER
@@ -67,36 +67,34 @@ async function ensureDB(employeesHint) {
 // subset that attendance verification depends on lives server-side instead —
 // see geofenceApi.
 export const settingsApi = {
-  async get() {
-    await ensureDB();
-    return wait(clone(db.settings));
+  get() {
+    return apiFetch('/settings');
   },
-  async update(patch) {
-    await ensureDB();
-    db.settings = { ...db.settings, ...patch };
-    saveDB(db);
-    return wait(clone(db.settings));
+  update(patch) {
+    return apiFetch('/settings', { method: 'PATCH', body: patch });
   },
 };
 
 // ── Real backend resources ──────────────────────────────────────────────
 
-function restResource(path) {
-  return {
+function restResource(path, methods = ['list', 'get', 'create', 'update', 'remove']) {
+  const all = {
     list: () => apiFetch(`/${path}`),
     get: (id) => apiFetch(`/${path}/${id}`),
     create: (data) => apiFetch(`/${path}`, { method: 'POST', body: data }),
     update: (id, patch) => apiFetch(`/${path}/${id}`, { method: 'PATCH', body: patch }),
     remove: (id) => apiFetch(`/${path}/${id}`, { method: 'DELETE' }),
   };
+  return Object.fromEntries(methods.map((m) => [m, all[m]]));
 }
 
 export const employeesApi = restResource('employees');
 
 // Real login accounts (Settings > Users & role access). HR Director only —
 // deliberately not part of loadAll()/hydrate, since GET /users would 403 for
-// every other role; fetched lazily from the Settings page instead.
-export const usersApi = restResource('users');
+// every other role; fetched lazily from the Settings page instead. No single-
+// user GET route exists server-side, so `get` is intentionally omitted here.
+export const usersApi = restResource('users', ['list', 'create', 'update', 'remove']);
 
 export const leavesApi = {
   ...restResource('leaves'),
@@ -116,12 +114,45 @@ export const expensesApi = {
 };
 export const assetsApi = restResource('assets');
 export const jobsApi = restResource('jobs');
+export const rolesApi = restResource('roles');
+export const masterCategoriesApi = restResource('master-data/master-categories');
+export const masterValuesApi = restResource('master-data/master-values');
+export const auditLogsApi = restResource('audit-logs');
+export const notificationsApi = {
+  ...restResource('notifications'),
+  readAll: () => apiFetch('/notifications/read-all', { method: 'PATCH' }),
+  markRead: (id) => apiFetch(`/notifications/${id}/read`, { method: 'PATCH' }),
+};
+
+export const documentsApi = {
+  list: () => apiFetch('/documents'),
+  create: (formData) => apiFetch('/documents', { method: 'POST', body: formData }),
+  update: (id, formData) => apiFetch(`/documents/${id}`, { method: 'PATCH', body: formData }),
+  remove: (id) => apiFetch(`/documents/${id}`, { method: 'DELETE' }),
+  download: (id) => apiFetchBlob(`/documents/${id}/download`),
+};
+
+export const resignationsApi = {
+  list: () => apiFetch('/resignations'),
+  create: (data) => apiFetch('/resignations', { method: 'POST', body: data }),
+  update: (id, patch) => apiFetch(`/resignations/${id}`, { method: 'PATCH', body: patch }),
+  signOffClearance: (id, clearance) => apiFetch(`/resignations/${id}/clearance`, { method: 'POST', body: clearance }),
+  processFnF: (id, fnf) => apiFetch(`/resignations/${id}/fnf`, { method: 'POST', body: fnf }),
+  payFnF: (id) => apiFetch(`/resignations/${id}/fnf/pay`, { method: 'POST' }),
+};
+
+export const attendanceCorrectionsApi = {
+  list: () => apiFetch('/attendance-corrections'),
+  create: (data) => apiFetch('/attendance-corrections', { method: 'POST', body: data }),
+  approve: (id) => apiFetch(`/attendance-corrections/${id}/approve`, { method: 'POST' }),
+  reject: (id) => apiFetch(`/attendance-corrections/${id}/reject`, { method: 'POST' }),
+};
 
 // Celebrations is computed server-side from real Employee dob/joinDate
 // (see server/src/routes/celebrations.js) rather than a stored collection —
-// only GET (list) and PATCH (send wish) are meaningful, but restResource's
-// shape is a safe superset since nothing calls create/remove on it.
-export const celebrationsApi = restResource('celebrations');
+// only GET (list) and PATCH (send wish) exist as real routes, so those are
+// the only methods requested here.
+export const celebrationsApi = restResource('celebrations', ['list', 'update']);
 
 export const attendanceApi = {
   ...restResource('attendance'),
@@ -195,12 +226,13 @@ export const authApi = {
 // session (employees/attendance/geofence and all 9 modules below are behind
 // requireAuth) — only call this after authApi has established a session.
 export async function loadAll() {
-  const employees = await employeesApi.list();
   const [
-    attendance, leaves, payroll, celebrations, holidays,
+    employees, attendance, leaves, payroll, celebrations, holidays,
     recruitment, reviews, expenses, assets, jobs,
-    local, geofence,
+    settings, roles, masterCategories, masterValues,
+    auditLogs, notifications, documents, resignations, attendanceCorrections,
   ] = await Promise.all([
+    employeesApi.list(),
     attendanceApi.list(),
     leavesApi.list(),
     payrollApi.list(),
@@ -211,41 +243,79 @@ export async function loadAll() {
     expensesApi.list(),
     assetsApi.list(),
     jobsApi.list(),
-    ensureDB(employees),
-    geofenceApi.get(),
+    settingsApi.get(),
+    rolesApi.list(),
+    masterCategoriesApi.list(),
+    masterValuesApi.list(),
+    auditLogsApi.list().catch(() => []),
+    notificationsApi.list().catch(() => []),
+    documentsApi.list().catch(() => []),
+    resignationsApi.list().catch(() => []),
+    attendanceCorrectionsApi.list().catch(() => []),
   ]);
-  const localClone = clone(local);
   return {
     employees, attendance, leaves, payroll, celebrations, holidays,
-    recruitment, reviews, expenses, assets, jobs,
-    ...localClone,
-    settings: { ...localClone.settings, ...geofence },
+    recruitment, reviews, expenses, assets, jobs, roles, masterCategories, masterValues,
+    auditLogs, notifications, documents, resignations, attendanceCorrections,
+    settings,
   };
 }
 
-// Re-reads localStorage into the in-memory mirror (picks up writes made by
-// another tab/window of the same browser — see the `storage` event listener
-// in HRMSContext) and refetches the server-backed collections, since those
-// can now also have changed from a different device entirely.
+// Re-reads and refetches all backend collections.
 export async function reloadFromDisk() {
-  db = null;
-  dbReady = null;
   return loadAll();
 }
 
 export const DB_STORAGE_KEY = DB_KEY;
 
-// Wipe the LOCAL (non-backend) collections and rebuild from seed, linked to
-// whichever employees currently exist on the server. Only `settings` is
-// local now — Employees, Attendance, and all 9 previously-local modules
-// (Leave, Payroll, Celebrations, Holidays, Recruitment, Reviews, Expenses,
-// Assets, Jobs) live in MongoDB and are unaffected by this (Settings →
-// Danger Zone reset was always scoped to this app's own demo data, not a
-// shared server database).
+// Reset company settings back to default values.
 export async function resetDB() {
-  const employees = await employeesApi.list();
-  db = buildSeed(employees);
-  saveDB(db);
-  dbReady = Promise.resolve(db);
+  const defaultSettings = {
+    orgName: 'Smaatech',
+    workWeek: '5-day',
+    notifyLeave: true,
+    notifyPayroll: true,
+    notifyBirthday: false,
+    twoFactor: true,
+    wishesSent: 0,
+    totalLeaveDays: 24,
+    departments: ['Engineering', 'Design', 'Sales', 'Marketing', 'HR'],
+    designations: ['Software Engineer', 'Senior Software Engineer', 'Product Manager', 'HR Manager'],
+    gatewayTwilioSid: '',
+    gatewayTwilioToken: '',
+    gatewayTwilioFrom: '',
+    gatewaySendgridKey: '',
+    gatewaySmtpHost: '',
+    gatewaySmtpUser: '',
+    gatewaySmtpPass: '',
+    gpsCheckInEnabled: false,
+    geofenceLat: 19.0760,
+    geofenceLng: 72.8777,
+    geofenceRadius: 25,
+    notificationTemplates: {
+      email: {
+        leaveApproval: 'Subject: Leave Approval Notification\n\nDear {employee},\n\nWe are pleased to inform you that your leave request for the period {date} has been approved.\n\nBest regards,\nPeople Operations Team',
+        payrollSlip: 'Subject: Monthly Salary Slip Published\n\nDear {employee},\n\nYour salary slip for {date} is now available in your ESS dashboard portal.\n\nBest regards,\nFinance Team'
+      },
+      sms: {
+        leaveApproval: 'Dear {employee}, your leave request for {date} has been approved by Operations. Smaatech',
+        payrollSlip: 'Dear {employee}, your payslip for {date} has been processed. Log in to ESS portal to view details. Smaatech'
+      },
+      whatsapp: {
+        leaveApproval: 'Hello *{employee}*,\n\nYour leave request for *{date}* has been *approved* by your supervisor. ✅\n\nRegards,\nHR Operations',
+        payrollSlip: 'Hello *{employee}*,\n\nYour salary slip for *{date}* is ready. You can view or download it under your ESS dashboard. 📊'
+      }
+    },
+    notifyChannels: {
+      leave: ['In-app'],
+      payroll: ['In-app'],
+      birthday: ['In-app']
+    },
+    approvalWorkflows: {
+      leave: ['HR Manager', 'HR Director'],
+      expense: ['Finance Lead', 'HR Director']
+    }
+  };
+  await settingsApi.update(defaultSettings);
   return loadAll();
 }

@@ -20,6 +20,7 @@ const expenseSchema = new mongoose.Schema({
     decision: String, // approved | declined
     at: { type: Date, default: Date.now },
   }],
+  company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
 expenseSchema.set('toJSON', {

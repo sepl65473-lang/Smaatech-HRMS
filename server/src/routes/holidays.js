@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import Holiday from '../models/Holiday.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', async (_req, res) => {
-  const rows = await Holiday.find().sort({ createdAt: 1 });
+router.get('/', async (req, res) => {
+  const rows = await Holiday.find(companyFilter(req)).sort({ createdAt: 1 });
   res.json(rows);
 });
 
@@ -16,7 +16,8 @@ router.get('/:id', async (req, res) => {
 });
 
 router.post('/', requireRole('HR Manager'), async (req, res) => {
-  const created = await Holiday.create(req.body || {});
+  const body = { ...(req.body || {}), company: req.auth.company };
+  const created = await Holiday.create(body);
   res.status(201).json(created);
 });
 

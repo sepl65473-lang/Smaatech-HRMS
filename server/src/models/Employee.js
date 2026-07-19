@@ -12,15 +12,43 @@ const employeeSchema = new mongoose.Schema({
   salary: Number,
   rating: Number,
   employmentType: { type: String, default: 'Full-time' }, // Full-time | Part-time | Contract | Intern
-  dob: { type: String, default: '' }, // 'YYYY-MM-DD', same string convention as joinDate
+  dob: { type: String, default: '' }, // 'YYYY-MM-DD'
   managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   bankAccount: { type: String, default: '' },
   ifsc: { type: String, default: '' },
+  company: { type: String, default: 'Smaatech', index: true },
+  
+  // 360 Lifecycle fields
+  gender: { type: String, default: '' },
+  bloodGroup: { type: String, default: '' },
+  personalEmail: { type: String, default: '' },
+  emergencyContact: {
+    name: { type: String, default: '' },
+    relation: { type: String, default: '' },
+    phone: { type: String, default: '' },
+  },
+  bankName: { type: String, default: '' },
+  skills: { type: [String], default: [] },
+  education: [{
+    degree: String,
+    institution: String,
+    year: String,
+    grade: String,
+  }],
+  experience: [{
+    company: String,
+    role: String,
+    from: String,
+    to: String,
+  }],
+  family: [{
+    name: String,
+    relation: String,
+    phone: String,
+  }],
 }, { timestamps: true });
 
 // Shape the API response to match the frontend's existing `id` (string) convention
-// instead of Mongo's `_id`, so store.js can swap localStorage for fetch() with no
-// changes anywhere else in the app.
 employeeSchema.set('toJSON', {
   virtuals: true,
   transform: (_doc, ret) => {

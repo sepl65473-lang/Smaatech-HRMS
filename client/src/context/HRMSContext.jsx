@@ -1,32 +1,23 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import { toast as reactToast } from 'react-toastify';
 import {
   loadAll, resetDB, reloadFromDisk, DB_STORAGE_KEY,
+
   employeesApi, leavesApi, attendanceApi, payrollApi,
   celebrationsApi, recruitmentApi, settingsApi, holidaysApi, reviewsApi,
-  expensesApi, assetsApi, jobsApi, authApi, geofenceApi, faceApi, usersApi,
+  expensesApi, assetsApi, jobsApi, authApi, geofenceApi, faceApi, usersApi, rolesApi, masterCategoriesApi, masterValuesApi, auditLogsApi, notificationsApi, documentsApi, resignationsApi, attendanceCorrectionsApi,
 } from '../data/store';
 import { setAccessToken } from '../lib/apiClient';
 import { getDeviceId } from '../lib/deviceId';
-import { uid, daysBetween, todayISO } from '../lib/helpers';
+import { uid, daysBetween, todayISO, DEPARTMENTS as fallbackDepts, LOCATIONS as fallbackLocs, LEAVE_TYPES as fallbackLeaves } from '../lib/helpers';
 import { resolveShiftForToday, isLate as isLateForShift } from '../lib/shifts';
+import {
+  canAccess as fallbackCanAccess,
+  canDo as fallbackCanDo,
+} from '../lib/permissions';
 
-// Settings fields the server is authoritative for — everything else in
-// "settings" stays local (see updateSettings below and data/store.js).
-const SERVER_SETTINGS_KEYS = [
-  'gpsCheckInEnabled', 'geofenceLat', 'geofenceLng', 'geofenceRadius',
-  'shifts', 'roster', 'employeeShifts', 'approvalWorkflows',
-];
 
 const HRMSContext = createContext(null);
-const AUDIT_KEY = 'Smaatech_hrms_audit_log';
-
-const loadAuditLog = () => {
-  try {
-    return JSON.parse(localStorage.getItem(AUDIT_KEY) || '[]');
-  } catch {
-    return [];
-  }
-};
 
 export const useHRMS = () => {
   const ctx = useContext(HRMSContext);
@@ -54,6 +45,12 @@ export function HRMSProvider({ children }) {
   const [expenses, setExpenses] = useState([]);
   const [assets, setAssets] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [resignations, setResignations] = useState([]);
+  const [attendanceCorrections, setAttendanceCorrections] = useState([]);
+  const [masterCategories, setMasterCategories] = useState([]);
+  const [masterValues, setMasterValues] = useState([]);
   const [settings, setSettings] = useState({});
   // Real login accounts (HR Director only) — lazily loaded from the Settings
   // page, not part of hydrate()/loadAll() (see usersApi in data/store.js).
@@ -65,10 +62,12 @@ export function HRMSProvider({ children }) {
     initials: authUser.initials,
     empId: authUser.employeeId || null,
   } : { name: '', role: '', initials: '' }), [authUser]);
-  const [auditLog, setAuditLog] = useState(loadAuditLog);
+  const [auditLog, setAuditLog] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [lastSyncedAt, setLastSyncedAt] = useState(() => Date.now());
 
   const [toasts, setToasts] = useState([]);
+
   const [search, setSearch] = useState('');
 
   // ── Toasts ─────────────────────────────────────────────────
@@ -76,30 +75,35 @@ export function HRMSProvider({ children }) {
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
-  const toast = useCallback((type, msg, duration = 3200) => {
-    const id = uid('toast');
-    setToasts((t) => [...t, { id, type, msg }]);
-    setTimeout(() => dismissToast(id), duration);
-    return id;
-  }, [dismissToast]);
+  const toast = useCallback((type, msg) => {
+    const plain = String(msg).replace(/<\/?strong>/g, '');
+    if (type === 'success') reactToast.success(plain);
+    else if (type === 'error') reactToast.error(plain);
+    else if (type === 'info') reactToast.info(plain);
+    else reactToast(plain);
+  }, []);
 
-  const audit = useCallback((action, subject, details = '') => {
-    const entry = {
-      id: uid('audit'),
-      action,
-      subject,
-      details,
-      actor: currentUser?.name || 'System',
-      role: currentUser?.role || '',
-      at: new Date().toISOString(),
-    };
-    setAuditLog((list) => {
-      const next = [entry, ...list].slice(0, 80);
-      localStorage.setItem(AUDIT_KEY, JSON.stringify(next));
-      return next;
-    });
-    return entry;
-  }, [currentUser?.name, currentUser?.role]);
+
+  const audit = useCallback(async (action, subject, details = '') => {
+    try {
+      const created = await auditLogsApi.create({ action, subject, details });
+      setAuditLog((list) => [created, ...list].slice(0, 100));
+      return created;
+    } catch (err) {
+      console.warn('[Audit Log Client Warning] Failed to log action to backend:', err);
+      const entry = {
+        id: uid('audit'),
+        action,
+        subject,
+        details,
+        actor: currentUser?.name || 'System',
+        role: currentUser?.role || '',
+        at: new Date().toISOString(),
+      };
+      setAuditLog((list) => [entry, ...list].slice(0, 100));
+      return entry;
+    }
+  }, [currentUser]);
 
   // ── Initial load ───────────────────────────────────────────
   const hydrate = useCallback((all) => {
@@ -114,6 +118,14 @@ export function HRMSProvider({ children }) {
     setExpenses(all.expenses || []);
     setAssets(all.assets || []);
     setJobs(all.jobs || []);
+    setRoles(all.roles || []);
+    setMasterCategories(all.masterCategories || []);
+    setMasterValues(all.masterValues || []);
+    setAuditLog(all.auditLogs || []);
+    setNotifications(all.notifications || []);
+    setDocuments(all.documents || []);
+    setResignations(all.resignations || []);
+    setAttendanceCorrections(all.attendanceCorrections || []);
     setSettings(all.settings);
     setLastSyncedAt(Date.now());
   }, []);
@@ -164,12 +176,36 @@ export function HRMSProvider({ children }) {
     setAuthUser(null);
     setEmployees([]);
     setAttendance([]);
+    setRoles([]);
+    setMasterCategories([]);
+    setMasterValues([]);
+    setAuditLog([]);
+    setNotifications([]);
     setFaceEnrolled(false);
     toast('info', 'Signed out');
   }, [toast]);
 
   const forgotPassword = useCallback((email) => authApi.forgotPassword(email), []);
   const resetPassword = useCallback((email, otp, newPassword) => authApi.resetPassword(email, otp, newPassword), []);
+
+  const markNotificationRead = useCallback(async (id) => {
+    try {
+      const updated = await notificationsApi.markRead(id);
+      setNotifications((prev) => prev.map((n) => (n.id === id ? updated : n)));
+    } catch (err) {
+      toast('error', 'Failed to mark notification as read');
+    }
+  }, [toast]);
+
+  const markAllNotificationsRead = useCallback(async () => {
+    try {
+      await notificationsApi.readAll();
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      toast('success', 'All notifications marked as read');
+    } catch (err) {
+      toast('error', 'Failed to mark all as read');
+    }
+  }, [toast]);
 
   useEffect(() => {
     let alive = true;
@@ -324,6 +360,43 @@ export function HRMSProvider({ children }) {
     toast('success', `Imported <strong>${count}</strong> employee${count === 1 ? '' : 's'}`);
     return count;
   };
+
+  const importAssets = async (rows) => {
+    let count = 0;
+    for (const row of rows) {
+      // eslint-disable-next-line no-await-in-loop
+      await addAsset(row);
+      count += 1;
+    }
+    audit('Assets imported', `${count} rows`, 'CSV import');
+    toast('success', `Imported <strong>${count}</strong> asset${count === 1 ? '' : 's'}`);
+    return count;
+  };
+
+  const importHolidays = async (rows) => {
+    let count = 0;
+    for (const row of rows) {
+      // eslint-disable-next-line no-await-in-loop
+      await addHoliday(row);
+      count += 1;
+    }
+    audit('Holidays imported', `${count} rows`, 'CSV import');
+    toast('success', `Imported <strong>${count}</strong> holiday${count === 1 ? '' : 's'}`);
+    return count;
+  };
+
+  const importJobs = async (rows) => {
+    let count = 0;
+    for (const row of rows) {
+      // eslint-disable-next-line no-await-in-loop
+      await addJob(row);
+      count += 1;
+    }
+    audit('Jobs imported', `${count} rows`, 'CSV import');
+    toast('success', `Imported <strong>${count}</strong> job opening${count === 1 ? '' : 's'}`);
+    return count;
+  };
+
 
   // ════════════════════════════════════════════════════════════
   //  USERS — real login accounts (HR Director only)
@@ -772,6 +845,108 @@ export function HRMSProvider({ children }) {
     return updated;
   };
 
+  // ── Documents ──────────────────────────────────────────────
+  const addDocument = async (formData) => {
+    const created = await documentsApi.create(formData);
+    setDocuments((list) => [created, ...list]);
+    audit('Document uploaded', created.title, created.owner);
+    toast('success', `Document <strong>${created.title}</strong> uploaded successfully.`);
+    return created;
+  };
+
+  const updateDocument = async (id, formData) => {
+    const updated = await documentsApi.update(id, formData);
+    setDocuments((list) => list.map((d) => (d.id === id ? updated : d)));
+    audit('Document updated', updated.title, updated.owner);
+    toast('success', `Document <strong>${updated.title}</strong> updated.`);
+    return updated;
+  };
+
+  const deleteDocument = async (id) => {
+    await documentsApi.remove(id);
+    setDocuments((list) => list.filter((d) => d.id !== id));
+    audit('Document deleted', id);
+    toast('info', 'Document deleted.');
+  };
+
+  const downloadDocument = async (id) => {
+    return documentsApi.download(id);
+  };
+
+  // ── Resignations & clearances ──────────────────────────────
+  const addResignation = async (data) => {
+    const created = await resignationsApi.create(data);
+    setResignations((list) => [created, ...list]);
+    audit('Resignation filed', created.employeeName, created.resignationDate);
+    toast('success', `Resignation filed successfully.`);
+    return created;
+  };
+
+  const signOffClearance = async (id, clearance) => {
+    const updated = await resignationsApi.signOffClearance(id, clearance);
+    setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
+    audit(`Clearance sign-off (${clearance.dept})`, updated.employeeName, clearance.status);
+    toast('success', `${clearance.dept} clearance status updated to ${clearance.status}.`);
+    return updated;
+  };
+
+  const processFnF = async (id, fnf) => {
+    const updated = await resignationsApi.processFnF(id, fnf);
+    setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
+    audit('FnF Settlement processed', updated.employeeName, `Payout: ₹${updated.fnfSettlement.netPayout}`);
+    toast('success', `FnF Settlement calculations processed.`);
+    return updated;
+  };
+
+  const payFnF = async (id) => {
+    const updated = await resignationsApi.payFnF(id);
+    setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
+    
+    const empList = await employeesApi.list();
+    setEmployees(empList);
+
+    audit('FnF Paid & Employee Terminated', updated.employeeName, 'Payout finalized');
+    toast('success', `Full & Final payout processed. Employee marked Exited.`);
+    return updated;
+  };
+
+  const updateResignationStatus = async (id, patch) => {
+    const updated = await resignationsApi.update(id, patch);
+    setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
+    audit('Resignation status updated', updated.employeeName, updated.status);
+    toast('info', `Resignation status updated to ${updated.status}.`);
+    return updated;
+  };
+
+  // ── Attendance Corrections ─────────────────────────────────
+  const requestCorrection = async (data) => {
+    const created = await attendanceCorrectionsApi.create(data);
+    setAttendanceCorrections((list) => [created, ...list]);
+    audit('Attendance correction requested', created.employeeName, created.date);
+    toast('success', `Attendance correction requested successfully.`);
+    return created;
+  };
+
+  const approveCorrection = async (id) => {
+    const updated = await attendanceCorrectionsApi.approve(id);
+    setAttendanceCorrections((list) => list.map((c) => (c.id === id ? updated : c)));
+    
+    const attList = await attendanceApi.list();
+    setAttendance(attList);
+
+    audit('Attendance correction approved', updated.employeeName, updated.date);
+    toast('success', `Correction approved. Attendance marked present.`);
+    return updated;
+  };
+
+  const rejectCorrection = async (id) => {
+    const updated = await attendanceCorrectionsApi.reject(id);
+    setAttendanceCorrections((list) => list.map((c) => (c.id === id ? updated : c)));
+    audit('Attendance correction rejected', updated.employeeName, updated.date);
+    toast('info', `Correction request rejected.`);
+    return updated;
+  };
+
   // ════════════════════════════════════════════════════════════
   //  SETTINGS
   // ════════════════════════════════════════════════════════════
@@ -779,19 +954,7 @@ export function HRMSProvider({ children }) {
   // client write for values attendance verification or approval routing
   // depend on) — everything else in "settings" stays local, same as before.
   const updateSettings = async (patch, notify = true) => {
-    const localPatch = {};
-    const serverPatch = {};
-    for (const [key, value] of Object.entries(patch)) {
-      (SERVER_SETTINGS_KEYS.includes(key) ? serverPatch : localPatch)[key] = value;
-    }
-    let merged = settings;
-    if (Object.keys(localPatch).length) {
-      merged = await settingsApi.update(localPatch);
-    }
-    if (Object.keys(serverPatch).length) {
-      const geo = await geofenceApi.update(serverPatch);
-      merged = { ...merged, ...geo };
-    }
+    const merged = await settingsApi.update(patch);
     setSettings(merged);
     if (notify) toast('success', 'Settings <strong>saved</strong>');
     return merged;
@@ -802,12 +965,79 @@ export function HRMSProvider({ children }) {
   const resetDatabase = async () => {
     setLoading(true);
     const all = await resetDB();
-    localStorage.removeItem(AUDIT_KEY);
     setAuditLog([]);
     hydrate(all);
     setLoading(false);
-    toast('info', 'Local demo data reset to defaults (employees/attendance on the server are unaffected)');
+    toast('info', 'Database settings reset to defaults.');
   };
+
+  const contextCanAccess = useCallback((path) => {
+    const role = currentUser.role;
+    if (!role) return false;
+    if (role === 'HR Director') return true;
+    const roleDef = roles.find((r) => r.name === role);
+    if (roleDef) {
+      if (roleDef.allowedPaths.includes('*')) return true;
+      return roleDef.allowedPaths.includes(path);
+    }
+    return fallbackCanAccess(role, path);
+  }, [currentUser.role, roles]);
+
+  const contextCanDo = useCallback((action) => {
+    const role = currentUser.role;
+    if (!role) return false;
+    if (role === 'HR Director') return true;
+    const roleDef = roles.find((r) => r.name === role);
+    if (roleDef) {
+      return roleDef.allowedActions.includes(action);
+    }
+    return fallbackCanDo(role, action);
+  }, [currentUser.role, roles]);
+
+  const addRole = async (data) => {
+    const created = await rolesApi.create(data);
+    setRoles((list) => [...list, created]);
+    audit('Role created', created.name, created.description);
+    toast('success', `Role <strong>${created.name}</strong> created.`);
+    return created;
+  };
+
+  const updateRole = async (id, patch) => {
+    const updated = await rolesApi.update(id, patch);
+    setRoles((list) => list.map((r) => (r.id === id ? updated : r)));
+    audit('Role updated', updated.name, updated.description);
+    toast('success', `Role <strong>${updated.name}</strong> updated.`);
+    return updated;
+  };
+
+  const deleteRole = async (id) => {
+    const roleDef = roles.find((r) => r.id === id);
+    await rolesApi.remove(id);
+    setRoles((list) => list.filter((r) => r.id !== id));
+    audit('Role deleted', roleDef ? roleDef.name : id);
+    toast('info', `Role deleted.`);
+  };
+
+  const getMasterValues = useCallback((code) => {
+    const category = masterCategories.find((c) => c.code === code);
+    if (!category) {
+      if (code === 'locations') return fallbackLocs;
+      if (code === 'departments') return fallbackDepts;
+      if (code === 'leave_types') return fallbackLeaves.map((l) => l.value);
+      if (code === 'document_types') return ['PDF', 'DOC', 'IMG', 'XLS'];
+      return [];
+    }
+    const vals = masterValues
+      .filter((v) => v.categoryId === category.id && v.active !== false)
+      .map((v) => v.value);
+    if (vals.length === 0) {
+      if (code === 'locations') return fallbackLocs;
+      if (code === 'departments') return fallbackDepts;
+      if (code === 'leave_types') return fallbackLeaves.map((l) => l.value);
+      if (code === 'document_types') return ['PDF', 'DOC', 'IMG', 'XLS'];
+    }
+    return vals;
+  }, [masterCategories, masterValues]);
 
   // ── Derived helpers exposed for convenience ─────────────────
   const pendingLeaves = leaves.filter((l) => l.status === 'pending');
@@ -818,12 +1048,20 @@ export function HRMSProvider({ children }) {
     employees, leaves, attendance, payroll,
     celebrations, holidays, recruitment, reviews, settings, currentUser, auditLog, audit,
     pendingLeaves,
-    expenses, assets, jobs,
+    expenses, assets, jobs, roles, masterCategories, masterValues, documents, resignations, attendanceCorrections,
+    addDocument, updateDocument, deleteDocument, downloadDocument,
+    addResignation, signOffClearance, processFnF, payFnF, updateResignationStatus,
+    requestCorrection, approveCorrection, rejectCorrection,
+    getMasterValues,
+    canAccess: contextCanAccess,
+    canDo: contextCanDo,
+    addRole, updateRole, deleteRole,
     addExpense, updateExpenseStatus,
-    addAsset, assignAsset, returnAsset,
-    addJob, updateJobStatus,
+    addAsset, assignAsset, returnAsset, importAssets,
+    addJob, updateJobStatus, importJobs,
     // employees
     addEmployee, updateEmployee, deleteEmployee, importEmployees,
+    importHolidays,
     // users (real login accounts, HR Director only)
     users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount,
     // leave
@@ -847,6 +1085,7 @@ export function HRMSProvider({ children }) {
     // ui
     toast, toasts, dismissToast,
     search, setSearch,
+    notifications, markNotificationRead, markAllNotificationsRead,
   };
 
   return <HRMSContext.Provider value={value}>{children}</HRMSContext.Provider>;

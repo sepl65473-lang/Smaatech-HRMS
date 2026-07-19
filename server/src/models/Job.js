@@ -7,6 +7,7 @@ const jobSchema = new mongoose.Schema({
   type: String, // Full-time | Part-time | Contract | Internship
   status: { type: String, default: 'Open' }, // Open | Closed
   description: { type: String, default: '' },
+  company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
 jobSchema.set('toJSON', {

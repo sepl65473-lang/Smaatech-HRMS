@@ -8,6 +8,8 @@ import {
   refreshCookieOptions, REFRESH_TOKEN_TTL_MS, REFRESH_COOKIE_NAME,
 } from '../lib/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
+import { validate } from '../middleware/validation.js';
+import { loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validations/authValidation.js';
 import { sendOtpEmail } from '../lib/mailer.js';
 
 const router = Router();
@@ -40,7 +42,7 @@ async function issueSession(res, user, req) {
   return accessToken;
 }
 
-router.post('/login', async (req, res) => {
+router.post('/login', validate(loginSchema), async (req, res) => {
   const { email, password } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   const valid = user && await bcrypt.compare(password || '', user.passwordHash);
@@ -123,7 +125,7 @@ router.get('/me', requireAuth, async (req, res) => {
 // old flow where the client just self-certified an email address with no
 // verification at all. The code itself is never returned in the response;
 // it only ever reaches the user via their inbox.
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', validate(forgotPasswordSchema), async (req, res) => {
   const { email } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   // Same response whether or not the account exists, so this can't be used
@@ -147,11 +149,8 @@ router.post('/forgot-password', async (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/reset-password', async (req, res) => {
+router.post('/reset-password', validate(resetPasswordSchema), async (req, res) => {
   const { email, otp, newPassword } = req.body || {};
-  if (!newPassword || newPassword.length < 6) {
-    return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: 'Password must be at least 6 characters.' } });
-  }
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   if (!user || !user.otpHash || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
     return res.status(400).json({ error: { code: 'INVALID_OTP', message: 'Code expired or not requested — request a new one.' } });
@@ -169,3 +168,4 @@ router.post('/reset-password', async (req, res) => {
 });
 
 export default router;
+

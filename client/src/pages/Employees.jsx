@@ -5,6 +5,7 @@ import Avatar from '../components/Avatar';
 import EmployeeForm from '../components/EmployeeForm';
 import ConfirmDialog from '../components/ConfirmDialog';
 import CsvImportModal from '../components/CsvImportModal';
+import { downloadCSV } from '../lib/csv';
 import {
   IconEdit, IconTrash, IconPlus, IconWorkforce, IconPresent, IconLeave, IconAnalytics,
 } from '../components/Icons';
@@ -27,6 +28,26 @@ export default function Employees() {
   const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
+
+  const handleExportCsv = () => {
+    const dataToExport = employees.map((e) => {
+      const manager = employees.find((m) => m.id === e.managerId);
+      return {
+        ...e,
+        managerName: manager ? manager.name : '',
+      };
+    });
+    const keys = [
+      'name', 'role', 'dept', 'loc', 'email', 'phone', 'status', 'joinDate',
+      'salary', 'bankAccount', 'ifsc', 'managerName', 'employmentType'
+    ];
+    const labels = [
+      'Name', 'Role', 'Department', 'Location', 'Email', 'Phone', 'Status', 'Join Date',
+      'Salary', 'Bank Account', 'IFSC', 'Manager Name', 'Employment Type'
+    ];
+    downloadCSV(dataToExport, keys, 'employees.csv', labels);
+    toast('success', 'Employees list exported successfully');
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -114,6 +135,7 @@ export default function Employees() {
             <div className="card-sub">{filtered.length} of {employees.length} shown</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={handleExportCsv}>Export CSV</button>
             <button className="btn btn-ghost" onClick={() => setImportOpen(true)}>Import CSV</button>
             <button className="btn" onClick={openAdd}><IconPlus width="14" height="14" /> Add employee</button>
           </div>

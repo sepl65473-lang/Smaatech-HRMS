@@ -2,10 +2,10 @@ const ROLE_ACCESS = {
   'HR Director': ['*'],
   'HR Manager': [
     '/', '/employees', '/org-chart', '/attendance', '/leave', '/holidays', '/celebrations',
-    '/recruitment', '/performance', '/analytics', '/integrations', '/expenses', '/assets', '/workflows'
+    '/recruitment', '/performance', '/analytics', '/integrations', '/expenses', '/assets', '/workflows', '/resignations'
   ],
-  'Finance Lead': ['/', '/payroll', '/documents', '/analytics', '/integrations', '/expenses', '/assets'],
-  'Employee': ['/', '/ess', '/holidays', '/org-chart', '/documents', '/expenses'],
+  'Finance Lead': ['/', '/payroll', '/documents', '/analytics', '/integrations', '/expenses', '/assets', '/resignations'],
+  'Employee': ['/', '/ess', '/holidays', '/org-chart', '/documents', '/expenses', '/resignations'],
 };
 
 export const ROLES = Object.keys(ROLE_ACCESS);

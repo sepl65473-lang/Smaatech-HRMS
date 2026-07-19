@@ -1,27 +1,69 @@
 import mongoose from 'mongoose';
 
-// Singleton document (one row, fixed _id) holding the settings the server
-// must be authoritative for. Everything else in the app's "settings" object
-// stays client-side in localStorage for now (see src/data/store.js) — this
-// collection only owns the fields attendance verification depends on.
+// Holds settings that are fully database-backed per company.
 const settingsSchema = new mongoose.Schema({
-  _id: { type: String, default: 'singleton' },
+  _id: { type: String, default: 'singleton' }, // company name
   gpsCheckInEnabled: { type: Boolean, default: false },
   geofenceLat: { type: Number, default: 19.0760 },
   geofenceLng: { type: Number, default: 72.8777 },
   geofenceRadius: { type: Number, default: 25 },
-  // Shift definitions + assignments — kept in lock-step with the client so the
-  // server's late/present calculation (src/lib/shifts.js on the frontend,
-  // ported to server/src/lib/shifts.js) matches whatever HR actually configured
-  // in Settings > Roster, instead of silently falling back to defaults.
   shifts: { type: mongoose.Schema.Types.Mixed, default: undefined },
   roster: { type: mongoose.Schema.Types.Mixed, default: undefined },
   employeeShifts: { type: mongoose.Schema.Types.Mixed, default: undefined },
-  // Ordered role sequence each leave/expense request must clear before it's
-  // fully approved (see routes/leave.js, routes/expenses.js) — configured
-  // from Settings > Workflows. Authoritative here so the server can actually
-  // enforce it, not just display it.
-  approvalWorkflows: { type: mongoose.Schema.Types.Mixed, default: undefined },
+  
+  orgName: { type: String, default: 'Smaatech' },
+  workWeek: { type: String, default: '5-day' },
+  notifyLeave: { type: Boolean, default: true },
+  notifyPayroll: { type: Boolean, default: true },
+  notifyBirthday: { type: Boolean, default: false },
+  twoFactor: { type: Boolean, default: true },
+  wishesSent: { type: Number, default: 0 },
+  totalLeaveDays: { type: Number, default: 24 },
+  departments: { type: [String], default: [] },
+  designations: { type: [String], default: [] },
+  
+  gatewayTwilioSid: { type: String, default: '' },
+  gatewayTwilioToken: { type: String, default: '' },
+  gatewayTwilioFrom: { type: String, default: '' },
+  gatewaySendgridKey: { type: String, default: '' },
+  gatewaySmtpHost: { type: String, default: '' },
+  gatewaySmtpUser: { type: String, default: '' },
+  gatewaySmtpPass: { type: String, default: '' },
+  
+  notificationTemplates: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({
+      email: {
+        leaveApproval: 'Subject: Leave Approval Notification\n\nDear {employee},\n\nWe are pleased to inform you that your leave request for the period {date} has been approved.\n\nBest regards,\nPeople Operations Team',
+        payrollSlip: 'Subject: Monthly Salary Slip Published\n\nDear {employee},\n\nYour salary slip for {date} is now available in your ESS dashboard portal.\n\nBest regards,\nFinance Team'
+      },
+      sms: {
+        leaveApproval: 'Dear {employee}, your leave request for {date} has been approved by Operations. Smaatech',
+        payrollSlip: 'Dear {employee}, your payslip for {date} has been processed. Log in to ESS portal to view details. Smaatech'
+      },
+      whatsapp: {
+        leaveApproval: 'Hello *{employee}*,\n\nYour leave request for *{date}* has been *approved* by your supervisor. ✅\n\nRegards,\nHR Operations',
+        payrollSlip: 'Hello *{employee}*,\n\nYour salary slip for *{date}* is ready. You can view or download it under your ESS dashboard. 📊'
+      }
+    })
+  },
+  
+  notifyChannels: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({
+      leave: ['In-app'],
+      payroll: ['In-app'],
+      birthday: ['In-app']
+    })
+  },
+  
+  approvalWorkflows: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({
+      leave: ['HR Manager', 'HR Director'],
+      expense: ['Finance Lead', 'HR Director']
+    })
+  }
 });
 
 settingsSchema.set('toJSON', {

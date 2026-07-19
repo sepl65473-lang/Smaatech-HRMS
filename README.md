@@ -6,7 +6,7 @@ Production HRMS dashboard. Two workspaces: **`client/`** (React + Vite frontend)
 
 ## 🔑 Demo login accounts (local dev only)
 
-`npm run seed:server` creates 4 demo accounts (HR Director, HR Manager, Finance Lead, Employee) so you have something to log in with on a fresh local database — see `server/src/seed.js` for their exact emails/passwords rather than duplicating them here.
+`npm run seed:server` creates 4 demo accounts (HR Director, HR Manager, Finance Lead, Employee) so you have something to log in with on a fresh local database. Passwords are **not** in the source code — they're read from your `server/.env` file (`SEED_ADMIN_PASS`, `SEED_HR_PASS`, `SEED_FINANCE_PASS`, `SEED_EMPLOYEE_PASS`). Default suggestions are in `server/.env.example`.
 
 > **These are dev-only placeholder credentials, not a real login system.** Don't rely on them past initial setup: create your own account (below) and deactivate or delete the seed accounts from **Settings → Users & role access** once you have one. Re-running the seed script also **wipes and recreates** the demo employee roster — don't run it against a database with real data you want to keep.
 
@@ -15,7 +15,7 @@ Production HRMS dashboard. Two workspaces: **`client/`** (React + Vite frontend)
 1. Sign in once with the seeded HR Director demo account (just to get in the door).
 2. Go to **Settings → Users & role access → Add user**. Enter your own name, a real email you control, a strong password, and the role you want (HR Director for full access).
 3. Sign out and sign back in with that new account to confirm it works.
-4. Go back to **Settings → Users & role access**, open each of the 4 seed accounts, and either toggle them **inactive** or delete them — this is the step that actually matters if this repo or the deployed app is ever made public, since `server/src/seed.js` (source code) has the demo passwords in plain text regardless of whether they're written here in the README.
+4. Go back to **Settings → Users & role access**, open each of the 4 seed accounts, and either toggle them **inactive** or delete them.
 
 ---
 
@@ -26,7 +26,7 @@ npm install                  # root orchestrator deps (concurrently)
 npm --prefix client install  # frontend deps
 npm --prefix server install  # backend deps
 
-cp server/.env.example server/.env   # fill in MONGODB_URI, JWT secrets, SMTP creds
+cp server/.env.example server/.env   # fill in MONGODB_URI, JWT secrets, SMTP creds, seed passwords
 npm run seed:server                  # first time only — creates the demo accounts above
 
 npm run dev                  # client (http://localhost:5173) + server (http://localhost:4000)
@@ -54,7 +54,7 @@ server/                     # Express + Mongoose, MongoDB Atlas
 public/models/               # face-api.js model weights (shared by client UX + server verification)
 ```
 
-Employees, attendance, leave, payroll, recruitment, reviews, expenses, assets, jobs, holidays and celebrations all live in MongoDB via the server's REST API. Only org-level `Settings` (branding, notification templates, login-profile face descriptors) still persists client-side in `localStorage`.
+Employees, attendance, leave, payroll, recruitment, reviews, expenses, assets, jobs, holidays, celebrations, settings, documents, resignations, and corrections all live in MongoDB via the server's REST API. No application settings persist client-side in `localStorage`.
 
 Auth: password (or face) login returns a short-lived JWT access token (kept in memory only) plus an httpOnly refresh cookie; `apiClient.js` retries once via `/auth/refresh` on a 401.
 
@@ -90,17 +90,19 @@ The server needs a persistent Node process (it loads face-api.js/TensorFlow mode
 
 ## ✨ Features
 
-| Module | CRUD operations |
+| Module | CRUD operations / Workflows |
 |---|---|
-| **Employees** | Add / Edit / Delete + search + department filter (full validation) |
-| **Attendance** | Check-in / Check-out with geofence + face verification, late detection |
+| **Employees** | Add / Edit / Delete + search + department filter + skills & documents (full validation) |
+| **Attendance** | Check-in / Check-out with geofence + face verification, late detection, and **Attendance Corrections** request & approval workflow |
 | **Leave** | New request, Approve / Decline, delete history, status filters |
 | **Payroll** | Process payroll, mark as paid, auto gross/deduction/net calc |
 | **Celebrations** | Send wishes, birthday/anniversary detection from real employee data |
 | **Recruitment** | Kanban — candidate add/delete, stage move (Applied → Hired) |
 | **Performance** | Reviews + ratings, auto-sorted leaderboard |
 | **Expenses / Assets / Jobs** | Full CRUD, status workflows |
-| **Settings** | Org config, users & role access, geofence/shift config, notification toggles |
+| **Documents** | Document library + **Document Expiry Alerts** (email warnings) & secure stream downloads |
+| **Exit & Clearance** | **Resignation filings**, multi-department clearances (IT, Finance, HR, Admin), and Full & Final settlement calculations with automated employee exit deactivation |
+| **Settings** | Org config, users & role access, geofence/shift config, notification templates (stored on server MongoDB) |
 | **Dashboard** | Live stats from real data, attendance chart, quick actions |
 
 ---

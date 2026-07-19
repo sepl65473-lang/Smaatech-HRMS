@@ -32,6 +32,7 @@ export default function Topbar({ onMenu, onAddEmployee }) {
   const {
     currentUser, search, setSearch, toast, settings, logout,
     employees, pendingLeaves, payroll, celebrations, recruitment,
+    notifications, markNotificationRead, markAllNotificationsRead,
   } = useHRMS();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -44,32 +45,9 @@ export default function Topbar({ onMenu, onAddEmployee }) {
   const entry = TITLES[pathname]
     || (pathname.startsWith('/employees/') ? ['Employee profile', 'Full record'] : undefined);
   const isHome = pathname === '/';
-  const leaveAlertsOn = settings.notifyLeave !== false;
-  const payrollAlertsOn = settings.notifyPayroll !== false;
-  const birthdayAlertsOn = settings.notifyBirthday !== false;
-  const pendingPayroll = payrollAlertsOn ? payroll.filter((p) => p.status === 'ready').length : 0;
-  const unwished = birthdayAlertsOn ? celebrations.filter((c) => !c.wished).length : 0;
-  const notificationCount = (leaveAlertsOn ? pendingLeaves.length : 0) + pendingPayroll + unwished;
-  const notifications = useMemo(() => [
-    ...(leaveAlertsOn ? pendingLeaves.slice(0, 4).map((l) => ({
-      id: `leave-${l.id}`,
-      title: `${l.name} leave approval`,
-      meta: `${l.dept} - ${l.start} to ${l.end}`,
-      to: '/leave',
-    })) : []),
-    ...(payrollAlertsOn ? payroll.filter((p) => p.status === 'ready').slice(0, 4).map((p) => ({
-      id: `payroll-${p.id}`,
-      title: `${p.name} salary ready`,
-      meta: `${p.cycle} - ${formatINR(p.net)}`,
-      to: '/payroll',
-    })) : []),
-    ...(birthdayAlertsOn ? celebrations.filter((c) => !c.wished).slice(0, 4).map((c) => ({
-      id: `celebration-${c.id}`,
-      title: `${c.name} ${c.type === 'birthday' ? 'birthday' : 'anniversary'}`,
-      meta: c.detail,
-      to: '/celebrations',
-    })) : []),
-  ].slice(0, 8), [pendingLeaves, payroll, celebrations, leaveAlertsOn, payrollAlertsOn, birthdayAlertsOn]);
+  
+  const unreadNotifications = useMemo(() => (notifications || []).filter((n) => !n.read), [notifications]);
+  const notificationCount = unreadNotifications.length;
 
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -132,8 +110,8 @@ export default function Topbar({ onMenu, onAddEmployee }) {
   }, []);
 
   const showNotifications = () => {
-    if (!notificationCount) {
-      toast('info', 'No new notifications');
+    if (!notifications?.length) {
+      toast('info', 'No notifications yet');
       return;
     }
     setNotificationsOpen((open) => !open);
@@ -214,22 +192,43 @@ export default function Topbar({ onMenu, onAddEmployee }) {
         </button>
         {notificationsOpen && (
           <div className="topbar-popover notification-popover">
-            <div className="popover-head">
-              <strong>{notificationCount}</strong> needs attention
+            <div className="popover-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span><strong>{notificationCount}</strong> unread</span>
+              {notificationCount > 0 && (
+                <button
+                  className="btn-link"
+                  style={{ fontSize: '11px', color: 'var(--primary-color)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    markAllNotificationsRead();
+                  }}
+                >
+                  Mark all read
+                </button>
+              )}
             </div>
-            {notifications.map((item) => (
-              <button
-                key={item.id}
-                className="popover-row"
-                onClick={() => {
-                  navigate(item.to);
-                  setNotificationsOpen(false);
-                }}
-              >
-                <span className="popover-title">{item.title}</span>
-                <span className="popover-meta">{item.meta}</span>
-              </button>
-            ))}
+            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+              {(notifications || []).map((item) => (
+                <button
+                  key={item.id}
+                  className="popover-row"
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', borderLeft: item.read ? 'none' : '3px solid var(--primary-color)', paddingLeft: item.read ? '12px' : '9px', opacity: item.read ? 0.7 : 1 }}
+                  onClick={async () => {
+                    if (!item.read) {
+                      await markNotificationRead(item.id);
+                    }
+                    if (item.actionUrl) {
+                      navigate(item.actionUrl);
+                    }
+                    setNotificationsOpen(false);
+                  }}
+                >
+                  <span className="popover-title" style={{ fontWeight: item.read ? 'normal' : '600' }}>{item.title}</span>
+                  <span className="popover-meta">{item.message}</span>
+                  <span style={{ fontSize: '9px', opacity: 0.5, marginTop: '2px' }}>{new Date(item.createdAt).toLocaleDateString()}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
         </div>
