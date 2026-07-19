@@ -74,7 +74,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 
 // Update document details
 router.patch('/:id', upload.single('file'), async (req, res) => {
-  const before = await Document.findById(req.params.id);
+  const before = await Document.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
 
   const isHR = ['HR Director', 'HR Manager'].includes(req.auth.role);
@@ -111,7 +111,7 @@ router.patch('/:id', upload.single('file'), async (req, res) => {
 
 // Delete document record
 router.delete('/:id', async (req, res) => {
-  const before = await Document.findById(req.params.id);
+  const before = await Document.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
 
   const isHR = ['HR Director', 'HR Manager'].includes(req.auth.role);
@@ -136,7 +136,7 @@ router.delete('/:id', async (req, res) => {
 
 // Download/Stream document file
 router.get('/:id/download', async (req, res) => {
-  const doc = await Document.findById(req.params.id);
+  const doc = await Document.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
 
   // Access checks

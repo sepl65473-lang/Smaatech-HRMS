@@ -38,7 +38,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Attendance.findById(req.params.id);
+  const row = await Attendance.findOne({ _id: req.params.id, ...companyFilter(req) });
   res.json(row || null);
 });
 
@@ -52,13 +52,14 @@ router.post('/', requireRole('HR Manager'), async (req, res) => {
 });
 
 router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
-  const updated = await Attendance.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
+  const updated = await Attendance.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, req.body || {}, { new: true });
   if (!updated) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attendance row not found.' } });
   res.json(updated);
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
-  await Attendance.findByIdAndDelete(req.params.id);
+  const deleted = await Attendance.findOneAndDelete({ _id: req.params.id, ...companyFilter(req) });
+  if (!deleted) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attendance row not found.' } });
   res.json({ id: req.params.id });
 });
 
@@ -91,7 +92,7 @@ function faceFailureMessage(code) {
 // can lie about a "faceVerified" flag, but not about what this server's own
 // model sees in the photo it uploaded.
 async function handlePunch(req, res, direction) {
-  const row = await Attendance.findById(req.params.id);
+  const row = await Attendance.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attendance row not found.' } });
 
   const isAdmin = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';

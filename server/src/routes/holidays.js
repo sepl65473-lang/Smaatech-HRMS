@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Holiday.findById(req.params.id);
+  const row = await Holiday.findOne({ _id: req.params.id, ...companyFilter(req) });
   res.json(row || null);
 });
 
@@ -22,13 +22,13 @@ router.post('/', requireRole('HR Manager'), async (req, res) => {
 });
 
 router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
-  const updated = await Holiday.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
+  const updated = await Holiday.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, req.body || {}, { new: true });
   if (!updated) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Holiday not found.' } });
   res.json(updated);
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
-  await Holiday.findByIdAndDelete(req.params.id);
+  await Holiday.findOneAndDelete({ _id: req.params.id, ...companyFilter(req) });
   res.json({ id: req.params.id });
 });
 

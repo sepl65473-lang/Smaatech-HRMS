@@ -72,7 +72,7 @@ router.post('/', async (req, res) => {
 
 // Approve correction request
 router.post('/:id/approve', requireRole('HR Manager'), async (req, res) => {
-  const correction = await AttendanceCorrection.findById(req.params.id);
+  const correction = await AttendanceCorrection.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!correction) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Correction request not found.' } });
   }
@@ -135,7 +135,7 @@ router.post('/:id/approve', requireRole('HR Manager'), async (req, res) => {
 
 // Reject correction request
 router.post('/:id/reject', requireRole('HR Manager'), async (req, res) => {
-  const correction = await AttendanceCorrection.findById(req.params.id);
+  const correction = await AttendanceCorrection.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!correction) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Correction request not found.' } });
   }

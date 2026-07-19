@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Leave.findById(req.params.id);
+  const row = await Leave.findOne({ _id: req.params.id, ...companyFilter(req) });
   res.json(row || null);
 });
 
@@ -72,7 +72,7 @@ router.post('/', async (req, res) => {
 });
 
 router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
-  const before = await Leave.findById(req.params.id);
+  const before = await Leave.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Leave request not found.' } });
 
   const updated = await Leave.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
@@ -85,7 +85,7 @@ router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
 // Approving the last stage is what actually flips status to 'approved';
 // approving an earlier one just advances currentStage and stays 'pending'.
 router.post('/:id/approve', async (req, res) => {
-  const leave = await Leave.findById(req.params.id);
+  const leave = await Leave.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!leave) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Leave request not found.' } });
   if (leave.status !== 'pending') {
     return res.status(400).json({ error: { code: 'ALREADY_DECIDED', message: 'This request has already been decided.' } });
@@ -133,7 +133,7 @@ router.post('/:id/approve', async (req, res) => {
 });
 
 router.post('/:id/decline', async (req, res) => {
-  const leave = await Leave.findById(req.params.id);
+  const leave = await Leave.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!leave) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Leave request not found.' } });
   if (leave.status !== 'pending') {
     return res.status(400).json({ error: { code: 'ALREADY_DECIDED', message: 'This request has already been decided.' } });
@@ -173,7 +173,7 @@ router.post('/:id/decline', async (req, res) => {
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
-  const before = await Leave.findById(req.params.id);
+  const before = await Leave.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (before) {
     await Leave.findByIdAndDelete(req.params.id);
     await logAudit(req, { action: 'Leave deleted', subject: before.name, before });

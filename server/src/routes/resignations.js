@@ -90,7 +90,7 @@ router.post('/:id/clearance', async (req, res) => {
     return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Invalid clearance department.' } });
   }
 
-  const resignation = await Resignation.findById(req.params.id);
+  const resignation = await Resignation.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!resignation) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Resignation record not found.' } });
   }
@@ -133,7 +133,7 @@ router.post('/:id/fnf', async (req, res) => {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Only Finance Lead or HR Director can calculate FnF.' } });
   }
 
-  const resignation = await Resignation.findById(req.params.id);
+  const resignation = await Resignation.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!resignation) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Resignation record not found.' } });
   }
@@ -178,13 +178,13 @@ router.post('/:id/fnf/pay', async (req, res) => {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Only Finance Lead or HR Director can pay FnF.' } });
   }
 
-  const resignation = await Resignation.findById(req.params.id);
+  const resignation = await Resignation.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!resignation) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Resignation record not found.' } });
   }
 
   const before = JSON.parse(JSON.stringify(resignation));
-  
+
   resignation.fnfSettlement.status = 'Paid';
   resignation.status = 'Approved';
   if (!resignation.approvedLastWorkingDay) {
@@ -226,7 +226,7 @@ router.patch('/:id', async (req, res) => {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Only HR personnel can modify resignation terms.' } });
   }
 
-  const before = await Resignation.findById(req.params.id);
+  const before = await Resignation.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Resignation record not found.' } });
   }

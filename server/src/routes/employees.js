@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Employee.findById(req.params.id);
+  const row = await Employee.findOne({ _id: req.params.id, ...companyFilter(req) });
   res.json(row || null);
 });
 
@@ -33,7 +33,7 @@ router.patch('/:id', async (req, res) => {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'You do not have permission to modify this profile.' } });
   }
 
-  const before = await Employee.findById(req.params.id);
+  const before = await Employee.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Employee not found.' } });
 
   let patchBody = { ...(req.body || {}) };
@@ -50,7 +50,7 @@ router.patch('/:id', async (req, res) => {
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
-  const before = await Employee.findById(req.params.id);
+  const before = await Employee.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (before) {
     await Employee.findByIdAndDelete(req.params.id);
     await logAudit(req, { action: 'Employee removed', subject: before.name, before });

@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Asset.findById(req.params.id);
+  const row = await Asset.findOne({ _id: req.params.id, ...companyFilter(req) });
   res.json(row || null);
 });
 
@@ -28,7 +28,7 @@ router.post('/', requireRole('HR Manager', 'Finance Lead'), async (req, res) => 
 // assignAsset/returnAsset both send a plain 4-field patch (status + the 3
 // assignment fields together) — generic merge-patch handles both directions.
 router.patch('/:id', requireRole('HR Manager', 'Finance Lead'), async (req, res) => {
-  const before = await Asset.findById(req.params.id);
+  const before = await Asset.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Asset not found.' } });
 
   const updated = await Asset.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
@@ -43,7 +43,7 @@ router.patch('/:id', requireRole('HR Manager', 'Finance Lead'), async (req, res)
 });
 
 router.delete('/:id', requireRole('HR Manager', 'Finance Lead'), async (req, res) => {
-  const before = await Asset.findById(req.params.id);
+  const before = await Asset.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (before) {
     await Asset.findByIdAndDelete(req.params.id);
     await logAudit(req, { action: 'Asset deleted', subject: before.name, before });

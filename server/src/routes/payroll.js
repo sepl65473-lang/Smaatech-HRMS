@@ -17,7 +17,9 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Payroll.findById(req.params.id);
+  const canSeeAll = ['HR Director', 'HR Manager', 'Finance Lead'].includes(req.auth.role);
+  const scope = { _id: req.params.id, ...companyFilter(req), ...(canSeeAll ? {} : { empId: req.auth.employeeId }) };
+  const row = await Payroll.findOne(scope);
   res.json(row || null);
 });
 
@@ -53,7 +55,7 @@ router.post('/', requireRole('HR Manager', 'Finance Lead'), async (req, res) => 
 });
 
 router.patch('/:id', requireRole('HR Manager', 'Finance Lead'), async (req, res) => {
-  const before = await Payroll.findById(req.params.id);
+  const before = await Payroll.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Payroll record not found.' } });
 
   const updated = await Payroll.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
@@ -90,7 +92,7 @@ router.patch('/:id', requireRole('HR Manager', 'Finance Lead'), async (req, res)
 });
 
 router.delete('/:id', requireRole('HR Manager', 'Finance Lead'), async (req, res) => {
-  const before = await Payroll.findById(req.params.id);
+  const before = await Payroll.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (before) {
     await Payroll.findByIdAndDelete(req.params.id);
     await logAudit(req, { action: 'Payroll record removed', subject: before.name, before });

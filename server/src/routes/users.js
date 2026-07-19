@@ -96,7 +96,7 @@ router.patch('/:id', requireRole(), async (req, res) => {
     patch.passwordHash = await bcrypt.hash(password, 10);
   }
 
-  const before = await User.findById(req.params.id);
+  const before = await User.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
 
   const updated = await User.findByIdAndUpdate(req.params.id, patch, { new: true });
@@ -105,7 +105,7 @@ router.patch('/:id', requireRole(), async (req, res) => {
 });
 
 router.delete('/:id', requireRole(), async (req, res) => {
-  const before = await User.findById(req.params.id);
+  const before = await User.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (before) {
     await User.findByIdAndDelete(req.params.id);
     await logAudit(req, { action: 'Login removed', subject: before.name, before });

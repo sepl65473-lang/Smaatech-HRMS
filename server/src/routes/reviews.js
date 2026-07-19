@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Review.findById(req.params.id);
+  const row = await Review.findOne({ _id: req.params.id, ...companyFilter(req) });
   res.json(row || null);
 });
 
@@ -30,7 +30,7 @@ router.post('/', requireRole('HR Manager'), async (req, res) => {
 const SELF_REVIEW_KEYS = ['selfRating', 'selfComments', 'status'];
 
 router.patch('/:id', async (req, res) => {
-  const review = await Review.findById(req.params.id);
+  const review = await Review.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!review) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Review not found.' } });
 
   const isManager = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
@@ -48,7 +48,7 @@ router.patch('/:id', async (req, res) => {
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
-  await Review.findByIdAndDelete(req.params.id);
+  await Review.findOneAndDelete({ _id: req.params.id, ...companyFilter(req) });
   res.json({ id: req.params.id });
 });
 

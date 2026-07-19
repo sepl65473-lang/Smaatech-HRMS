@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Job.findById(req.params.id);
+  const row = await Job.findOne({ _id: req.params.id, ...companyFilter(req) });
   res.json(row || null);
 });
 
@@ -24,7 +24,7 @@ router.post('/', requireRole('HR Manager'), async (req, res) => {
 });
 
 router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
-  const before = await Job.findById(req.params.id);
+  const before = await Job.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Job posting not found.' } });
 
   const updated = await Job.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
@@ -35,7 +35,7 @@ router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
-  const before = await Job.findById(req.params.id);
+  const before = await Job.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (before) {
     await Job.findByIdAndDelete(req.params.id);
     await logAudit(req, { action: 'Job posting deleted', subject: before.title, before });

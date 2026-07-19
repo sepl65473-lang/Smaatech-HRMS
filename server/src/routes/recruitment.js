@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const row = await Candidate.findById(req.params.id);
+  const row = await Candidate.findOne({ _id: req.params.id, ...companyFilter(req) });
   res.json(row || null);
 });
 
@@ -24,13 +24,13 @@ router.post('/', requireRole('HR Manager'), async (req, res) => {
 // alongside a stage change, and onboarding wholesale on first hire),
 // toggleOnboardingItem sends a full replacement `onboarding` array.
 router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
-  const updated = await Candidate.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
+  const updated = await Candidate.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, req.body || {}, { new: true });
   if (!updated) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Candidate not found.' } });
   res.json(updated);
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
-  await Candidate.findByIdAndDelete(req.params.id);
+  await Candidate.findOneAndDelete({ _id: req.params.id, ...companyFilter(req) });
   res.json({ id: req.params.id });
 });
 

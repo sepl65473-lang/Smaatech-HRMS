@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import User from '../models/User.js';
 import FaceDescriptor from '../models/FaceDescriptor.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, companyFilter } from '../middleware/auth.js';
 import { extractDescriptor } from '../lib/faceEngine.js';
 import { savePhoto } from '../lib/photoStorage.js';
 
@@ -26,9 +26,9 @@ router.post('/enroll', upload.single('photo'), async (req, res) => {
 
   let target;
   if (isAdmin && req.body.userId) {
-    target = await User.findById(req.body.userId);
+    target = await User.findOne({ _id: req.body.userId, ...companyFilter(req) });
   } else if (isAdmin && req.body.email) {
-    target = await User.findOne({ email: String(req.body.email).toLowerCase().trim() });
+    target = await User.findOne({ email: String(req.body.email).toLowerCase().trim(), ...companyFilter(req) });
   } else {
     target = await User.findById(req.auth.sub);
   }
@@ -55,8 +55,13 @@ router.post('/enroll', upload.single('photo'), async (req, res) => {
 
 router.get('/status/:userId', async (req, res) => {
   const isAdmin = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
-  if (!isAdmin && req.auth.sub !== req.params.userId) {
+  const isSelf = req.auth.sub === req.params.userId;
+  if (!isAdmin && !isSelf) {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Not allowed.' } });
+  }
+  if (!isSelf) {
+    const targetUser = await User.findOne({ _id: req.params.userId, ...companyFilter(req) });
+    if (!targetUser) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
   }
   const doc = await FaceDescriptor.findOne({ userId: req.params.userId }).select('enrolledAt');
   res.json({ enrolled: Boolean(doc), enrolledAt: doc?.enrolledAt || null });
