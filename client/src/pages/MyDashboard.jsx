@@ -400,6 +400,22 @@ export default function MyDashboard() {
           </div>
           {openReview ? (
             <div className="form-grid">
+              {(openReview.goals || []).length > 0 && (
+                <div className="field field-full">
+                  <span className="field-label">Goals set for this cycle</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                    {openReview.goals.map((g) => (
+                      <span
+                        key={g.id}
+                        className={`state-badge ${g.done ? 'approved' : 'pending'}`}
+                        style={{ textDecoration: g.done ? 'line-through' : 'none' }}
+                      >
+                        {g.text}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <label className="field field-full">
                 <span className="field-label">Self rating (0–5)</span>
                 <input type="number" min="0" max="5" step="0.1" className="input" value={selfRating} onChange={(e) => setSelfRating(e.target.value)} />
@@ -429,6 +445,22 @@ export default function MyDashboard() {
                     <div className="leave-meta">
                       Self: {r.selfRating ?? '—'} / 5 · Manager: {r.managerRating ?? '—'} / 5
                     </div>
+                    {r.managerComments && (
+                      <div className="leave-reason">Manager feedback: "{r.managerComments}"</div>
+                    )}
+                    {(r.goals || []).length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                        {r.goals.map((g) => (
+                          <span
+                            key={g.id}
+                            className={`state-badge ${g.done ? 'approved' : 'pending'}`}
+                            style={{ textDecoration: g.done ? 'line-through' : 'none' }}
+                          >
+                            {g.text}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
