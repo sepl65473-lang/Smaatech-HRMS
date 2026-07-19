@@ -60,7 +60,22 @@ const apiLimiter = rateLimit({
 });
 app.use('/api/', apiLimiter);
 
-app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173', credentials: true }));
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.CLIENT_ORIGIN ? process.env.CLIENT_ORIGIN.replace(/\/$/, '') : null,
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin.replace(/\/$/, '')) || /\.vercel\.app$/.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true);
+    }
+  },
+  credentials: true,
+}));
 app.use(express.json());
 app.use(cookieParser());
 
