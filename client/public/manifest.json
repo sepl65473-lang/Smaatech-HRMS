@@ -1,0 +1,16 @@
+{
+  "short_name": "HRMS",
+  "name": "Smaatech HRMS — People Operations",
+  "icons": [
+    {
+      "src": "/logo.jpg",
+      "type": "image/jpeg",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#EEF2F8",
+  "theme_color": "#3B7DDD",
+  "display": "standalone",
+  "orientation": "portrait"
+}
