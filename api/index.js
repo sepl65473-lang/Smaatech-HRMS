@@ -36,18 +36,22 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
-// Connect DB middleware for serverless execution
-app.use(async (req, _res, next) => {
+// Connect DB middleware for serverless execution — required secrets must
+// come from Vercel's own Environment Variables, never a hardcoded fallback
+// (a fallback here would mean anyone who can read this source file could
+// forge a valid login token or connect to the database directly).
+app.use(async (req, res, next) => {
+  const missing = ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']
+    .filter((key) => !process.env[key]);
+  if (missing.length) {
+    return res.status(500).json({
+      error: {
+        code: 'MISSING_CONFIG',
+        message: `Server misconfigured: missing ${missing.join(', ')}. Set these in Vercel's Environment Variables.`,
+      },
+    });
+  }
   try {
-    if (!process.env.MONGODB_URI) {
-      process.env.MONGODB_URI = 'mongodb+srv://sepl65473_db_user:pCctp0rdQWHPud0n@cluster0.o76ecpa.mongodb.net/smaatech_hrms?retryWrites=true&w=majority';
-    }
-    if (!process.env.JWT_ACCESS_SECRET) {
-      process.env.JWT_ACCESS_SECRET = 'smaatech_secret_access_jwt_key_2026';
-    }
-    if (!process.env.JWT_REFRESH_SECRET) {
-      process.env.JWT_REFRESH_SECRET = 'smaatech_secret_refresh_jwt_key_2026';
-    }
     await connectDB();
     next();
   } catch (err) {

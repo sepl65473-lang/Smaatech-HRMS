@@ -4,9 +4,12 @@ import User from '../models/User.js';
 import { sendNotification } from './notificationService.js';
 import logger from './logger.js';
 
+import { connectDB } from '../db.js';
+
 // Checks for documents expiring within 30 days and sends alerts.
 export async function checkDocumentExpirations() {
   try {
+    await connectDB();
     logger.info('[Document Expiry Job] Running document expiry check...');
     const now = new Date();
     const thirtyDaysFromNow = new Date();
