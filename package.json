@@ -7,6 +7,7 @@
     "dev": "concurrently -n web,api -c blue,green \"npm --prefix client run dev\" \"npm --prefix server run dev\"",
     "dev:web": "npm --prefix client run dev",
     "dev:server": "npm --prefix server run dev",
+    "start": "node server/src/index.js",
     "seed:server": "npm --prefix server run seed",
     "build": "npm --prefix client run build",
     "preview": "npm --prefix client run preview",

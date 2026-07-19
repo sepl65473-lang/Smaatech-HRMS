@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm --prefix server install
-    startCommand: npm --prefix server start
+    startCommand: node server/src/index.js
     envVars:
       - key: NODE_ENV
         value: production
