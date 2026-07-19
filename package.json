@@ -2,6 +2,7 @@
   "name": "S-hrms",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "description": "Smaatech HRMS — production-ready People Operations dashboard (client/ + server/ workspace root).",
   "scripts": {
     "dev": "concurrently -n web,api -c blue,green \"npm --prefix client run dev\" \"npm --prefix server run dev\"",
@@ -12,6 +13,13 @@
     "build": "npm --prefix client run build",
     "preview": "npm --prefix client run preview",
     "lint": "npm --prefix client run lint"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-mongo-sanitize": "^2.2.0",
+    "helmet": "^8.3.0"
   },
   "devDependencies": {
     "concurrently": "^10.0.3"
