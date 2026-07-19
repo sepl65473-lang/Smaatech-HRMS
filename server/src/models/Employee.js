@@ -13,6 +13,7 @@ const employeeSchema = new mongoose.Schema({
   rating: Number,
   employmentType: { type: String, default: 'Full-time' }, // Full-time | Part-time | Contract | Intern
   dob: { type: String, default: '' }, // 'YYYY-MM-DD'
+  photo: { type: String, default: '' }, // client-resized JPEG data URL (EmployeeForm.jsx)
   managerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   bankAccount: { type: String, default: '' },
   ifsc: { type: String, default: '' },
@@ -47,6 +48,13 @@ const employeeSchema = new mongoose.Schema({
     phone: String,
   }],
 }, { timestamps: true });
+
+// One employee per email per company — partial so employees added without an
+// email yet (the form allows leaving it blank) never collide with each other.
+employeeSchema.index(
+  { company: 1, email: 1 },
+  { unique: true, partialFilterExpression: { email: { $type: 'string', $gt: '' } } },
+);
 
 // Shape the API response to match the frontend's existing `id` (string) convention
 employeeSchema.set('toJSON', {

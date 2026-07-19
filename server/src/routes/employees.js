@@ -18,9 +18,16 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', requireRole('HR Manager'), async (req, res) => {
   const body = { ...(req.body || {}), company: req.auth.company };
-  const created = await Employee.create(body);
-  await logAudit(req, { action: 'Employee added', subject: created.name, after: created });
-  res.status(201).json(created);
+  try {
+    const created = await Employee.create(body);
+    await logAudit(req, { action: 'Employee added', subject: created.name, after: created });
+    res.status(201).json(created);
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(409).json({ error: { code: 'EMAIL_IN_USE', message: 'Another employee already has that email.' } });
+    }
+    throw err;
+  }
 });
 
 const RESTRICTED_FIELDS = ['salary', 'role', 'dept', 'loc', 'status', 'managerId', 'joinDate', 'rating', 'employmentType', 'company', 'email'];
@@ -44,9 +51,16 @@ router.patch('/:id', async (req, res) => {
     });
   }
 
-  const updated = await Employee.findByIdAndUpdate(req.params.id, patchBody, { new: true });
-  await logAudit(req, { action: 'Employee updated', subject: updated.name, before, after: updated });
-  res.json(updated);
+  try {
+    const updated = await Employee.findByIdAndUpdate(req.params.id, patchBody, { new: true });
+    await logAudit(req, { action: 'Employee updated', subject: updated.name, before, after: updated });
+    res.json(updated);
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(409).json({ error: { code: 'EMAIL_IN_USE', message: 'Another employee already has that email.' } });
+    }
+    throw err;
+  }
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
