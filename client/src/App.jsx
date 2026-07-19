@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useParams } from 'react-router-dom';
 import Layout from './components/Layout';
 import Placeholder from './pages/Placeholder';
 import { useHRMS } from './context/HRMSContext';
@@ -49,6 +49,22 @@ function Guard({ path, children }) {
   return children;
 }
 
+// Employees without directory access can still view their own profile page.
+function EmployeeProfileGuard({ children }) {
+  const { canAccess, currentUser } = useHRMS();
+  const { id } = useParams();
+  const isOwnProfile = Boolean(currentUser.empId) && currentUser.empId === id;
+  if (!canAccess('/employees') && !isOwnProfile) {
+    return (
+      <Placeholder
+        title="Access restricted"
+        note="This workspace profile does not have access to this area."
+      />
+    );
+  }
+  return children;
+}
+
 function Home() {
   const { currentUser } = useHRMS();
   return currentUser.role === 'Employee' ? <MyDashboard /> : <Dashboard />;
@@ -62,7 +78,7 @@ export default function App() {
           <Route index element={<Home />} />
           <Route path="ess" element={<Guard path="/ess"><MyDashboard /></Guard>} />
           <Route path="employees" element={<Guard path="/employees"><Employees /></Guard>} />
-          <Route path="employees/:id" element={<Guard path="/employees"><EmployeeProfile /></Guard>} />
+          <Route path="employees/:id" element={<EmployeeProfileGuard><EmployeeProfile /></EmployeeProfileGuard>} />
           <Route path="org-chart" element={<Guard path="/org-chart"><OrgChart /></Guard>} />
           <Route path="attendance" element={<Guard path="/attendance"><Attendance /></Guard>} />
           <Route path="leave" element={<Guard path="/leave"><Leave /></Guard>} />

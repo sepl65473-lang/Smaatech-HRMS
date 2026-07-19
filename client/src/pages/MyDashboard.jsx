@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import LeaveForm from '../components/LeaveForm';
@@ -227,6 +228,7 @@ export default function MyDashboard() {
               <div className="card-sub">{me.role} · {me.dept} · {me.loc}</div>
             </div>
           </div>
+          <Link className="btn btn-ghost" to={`/employees/${me.id}`}>View full profile</Link>
         </div>
       </div>
 
