@@ -53,8 +53,8 @@ export default function LoginScreen() {
       const result = await login(email.trim(), password);
       setError('');
       await proceedAfterAuth(result);
-    } catch {
-      setError('Invalid email or password.');
+    } catch (err) {
+      setError(err.message || 'Invalid email or password.');
     }
   };
 
