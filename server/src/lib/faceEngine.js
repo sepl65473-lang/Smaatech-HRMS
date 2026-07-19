@@ -10,6 +10,8 @@ import * as tf from '@tensorflow/tfjs';
 import * as wasm from '@tensorflow/tfjs-backend-wasm';
 import * as faceapi from '@vladmandic/face-api/dist/face-api.node-wasm.js';
 
+import fs from 'node:fs';
+
 const MODELS_DIR = path.resolve(import.meta.dirname, '../../../public/models');
 const WASM_DIR = path.resolve(import.meta.dirname, '../../node_modules/@tensorflow/tfjs-backend-wasm/dist/');
 export const MATCH_THRESHOLD = 0.5;
@@ -19,13 +21,21 @@ let ready = null;
 export function initFaceEngine() {
   if (!ready) {
     ready = (async () => {
-      wasm.setWasmPaths(WASM_DIR + path.sep);
-      await tf.setBackend('wasm');
-      await tf.ready();
-      await faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR);
-      await faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR);
-      await faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR);
-      console.log('[face] model loaded, backend:', tf.getBackend());
+      try {
+        if (!fs.existsSync(MODELS_DIR)) {
+          console.warn('[face] models directory not found at', MODELS_DIR);
+          return;
+        }
+        wasm.setWasmPaths(WASM_DIR + path.sep);
+        await tf.setBackend('wasm');
+        await tf.ready();
+        await faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR);
+        await faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR);
+        await faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR);
+        console.log('[face] model loaded, backend:', tf.getBackend());
+      } catch (err) {
+        console.warn('[face] init deferred:', err.message);
+      }
     })();
   }
   return ready;

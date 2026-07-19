@@ -115,14 +115,22 @@ app.use((err, _req, res, _next) => {
 
 const PORT = process.env.PORT || 4000;
 
-Promise.all([connectDB(), initFaceEngine()]).then(() => {
-  app.listen(PORT, () => {
-    logger.info(`[server] listening on http://localhost:${PORT}`);
-    logger.info(`[server] Swagger API documentation available at http://localhost:${PORT}/api-docs`);
-    startDocumentExpiryScheduler();
+app.listen(PORT, () => {
+  logger.info(`[server] listening on port ${PORT}`);
+  logger.info(`[server] Swagger API documentation available at http://localhost:${PORT}/api-docs`);
+  
+  connectDB().catch((err) => {
+    logger.error('[db] connection failed: %s', err.message);
   });
-}).catch((err) => {
-  logger.error('[server] failed to start: %s', err.message);
-  process.exit(1);
+
+  initFaceEngine().catch((err) => {
+    logger.warn('[face] engine init deferred: %s', err.message);
+  });
+
+  try {
+    startDocumentExpiryScheduler();
+  } catch (err) {
+    logger.warn('[scheduler] deferred: %s', err.message);
+  }
 });
 
