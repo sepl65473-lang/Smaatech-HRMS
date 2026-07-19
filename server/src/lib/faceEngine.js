@@ -6,10 +6,6 @@
 // native build tools needed, validated in scripts/face-spike.js.
 import path from 'node:path';
 import jpeg from 'jpeg-js';
-import * as tf from '@tensorflow/tfjs';
-import * as wasm from '@tensorflow/tfjs-backend-wasm';
-import * as faceapi from '@vladmandic/face-api/dist/face-api.node-wasm.js';
-
 import fs from 'node:fs';
 
 const MODELS_DIR = path.resolve(import.meta.dirname, '../../../public/models');
@@ -17,6 +13,8 @@ const WASM_DIR = path.resolve(import.meta.dirname, '../../node_modules/@tensorfl
 export const MATCH_THRESHOLD = 0.5;
 
 let ready = null;
+let tfModule = null;
+let faceapiModule = null;
 
 export function initFaceEngine() {
   if (!ready) {
@@ -24,24 +22,33 @@ export function initFaceEngine() {
       try {
         if (!fs.existsSync(MODELS_DIR)) {
           console.warn('[face] models directory not found at', MODELS_DIR);
-          return;
+          return null;
         }
+        const tf = await import('@tensorflow/tfjs');
+        const wasm = await import('@tensorflow/tfjs-backend-wasm');
+        const faceapi = await import('@vladmandic/face-api/dist/face-api.node-wasm.js');
+
         wasm.setWasmPaths(WASM_DIR + path.sep);
         await tf.setBackend('wasm');
         await tf.ready();
         await faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR);
         await faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR);
         await faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR);
-        console.log('[face] model loaded, backend:', tf.getBackend());
+
+        tfModule = tf;
+        faceapiModule = faceapi;
+        console.log('[face] model loaded dynamically, backend:', tf.getBackend());
+        return { tf, faceapi };
       } catch (err) {
         console.warn('[face] init deferred:', err.message);
+        return null;
       }
     })();
   }
   return ready;
 }
 
-function jpegBufferToTensor(buffer) {
+function jpegBufferToTensor(buffer, tf) {
   const { width, height, data } = jpeg.decode(buffer, { useTArray: true });
   const rgb = new Uint8Array(width * height * 3);
   for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
@@ -54,18 +61,21 @@ function jpegBufferToTensor(buffer) {
 
 // Returns { descriptor: number[] } or { error: 'NO_FACE' | 'MULTIPLE_FACES' }.
 export async function extractDescriptor(jpegBuffer) {
-  await initFaceEngine();
-  const tensor = jpegBufferToTensor(jpegBuffer);
+  const modules = await initFaceEngine();
+  if (!modules || !tfModule || !faceapiModule) {
+    return { error: 'ENGINE_NOT_READY' };
+  }
+  const tensor = jpegBufferToTensor(jpegBuffer, tfModule);
   try {
-    const results = await faceapi
-      .detectAllFaces(tensor, new faceapi.TinyFaceDetectorOptions())
+    const results = await faceapiModule
+      .detectAllFaces(tensor, new faceapiModule.TinyFaceDetectorOptions())
       .withFaceLandmarks()
       .withFaceDescriptors();
     if (results.length === 0) return { error: 'NO_FACE' };
     if (results.length > 1) return { error: 'MULTIPLE_FACES' };
     return { descriptor: Array.from(results[0].descriptor) };
   } finally {
-    tf.dispose(tensor);
+    tfModule.dispose(tensor);
   }
 }
 
