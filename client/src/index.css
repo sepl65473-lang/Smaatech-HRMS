@@ -2150,12 +2150,64 @@
     .form-grid{grid-template-columns:1fr}
   }
 
-  /* ---- Mobile-friendly layout enhancements ---- */
+  /* ---- Mobile-friendly layout & mobile drawer enhancements ---- */
   .template-editor-grid {
     display: grid;
     grid-template-columns: 1.2fr 0.8fr;
   }
+
+  /* 1. Mobile Sidebar Drawer & Main Layout (< 900px) */
   @media (max-width: 900px) {
+    .app {
+      display: block !important;
+      min-height: 100vh;
+    }
+    aside {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      bottom: 0 !important;
+      width: 280px !important;
+      z-index: 1000 !important;
+      transform: translateX(-100%) !important;
+      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2) !important;
+      background: var(--paper) !important;
+    }
+    .app.sidebar-open aside {
+      transform: translateX(0) !important;
+    }
+    .mobile-scrim {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.5);
+      backdrop-filter: blur(2px);
+      z-index: 999;
+      border: none;
+      cursor: pointer;
+    }
+    .app.sidebar-open .mobile-scrim {
+      display: block !important;
+    }
+    .menu-btn {
+      display: grid !important;
+    }
+    main {
+      padding: 16px 16px 28px !important;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+    .stats {
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 10px !important;
+    }
+    .grid, .grid-2 {
+      grid-template-columns: 1fr !important;
+    }
+    .summary-pill-row, .summary-pill-row.cols-3 {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
     .template-editor-grid {
       grid-template-columns: 1fr !important;
     }
@@ -2172,8 +2224,69 @@
       min-width: 260px !important;
     }
   }
+
+  /* 2. Topbar & Header Mobile Tweak (< 768px) */
+  @media (max-width: 768px) {
+    .topbar {
+      flex-direction: column !important;
+      align-items: stretch !important;
+      gap: 12px !important;
+      margin-bottom: 20px !important;
+    }
+    .topbar-actions {
+      flex-wrap: wrap !important;
+      justify-content: space-between !important;
+      width: 100% !important;
+    }
+    .search {
+      width: 100% !important;
+    }
+    .topbar-popover-wrap {
+      position: static !important;
+    }
+    .search-popover, .notification-popover {
+      left: 12px !important;
+      right: 12px !important;
+      width: auto !important;
+    }
+    .table-wrap {
+      overflow-x: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+    }
+    table {
+      min-width: 600px !important;
+    }
+  }
+
+  /* 3. Smartphone Layout Tweak (< 500px) */
   @media (max-width: 500px) {
     .stats {
+      grid-template-columns: 1fr !important;
+    }
+    .summary-pill-row, .summary-pill-row.cols-3 {
+      grid-template-columns: 1fr !important;
+    }
+    .page-title {
+      font-size: 24px !important;
+    }
+    .page-header-row {
+      flex-direction: column !important;
+      align-items: stretch !important;
+      gap: 12px !important;
+    }
+    .page-header-actions {
+      flex-wrap: wrap !important;
+      gap: 8px !important;
+    }
+    .modal {
+      width: 94% !important;
+      max-width: 94% !important;
+      margin: 12px auto !important;
+      padding: 16px !important;
+      max-height: 90vh !important;
+      overflow-y: auto !important;
+    }
+    .form-grid {
       grid-template-columns: 1fr !important;
     }
   }
@@ -2191,3 +2304,4 @@
       border:1px solid #ddd;
     }
   }
+
