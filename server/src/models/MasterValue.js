@@ -4,7 +4,10 @@ const masterValueSchema = new mongoose.Schema({
   categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'MasterCategory', required: true },
   value: { type: String, required: true },
   active: { type: Boolean, default: true },
+  company: { type: String, required: true },
 }, { timestamps: true });
+
+masterValueSchema.index({ company: 1, categoryId: 1 });
 
 masterValueSchema.set('toJSON', {
   virtuals: true,

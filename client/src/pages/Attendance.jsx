@@ -6,7 +6,7 @@ import RosterPlanner from '../components/RosterPlanner';
 import {
   IconInfo, IconPresent, IconCalendar, IconX, IconLeave,
 } from '../components/Icons';
-import { DEPARTMENTS, todayISO } from '../lib/helpers';
+import { todayISO } from '../lib/helpers';
 import { resolveShiftForToday } from '../lib/shifts';
 import { downloadCSV } from '../lib/exportCsv';
 
@@ -46,10 +46,11 @@ function LiveIndicator({ lastSyncedAt }) {
 export default function Attendance() {
   const {
     attendance, settings, checkIn, checkOut, setAttendanceStatus, lastSyncedAt,
-    attendanceCorrections, requestCorrection, approveCorrection, rejectCorrection, currentUser, employees, toast
+    attendanceCorrections, requestCorrection, approveCorrection, rejectCorrection, currentUser, employees, toast,
+    getMasterValues,
   } = useHRMS();
 
-  const departments = settings.departments?.length ? settings.departments : DEPARTMENTS;
+  const departments = getMasterValues('departments');
   const [dept, setDept] = useState('All');
   const [status, setStatus] = useState('all');
   const [tab, setTab] = useState('roster');

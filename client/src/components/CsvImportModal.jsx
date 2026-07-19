@@ -35,6 +35,7 @@ export default function CsvImportModal({
     { key: 'salary', label: 'Salary' },
   ],
   departments = DEPARTMENTS,
+  locations = LOCATIONS,
   employees = [],
 }) {
   const [rows, setRows] = useState([]);
@@ -87,7 +88,7 @@ export default function CsvImportModal({
         name: r.name,
         role: r.role,
         dept: departments.includes(r.dept) ? r.dept : departments[0],
-        loc: LOCATIONS.includes(r.loc) ? r.loc : LOCATIONS[0],
+        loc: locations.includes(r.loc) ? r.loc : locations[0],
         email: r.email || '',
         phone: r.phone || '',
         status: r.status || 'active',

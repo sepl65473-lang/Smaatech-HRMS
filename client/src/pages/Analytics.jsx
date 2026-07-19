@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
-import { DEPARTMENTS, formatINR } from '../lib/helpers';
+import { formatINR } from '../lib/helpers';
 import { downloadCSV } from '../lib/exportCsv';
 import {
   IconWorkforce, IconPresent, IconPerformance, IconPayroll,
@@ -44,8 +44,8 @@ const REPORT_DATASETS = {
 };
 
 export default function Analytics() {
-  const { employees, attendance, leaves, payroll, recruitment, settings } = useHRMS();
-  const departments = settings.departments?.length ? settings.departments : DEPARTMENTS;
+  const { employees, attendance, leaves, payroll, recruitment, getMasterValues } = useHRMS();
+  const departments = getMasterValues('departments');
   const [dept, setDept] = useState('All');
 
   const DATA_SOURCE = { employees, attendance, leave: leaves, payroll };

@@ -9,18 +9,19 @@ import { downloadCSV } from '../lib/csv';
 import {
   IconEdit, IconTrash, IconPlus, IconWorkforce, IconPresent, IconLeave, IconAnalytics,
 } from '../components/Icons';
-import { DEPARTMENTS, formatINR } from '../lib/helpers';
+import { formatINR } from '../lib/helpers';
 
 const STATUS_LABEL = { active: 'Active', remote: 'Remote', 'on-leave': 'On leave' };
 const PAGE_SIZE = 6;
 
 export default function Employees() {
   const {
-    employees, search, settings, addEmployee, updateEmployee, deleteEmployee, importEmployees,
-    addUserAccount, toast,
+    employees, search, addEmployee, updateEmployee, deleteEmployee, importEmployees,
+    addUserAccount, toast, getMasterValues,
   } = useHRMS();
   const navigate = useNavigate();
-  const departments = settings.departments?.length ? settings.departments : DEPARTMENTS;
+  const departments = getMasterValues('departments');
+  const locations = getMasterValues('locations');
   const [dept, setDept] = useState('All');
   const [sort, setSort] = useState('name');
   const [page, setPage] = useState(1);
@@ -219,6 +220,7 @@ export default function Employees() {
         onClose={() => setImportOpen(false)}
         onImport={importEmployees}
         departments={departments}
+        locations={locations}
         employees={employees}
       />
 

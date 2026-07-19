@@ -4,7 +4,6 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import UserForm from '../components/UserForm';
 import FaceEnrollModal from '../components/FaceEnrollModal';
 import { IconPlus, IconX, IconEdit, IconTrash } from '../components/Icons';
-import { DEPARTMENTS } from '../lib/helpers';
 import { ROLE_SCOPE } from '../lib/permissions';
 
 function Toggle({ on, onClick }) {
@@ -84,6 +83,7 @@ export default function Settings() {
   const {
     settings, employees, currentUser, updateSettings, toggleSetting, resetDatabase, auditLog, toast, enrollFace,
     users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount,
+    masterCategories, masterValues, addMasterValue, deleteMasterValue,
   } = useHRMS();
   const [orgName, setOrgName] = useState('');
   const [workWeek, setWorkWeek] = useState('5-day');
@@ -107,8 +107,12 @@ export default function Settings() {
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
-  const departments = settings.departments?.length ? settings.departments : DEPARTMENTS;
   const designations = settings.designations || [];
+
+  const deptCategory = masterCategories.find((c) => c.code === 'departments');
+  const locCategory = masterCategories.find((c) => c.code === 'locations');
+  const deptValues = masterValues.filter((v) => v.categoryId === deptCategory?.id && v.active !== false);
+  const locValues = masterValues.filter((v) => v.categoryId === locCategory?.id && v.active !== false);
 
   const notifyChannels = settings.notifyChannels || { leave: ['In-app'], payroll: ['In-app'], birthday: ['In-app'] };
   const toggleChannel = (category, channel) => {
@@ -117,8 +121,6 @@ export default function Settings() {
     updateSettings({ notifyChannels: { ...notifyChannels, [category]: next } }, false);
   };
 
-  const addDepartment = (d) => updateSettings({ departments: [...departments, d] }, false);
-  const removeDepartment = (d) => updateSettings({ departments: departments.filter((x) => x !== d) }, false);
   const addDesignation = (d) => updateSettings({ designations: [...designations, d] }, false);
   const removeDesignation = (d) => updateSettings({ designations: designations.filter((x) => x !== d) }, false);
 
@@ -494,10 +496,24 @@ export default function Settings() {
         <ChipManager
           label="Departments"
           sub="Used across employee profiles & filters"
-          items={departments}
-          onAdd={addDepartment}
-          onRemove={removeDepartment}
+          items={deptValues.map((v) => v.value)}
+          onAdd={(v) => deptCategory && addMasterValue(deptCategory.id, v)}
+          onRemove={(v) => {
+            const row = deptValues.find((x) => x.value === v);
+            if (row) deleteMasterValue(row.id);
+          }}
           placeholder="e.g. Customer Success"
+        />
+        <ChipManager
+          label="Locations"
+          sub="Used across employee profiles & filters"
+          items={locValues.map((v) => v.value)}
+          onAdd={(v) => locCategory && addMasterValue(locCategory.id, v)}
+          onRemove={(v) => {
+            const row = locValues.find((x) => x.value === v);
+            if (row) deleteMasterValue(row.id);
+          }}
+          placeholder="e.g. Kolkata"
         />
         <ChipManager
           label="Designations"

@@ -1018,6 +1018,28 @@ export function HRMSProvider({ children }) {
     toast('info', `Role deleted.`);
   };
 
+  const addMasterValue = async (categoryId, value) => {
+    const created = await masterValuesApi.create({ categoryId, value });
+    setMasterValues((list) => [...list, created]);
+    audit('Master value added', created.value);
+    toast('success', `<strong>${created.value}</strong> added.`);
+    return created;
+  };
+
+  const updateMasterValue = async (id, patch) => {
+    const updated = await masterValuesApi.update(id, patch);
+    setMasterValues((list) => list.map((v) => (v.id === id ? updated : v)));
+    return updated;
+  };
+
+  const deleteMasterValue = async (id) => {
+    const row = masterValues.find((v) => v.id === id);
+    await masterValuesApi.remove(id);
+    setMasterValues((list) => list.filter((v) => v.id !== id));
+    audit('Master value removed', row ? row.value : id);
+    toast('info', 'Removed.');
+  };
+
   const getMasterValues = useCallback((code) => {
     const category = masterCategories.find((c) => c.code === code);
     if (!category) {
@@ -1052,7 +1074,7 @@ export function HRMSProvider({ children }) {
     addDocument, updateDocument, deleteDocument, downloadDocument,
     addResignation, signOffClearance, processFnF, payFnF, updateResignationStatus,
     requestCorrection, approveCorrection, rejectCorrection,
-    getMasterValues,
+    getMasterValues, addMasterValue, updateMasterValue, deleteMasterValue,
     canAccess: contextCanAccess,
     canDo: contextCanDo,
     addRole, updateRole, deleteRole,
