@@ -115,8 +115,8 @@ app.use((err, _req, res, _next) => {
 
 const PORT = process.env.PORT || 4000;
 
-app.listen(PORT, () => {
-  logger.info(`[server] listening on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  logger.info(`[server] listening on 0.0.0.0:${PORT}`);
   logger.info(`[server] Swagger API documentation available at http://localhost:${PORT}/api-docs`);
   
   connectDB().catch((err) => {
