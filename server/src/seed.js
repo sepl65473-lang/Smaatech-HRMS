@@ -255,19 +255,19 @@ async function run() {
     {
       name: 'HR Manager',
       description: 'Manage employee directory, shifts, leaves, recruitment, and reviews',
-      allowedPaths: ['/', '/employees', '/org-chart', '/attendance', '/leave', '/holidays', '/celebrations', '/recruitment', '/performance', '/analytics', '/integrations', '/expenses', '/assets', '/workflows'],
+      allowedPaths: ['/', '/employees', '/org-chart', '/attendance', '/leave', '/holidays', '/celebrations', '/recruitment', '/performance', '/analytics', '/integrations', '/expenses', '/assets', '/workflows', '/resignations'],
       allowedActions: ['manageEmployees', 'manageAttendance', 'manageLeave', 'manageRecruitment'],
     },
     {
       name: 'Finance Lead',
       description: 'Manage payroll run, payslips, assets, expenses, and documents',
-      allowedPaths: ['/', '/payroll', '/documents', '/analytics', '/integrations', '/expenses', '/assets'],
+      allowedPaths: ['/', '/payroll', '/documents', '/analytics', '/integrations', '/expenses', '/assets', '/resignations'],
       allowedActions: ['managePayroll', 'manageDocuments'],
     },
     {
       name: 'Employee',
       description: 'Employee self-service dashboard, leave applications, documents, and profile',
-      allowedPaths: ['/', '/ess', '/holidays', '/org-chart', '/documents', '/expenses'],
+      allowedPaths: ['/', '/ess', '/holidays', '/org-chart', '/documents', '/expenses', '/resignations', '/attendance'],
       allowedActions: [],
     },
   ]);
