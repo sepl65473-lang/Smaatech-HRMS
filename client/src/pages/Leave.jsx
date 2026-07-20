@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import LeaveForm from '../components/LeaveForm';
@@ -10,15 +10,58 @@ const FILTERS = ['Pending', 'Approved', 'Declined', 'All'];
 const DEFAULT_STAGES = ['HR Manager', 'HR Director']; // mirrors server/src/routes/leave.js's fallback
 
 export default function Leave() {
-  const { leaves, employees, settings, currentUser, addLeave, approveLeave, declineLeave, deleteLeave } = useHRMS();
+  const {
+    leaves, employees, settings, currentUser, addLeave, approveLeave, declineLeave, deleteLeave,
+    bulkApproveLeave, bulkDeclineLeave,
+  } = useHRMS();
   const [filter, setFilter] = useState('Pending');
   const [formOpen, setFormOpen] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const list = useMemo(() => {
     if (filter === 'All') return leaves;
     return leaves.filter((l) => l.status === filter.toLowerCase());
   }, [leaves, filter]);
+
+  const canActOn = (l) => {
+    const stages = l.approvalStages?.length ? l.approvalStages : DEFAULT_STAGES;
+    const requiredRole = stages[l.currentStage || 0] || stages[stages.length - 1];
+    return currentUser.role === 'HR Director' || currentUser.role === requiredRole;
+  };
+  const selectableIds = useMemo(
+    () => list.filter((l) => l.status === 'pending' && canActOn(l)).map((l) => l.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [list, currentUser.role],
+  );
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => (
+      prev.size === selectableIds.length ? new Set() : new Set(selectableIds)
+    ));
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  useEffect(() => { clearSelection(); }, [filter]);
+
+  const runBulk = async (action) => {
+    setBulkBusy(true);
+    try {
+      const fn = action === 'approved' ? bulkApproveLeave : bulkDeclineLeave;
+      await fn([...selectedIds]);
+      clearSelection();
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const counts = useMemo(() => ({
     Pending: leaves.filter((l) => l.status === 'pending').length,
@@ -79,10 +122,41 @@ export default function Leave() {
           ))}
         </div>
 
+        {selectableIds.length > 0 && (
+          <div className="list-toolbar" style={{ marginTop: 12 }}>
+            <label className="inline-select" style={{ gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={selectedIds.size > 0 && selectedIds.size === selectableIds.length}
+                onChange={toggleSelectAll}
+              />
+              <span>{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</span>
+            </label>
+            {selectedIds.size > 0 && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="mini-btn approve" disabled={bulkBusy} onClick={() => runBulk('approved')}>
+                  Approve selected
+                </button>
+                <button className="mini-btn" disabled={bulkBusy} onClick={() => runBulk('declined')}>
+                  Decline selected
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="leave-list" style={{ marginTop: 16 }}>
           {list.length === 0 && <div className="empty">Nothing here.</div>}
           {list.map((l) => (
             <div className="leave-item" key={l.id}>
+              {l.status === 'pending' && canActOn(l) && (
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(l.id)}
+                  onChange={() => toggleSelect(l.id)}
+                  style={{ marginTop: 4 }}
+                />
+              )}
               <Avatar name={l.name} size={42} className="leave-avatar" />
               <div className="leave-body">
                 <div className="leave-name">

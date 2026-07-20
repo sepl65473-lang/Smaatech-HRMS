@@ -487,7 +487,7 @@ export function HRMSProvider({ children }) {
   // the caller's role against the request's current approval stage, and
   // `updated.status` only actually becomes 'approved' once every configured
   // stage (Settings > Workflows) has signed off.
-  const setLeaveStatus = async (id, action) => {
+  const setLeaveStatus = async (id, action, opts = {}) => {
     const updated = action === 'approved' ? await leavesApi.approve(id) : await leavesApi.decline(id);
     setLeaves((list) => list.map((l) => (l.id === id ? updated : l)));
     if (updated.status === 'approved' && updated.empId) {
@@ -509,19 +509,40 @@ export function HRMSProvider({ children }) {
         )));
       }
     }
-    if (action === 'declined') {
-      toast('info', `Leave <strong>declined</strong> for ${updated.name}`);
-    } else if (updated.status === 'approved') {
-      toast('success', `Leave <strong>approved</strong> for ${updated.name}`);
-    } else {
-      const nextRole = updated.approvalStages?.[updated.currentStage];
-      toast('info', `Stage approved for ${updated.name}${nextRole ? ` — awaiting <strong>${nextRole}</strong>` : ''}`);
+    if (!opts.silent) {
+      if (action === 'declined') {
+        toast('info', `Leave <strong>declined</strong> for ${updated.name}`);
+      } else if (updated.status === 'approved') {
+        toast('success', `Leave <strong>approved</strong> for ${updated.name}`);
+      } else {
+        const nextRole = updated.approvalStages?.[updated.currentStage];
+        toast('info', `Stage approved for ${updated.name}${nextRole ? ` — awaiting <strong>${nextRole}</strong>` : ''}`);
+      }
     }
     auditLocal(`Leave ${action === 'declined' ? 'declined' : (updated.status === 'approved' ? 'approved' : 'stage approved')}`, updated.name, `${updated.start} to ${updated.end}`);
     return updated;
   };
   const approveLeave = (id) => setLeaveStatus(id, 'approved');
   const declineLeave = (id) => setLeaveStatus(id, 'declined');
+
+  // Bulk approve/decline — reuses setLeaveStatus per id (so every existing
+  // side effect: attendance sync, on-leave status, audit entry, all still
+  // happen per row) via Promise.allSettled so one row's 403 (wrong approval
+  // stage) or 400 (already decided) doesn't block the rest of the batch.
+  const bulkSetLeaveStatus = async (ids, action) => {
+    const results = await Promise.allSettled(ids.map((id) => setLeaveStatus(id, action, { silent: true })));
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.length - succeeded;
+    const verb = action === 'approved' ? 'approved' : 'declined';
+    if (failed === 0) {
+      toast('success', `${succeeded} leave request${succeeded === 1 ? '' : 's'} ${verb}.`);
+    } else {
+      toast('info', `${succeeded} ${verb}, ${failed} skipped (already decided or not your approval stage).`);
+    }
+    return { succeeded, failed };
+  };
+  const bulkApproveLeave = (ids) => bulkSetLeaveStatus(ids, 'approved');
+  const bulkDeclineLeave = (ids) => bulkSetLeaveStatus(ids, 'declined');
 
   const deleteLeave = async (id) => {
     await leavesApi.remove(id);
@@ -1117,7 +1138,7 @@ export function HRMSProvider({ children }) {
     // users (real login accounts, HR Director only)
     users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount,
     // leave
-    addLeave, approveLeave, declineLeave, deleteLeave,
+    addLeave, approveLeave, declineLeave, deleteLeave, bulkApproveLeave, bulkDeclineLeave,
     // attendance
     checkIn, checkOut, setAttendanceStatus, recordPunch, enrollFace, faceEnrolled,
     // payroll
