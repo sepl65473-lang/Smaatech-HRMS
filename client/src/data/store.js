@@ -88,7 +88,17 @@ function restResource(path, methods = ['list', 'get', 'create', 'update', 'remov
   return Object.fromEntries(methods.map((m) => [m, all[m]]));
 }
 
-export const employeesApi = restResource('employees');
+export const employeesApi = {
+  ...restResource('employees'),
+  // Server-side paginated/filtered directory search — opt-in (any legacy
+  // .list() caller with no params still gets the full unpaginated roster).
+  search: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+    ).toString();
+    return apiFetch(`/employees${qs ? `?${qs}` : ''}`);
+  },
+};
 
 // Real login accounts (Settings > Users & role access). HR Director only —
 // deliberately not part of loadAll()/hydrate, since GET /users would 403 for
@@ -117,7 +127,16 @@ export const jobsApi = restResource('jobs');
 export const rolesApi = restResource('roles');
 export const masterCategoriesApi = restResource('master-data/master-categories');
 export const masterValuesApi = restResource('master-data/master-values');
-export const auditLogsApi = restResource('audit-logs');
+export const auditLogsApi = {
+  ...restResource('audit-logs'),
+  // Server-side paginated/filtered history — opt-in, mirrors employeesApi.search.
+  search: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+    ).toString();
+    return apiFetch(`/audit-logs${qs ? `?${qs}` : ''}`);
+  },
+};
 export const notificationsApi = {
   ...restResource('notifications'),
   readAll: () => apiFetch('/notifications/read-all', { method: 'PATCH' }),

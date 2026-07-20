@@ -203,6 +203,9 @@ export function HRMSProvider({ children }) {
   const forgotPassword = useCallback((email) => authApi.forgotPassword(email), []);
   const resetPassword = useCallback((email, otp, newPassword) => authApi.resetPassword(email, otp, newPassword), []);
 
+  const searchAuditLog = useCallback((params) => auditLogsApi.search(params), []);
+  const searchEmployees = useCallback((params) => employeesApi.search(params), []);
+
   const loadSessions = useCallback(() => authApi.sessions(), []);
   const revokeSession = useCallback(async (id) => {
     await authApi.revokeSession(id);
@@ -1092,7 +1095,7 @@ export function HRMSProvider({ children }) {
 
   const value = {
     isAuthenticated: Boolean(authUser), login, loginWithFace, finishLogin, logout, forgotPassword, resetPassword,
-    loadSessions, revokeSession, revokeOtherSessions,
+    loadSessions, revokeSession, revokeOtherSessions, searchAuditLog, searchEmployees,
     booting, loading, lastSyncedAt,
     employees, leaves, attendance, payroll,
     celebrations, holidays, recruitment, reviews, settings, currentUser, auditLog, audit,

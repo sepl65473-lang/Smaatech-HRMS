@@ -88,10 +88,10 @@ function ChipManager({ label, sub, items, onAdd, onRemove, placeholder }) {
 
 export default function Settings() {
   const {
-    settings, employees, currentUser, updateSettings, toggleSetting, resetDatabase, auditLog, toast, enrollFace,
+    settings, employees, currentUser, updateSettings, toggleSetting, resetDatabase, toast, enrollFace,
     users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount,
     masterCategories, masterValues, addMasterValue, deleteMasterValue,
-    loadSessions, revokeSession, revokeOtherSessions,
+    loadSessions, revokeSession, revokeOtherSessions, searchAuditLog,
   } = useHRMS();
   const [orgName, setOrgName] = useState('');
   const [workWeek, setWorkWeek] = useState('5-day');
@@ -102,6 +102,10 @@ export default function Settings() {
   const [confirmRemoveUser, setConfirmRemoveUser] = useState(null);
   const [faceEnrollUser, setFaceEnrollUser] = useState(null);
   const [sessions, setSessions] = useState([]);
+  const AUDIT_PAGE_SIZE = 10;
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditRows, setAuditRows] = useState([]);
+  const [auditTotal, setAuditTotal] = useState(0);
 
   // Notification Template states
   const [templateChannel, setTemplateChannel] = useState('email');
@@ -115,6 +119,12 @@ export default function Settings() {
   }, [settings.notificationTemplates, templateChannel, templateName]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  useEffect(() => {
+    searchAuditLog({ page: auditPage, limit: AUDIT_PAGE_SIZE })
+      .then((data) => { setAuditRows(data.rows); setAuditTotal(data.total); })
+      .catch(() => {});
+  }, [auditPage, searchAuditLog]);
 
   const refreshSessions = () => { loadSessions().then(setSessions).catch(() => {}); };
   useEffect(() => { refreshSessions(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -623,12 +633,12 @@ export default function Settings() {
         <div className="card-head">
           <div>
             <div className="card-title">Activity history</div>
-            <div className="card-sub">Recent frontend workspace actions</div>
+            <div className="card-sub">{auditTotal} event{auditTotal === 1 ? '' : 's'} recorded</div>
           </div>
         </div>
         <div className="settings-rows">
-          {auditLog.length === 0 && <div className="empty">No activity recorded yet.</div>}
-          {auditLog.slice(0, 10).map((item) => (
+          {auditRows.length === 0 && <div className="empty">No activity recorded yet.</div>}
+          {auditRows.map((item) => (
             <div className="settings-row" key={item.id}>
               <div>
                 <div className="settings-row-label">{item.action} - {item.subject}</div>
@@ -641,6 +651,13 @@ export default function Settings() {
             </div>
           ))}
         </div>
+        {auditTotal > AUDIT_PAGE_SIZE && (
+          <div className="pager">
+            <button className="mini-btn" disabled={auditPage === 1} onClick={() => setAuditPage((p) => p - 1)}>Previous</button>
+            <span className="pager-meta">Page {auditPage} of {Math.ceil(auditTotal / AUDIT_PAGE_SIZE)}</span>
+            <button className="mini-btn approve" disabled={auditPage >= Math.ceil(auditTotal / AUDIT_PAGE_SIZE)} onClick={() => setAuditPage((p) => p + 1)}>Next</button>
+          </div>
+        )}
       </div>
 
       <ConfirmDialog

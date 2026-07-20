@@ -27,8 +27,35 @@ const CLIENT_ONLY_ACTIONS = new Set([
 
 router.get('/', requireRole('HR Director'), async (req, res) => {
   try {
-    const logs = await AuditLog.find(companyFilter(req)).sort({ createdAt: -1 }).limit(100);
-    res.json(logs);
+    const { page, limit, search, from, to } = req.query;
+
+    // Legacy callers (loadAll()'s initial hydrate, Dashboard's recent-activity
+    // preview) get the same capped-100-most-recent array as before — nothing
+    // downstream of those expects pagination. Only opt into paging/filtering
+    // when a caller explicitly asks for it via page/limit.
+    if (!page && !limit) {
+      const logs = await AuditLog.find(companyFilter(req)).sort({ createdAt: -1 }).limit(100);
+      return res.json(logs);
+    }
+
+    const filter = { ...companyFilter(req) };
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) filter.createdAt.$lte = new Date(to);
+    }
+    if (search) {
+      const re = new RegExp(String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [{ action: re }, { subject: re }, { details: re }, { 'actor.name': re }];
+    }
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+    const [rows, total] = await Promise.all([
+      AuditLog.find(filter).sort({ createdAt: -1 }).skip((pageNum - 1) * limitNum).limit(limitNum),
+      AuditLog.countDocuments(filter),
+    ]);
+    res.json({ rows, total, page: pageNum, limit: limitNum });
   } catch (err) {
     res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: err.message } });
   }

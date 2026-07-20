@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
@@ -17,7 +17,7 @@ const PAGE_SIZE = 6;
 export default function Employees() {
   const {
     employees, search, addEmployee, updateEmployee, deleteEmployee, importEmployees,
-    addUserAccount, toast, getMasterValues,
+    addUserAccount, toast, getMasterValues, searchEmployees,
   } = useHRMS();
   const navigate = useNavigate();
   const departments = getMasterValues('departments');
@@ -29,6 +29,12 @@ export default function Employees() {
   const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
+
+  // Server-side paginated/searched/sorted directory table — independent of
+  // the `employees` array above, which stays a full unpaginated fetch used
+  // everywhere else (manager pickers, CSV export/import, org chart, stats).
+  const [dirRows, setDirRows] = useState([]);
+  const [dirTotal, setDirTotal] = useState(0);
 
   const handleExportCsv = () => {
     const dataToExport = employees.map((e) => {
@@ -50,33 +56,21 @@ export default function Employees() {
     toast('success', 'Employees list exported successfully');
   };
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return employees.filter((e) => {
-      const matchDept = dept === 'All' || e.dept === dept;
-      const matchQ = !q
-        || e.name.toLowerCase().includes(q)
-        || e.role.toLowerCase().includes(q)
-        || e.dept.toLowerCase().includes(q)
-        || e.loc.toLowerCase().includes(q);
-      return matchDept && matchQ;
-    });
-  }, [employees, dept, search]);
+  const totalPages = Math.max(1, Math.ceil(dirTotal / PAGE_SIZE));
 
-  const sorted = useMemo(() => {
-    const list = [...filtered];
-    const sorters = {
-      name: (a, b) => a.name.localeCompare(b.name),
-      dept: (a, b) => a.dept.localeCompare(b.dept) || a.name.localeCompare(b.name),
-      salary: (a, b) => Number(b.salary || 0) - Number(a.salary || 0),
-      rating: (a, b) => Number(b.rating || 0) - Number(a.rating || 0),
-      newest: (a, b) => String(b.joinDate || '').localeCompare(String(a.joinDate || '')),
-    };
-    return list.sort(sorters[sort] || sorters.name);
-  }, [filtered, sort]);
+  const refreshDirectory = () => {
+    searchEmployees({ page, limit: PAGE_SIZE, search: search.trim(), dept: dept === 'All' ? undefined : dept, sort })
+      .then((data) => { setDirRows(data.rows); setDirTotal(data.total); })
+      .catch(() => {});
+  };
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const pageItems = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Debounced so every keystroke in the (global, shared-with-Topbar) search
+  // box doesn't fire a request — only once typing pauses.
+  useEffect(() => {
+    const handle = setTimeout(refreshDirectory, 300);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, dept, sort, search]);
 
   useEffect(() => {
     setPage(1);
@@ -103,6 +97,7 @@ export default function Employees() {
       }
     }
     setFormOpen(false);
+    refreshDirectory();
   };
 
   const activeCount = employees.filter((e) => e.status === 'active').length;
@@ -133,7 +128,7 @@ export default function Employees() {
         <div className="card-head">
           <div>
             <div className="card-title">People directory</div>
-            <div className="card-sub">{filtered.length} of {employees.length} shown</div>
+            <div className="card-sub">{dirTotal} of {employees.length} shown</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost" onClick={handleExportCsv}>Export CSV</button>
@@ -160,11 +155,11 @@ export default function Employees() {
           </label>
         </div>
 
-        {filtered.length === 0 ? (
+        {dirRows.length === 0 ? (
           <div className="empty">No employees match your filters.</div>
         ) : (
           <div className="emp-grid" style={{ marginTop: 16 }}>
-            {pageItems.map((e) => (
+            {dirRows.map((e) => (
               <div className="emp-card" key={e.id}>
                 <div className="emp-card-head">
                   <Avatar name={e.name} photo={e.photo} size={44} />
@@ -204,7 +199,7 @@ export default function Employees() {
           </div>
         )}
 
-        {sorted.length > PAGE_SIZE && (
+        {dirTotal > PAGE_SIZE && (
           <div className="pager">
             <button className="mini-btn" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
             <span className="pager-meta">Page {page} of {totalPages}</span>
@@ -218,7 +213,7 @@ export default function Employees() {
       <CsvImportModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onImport={importEmployees}
+        onImport={async (rows) => { await importEmployees(rows); refreshDirectory(); }}
         departments={departments}
         locations={locations}
         employees={employees}
@@ -230,7 +225,7 @@ export default function Employees() {
         message={confirm ? `Remove ${confirm.name} from the directory? This can’t be undone.` : ''}
         confirmLabel="Remove"
         onCancel={() => setConfirm(null)}
-        onConfirm={async () => { await deleteEmployee(confirm.id); setConfirm(null); }}
+        onConfirm={async () => { await deleteEmployee(confirm.id); setConfirm(null); refreshDirectory(); }}
       />
     </div>
   );
