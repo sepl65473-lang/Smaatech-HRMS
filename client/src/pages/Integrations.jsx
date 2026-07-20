@@ -41,6 +41,11 @@ export default function Integrations() {
     return Object.entries(byCategory).filter(([, amount]) => amount > 0);
   }, [cyclePayroll]);
 
+  // Demo mode: this section simulates what device connectivity/sync would
+  // look like — it never opens a real network connection. Real ZKTeco/eSSL
+  // integration talks a vendor-specific TCP protocol (e.g. via node-zklib),
+  // not plain HTTP, and needs actual hardware on the network to build
+  // against; that's a separate, hardware-dependent piece of work.
   const testConnection = (deviceId) => {
     setDevices((list) => list.map((d) => (d.id === deviceId ? { ...d, status: 'pinging' } : d)));
     setTimeout(() => {
@@ -48,10 +53,10 @@ export default function Integrations() {
         if (d.id === deviceId) {
           const isValidIp = d.ip.match(/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/);
           if (isValidIp) {
-            toast('success', `Connection to <strong>${d.name}</strong> successful (Ping: 32ms)`);
+            toast('success', `Simulated check passed for <strong>${d.name}</strong> — demo mode, no real device was contacted`);
             return { ...d, status: 'online' };
           } else {
-            toast('error', `Failed to connect to <strong>${d.name}</strong> at ${d.ip || 'empty'}:${d.port}`);
+            toast('error', `Simulated check failed for <strong>${d.name}</strong> — "${d.ip || 'empty'}" isn't a valid IP address`);
             return { ...d, status: 'offline' };
           }
         }
@@ -91,8 +96,8 @@ export default function Integrations() {
 
     setStaging((list) => [...punches, ...list]);
     setDevices((list) => list.map((d) => (d.id === device.id ? { ...d, lastSync: new Date().toLocaleTimeString('en-IN') } : d)));
-    audit('Biometric device synced', device.name, `${punches.length} punches pulled`);
-    toast('success', `Pulled <strong>${punches.length}</strong> punches from <strong>${device.name}</strong>`);
+    audit('Biometric device synced', device.name, `${punches.length} sample punches generated (demo mode)`);
+    toast('success', `Generated <strong>${punches.length}</strong> sample punches for <strong>${device.name}</strong> — demo data, not pulled from a real device`);
   };
 
   const reconcile = async (punch) => {
@@ -123,6 +128,9 @@ export default function Integrations() {
             <div className="card-sub">Configure network settings, test connection, & sync logs</div>
           </div>
         </div>
+        <div className="empty" style={{ textAlign: 'left', marginBottom: 4 }}>
+          <strong>Demo mode.</strong> Ping tests and syncs below are simulated — no real device is contacted and punch data is randomly generated for demonstration. Connecting real ZKTeco/eSSL hardware needs its own vendor protocol integration (not built here).
+        </div>
         <div className="settings-rows">
           {devices.map((d) => (
             <div className="settings-row" key={d.id} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
@@ -131,7 +139,7 @@ export default function Integrations() {
                   <div className="settings-row-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {d.name}
                     <span className={`state-badge ${d.status === 'online' ? 'approved' : d.status === 'offline' ? 'declined' : d.status === 'pinging' ? 'pending' : 'approved'}`} style={{ textTransform: 'none' }}>
-                      {d.status === 'online' ? 'Connected ✓' : d.status === 'offline' ? 'Offline ❌' : d.status === 'pinging' ? 'Testing...' : 'Ready'}
+                      {d.status === 'online' ? 'Connected (Demo)' : d.status === 'offline' ? 'Offline' : d.status === 'pinging' ? 'Testing...' : 'Demo — not connected'}
                     </span>
                   </div>
                   <div className="settings-row-sub">{d.lastSync ? `Last synced ${d.lastSync}` : 'Never synced'}</div>
