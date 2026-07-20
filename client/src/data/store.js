@@ -205,10 +205,13 @@ export const geofenceApi = {
 };
 
 export const authApi = {
-  // Returns { accessToken, user } — caller decides when to commit the
-  // session (HRMSContext defers this until any 2FA step finishes).
+  // Returns either { accessToken, user } (session issued immediately) or
+  // { requiresTwoFactor: true, email } (server emailed a real OTP and is
+  // waiting on verifyTwoFactor before any session exists) — the server
+  // decides which, based on that company's Settings > Two-factor toggle.
   login: (email, password) => apiFetch('/auth/login', { method: 'POST', body: { email, password }, skipAuth: true }),
   faceLogin: (email) => apiFetch('/auth/face-login', { method: 'POST', body: { email }, skipAuth: true }),
+  verifyTwoFactor: (email, otp) => apiFetch('/auth/verify-2fa', { method: 'POST', body: { email, otp }, skipAuth: true }),
   async me() {
     try {
       const { user } = await apiFetch('/auth/me');

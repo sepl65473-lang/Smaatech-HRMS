@@ -158,20 +158,18 @@ export function HRMSProvider({ children }) {
     }
   }, [hydrate]);
 
-  // Auth is now a real server session (JWT access token in memory + httpOnly
+  // Auth is a real server session (JWT access token in memory + httpOnly
   // refresh cookie — see src/lib/apiClient.js) rather than a plain object
-  // trusted from localStorage. `login`/`loginWithFace` return the token
-  // instead of committing it immediately so a (still-simulated) 2FA step can
-  // gate when the session actually takes effect, same as before.
-  const login = useCallback(async (email, password) => {
-    const { accessToken, user } = await authApi.login(email, password);
-    return { accessToken, user, requiresTwoFactor: Boolean(settings.twoFactor) };
-  }, [settings.twoFactor]);
+  // trusted from localStorage. The server — not this client — decides
+  // whether 2FA applies (per-company Settings.twoFactor): `login`/
+  // `loginWithFace` just forward whatever shape it returns, either
+  // {accessToken, user} (session issued) or {requiresTwoFactor, email}
+  // (a real OTP was just emailed, no session exists yet).
+  const login = useCallback((email, password) => authApi.login(email, password), []);
 
-  const loginWithFace = useCallback(async (email) => {
-    const { accessToken, user } = await authApi.faceLogin(email);
-    return { accessToken, user, requiresTwoFactor: Boolean(settings.twoFactor) };
-  }, [settings.twoFactor]);
+  const loginWithFace = useCallback((email) => authApi.faceLogin(email), []);
+
+  const verifyTwoFactor = useCallback((email, otp) => authApi.verifyTwoFactor(email, otp), []);
 
   const finishLogin = useCallback(async (accessToken, user) => {
     setAccessToken(accessToken);
@@ -1134,7 +1132,7 @@ export function HRMSProvider({ children }) {
   const pendingLeaves = leaves.filter((l) => l.status === 'pending');
 
   const value = {
-    isAuthenticated: Boolean(authUser), login, loginWithFace, finishLogin, logout, forgotPassword, resetPassword,
+    isAuthenticated: Boolean(authUser), login, loginWithFace, verifyTwoFactor, finishLogin, logout, forgotPassword, resetPassword,
     loadSessions, revokeSession, revokeOtherSessions, searchAuditLog, searchEmployees,
     booting, loading, lastSyncedAt,
     employees, leaves, attendance, payroll,

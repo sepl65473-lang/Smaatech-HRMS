@@ -6,7 +6,7 @@ import ForgotPasswordModal from './ForgotPasswordModal';
 
 export default function LoginScreen() {
   const {
-    login, loginWithFace, finishLogin, forgotPassword: requestPasswordResetOtp,
+    login, loginWithFace, verifyTwoFactor, finishLogin, forgotPassword: requestPasswordResetOtp,
     resetPassword: resetPasswordOnServer, settings, toast,
   } = useHRMS();
   const profiles = settings.loginProfiles?.length ? settings.loginProfiles : DEFAULT_LOGIN_PROFILES;
@@ -17,39 +17,31 @@ export default function LoginScreen() {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Two-Factor Authentication state. Real password/face auth has already
-  // happened server-side by this point (a session exists) — this step is
-  // still a client-simulated speed bump, not a real second factor, same as
-  // before; it just gates when the app commits to showing that session.
-  const [pendingAuth, setPendingAuth] = useState(null); // { accessToken, user }
+  // Two-Factor Authentication state. The server decides whether 2FA is
+  // required (per-company Settings.twoFactor) and, if so, emails a real
+  // code and withholds any session until /verify-2fa confirms it — no
+  // token exists client-side until that succeeds, unlike the old flow.
+  const [pendingEmail, setPendingEmail] = useState('');
+  const [authMethod, setAuthMethod] = useState('password'); // 'password' | 'face', for Resend
   const [otpMode, setOtpMode] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
   const [otpError, setOtpError] = useState('');
 
-  const sendOtpSim = (user) => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedOtp(code);
-    setOtpError('');
-    setOtpCode('');
-    // Trigger simulated notification banner
-    setTimeout(() => {
-      toast('info', `🔐 <strong>SMS/Auth Simulator:</strong> Verification code for ${user.name} is: <strong style="font-size: 15px; color: #3b7ddd; letter-spacing: 1.5px; border-bottom: 2px dashed #3b7ddd;">${code}</strong>`, 12000);
-    }, 450);
-  };
-
-  const proceedAfterAuth = async ({ accessToken, user, requiresTwoFactor }) => {
-    if (requiresTwoFactor) {
-      setPendingAuth({ accessToken, user });
+  const proceedAfterAuth = async (result) => {
+    if (result.requiresTwoFactor) {
+      setPendingEmail(result.email);
+      setOtpCode('');
+      setOtpError('');
       setOtpMode(true);
-      sendOtpSim(user);
+      toast('info', `We've emailed a 6-digit verification code to <strong>${result.email}</strong>.`);
     } else {
-      await finishLogin(accessToken, user);
+      await finishLogin(result.accessToken, result.user);
     }
   };
 
   const submit = async () => {
     try {
+      setAuthMethod('password');
       const result = await login(email.trim(), password);
       setError('');
       await proceedAfterAuth(result);
@@ -59,12 +51,32 @@ export default function LoginScreen() {
   };
 
   const verifyOtp = async () => {
-    if (otpCode.trim() === generatedOtp) {
+    try {
+      const { accessToken, user } = await verifyTwoFactor(pendingEmail, otpCode.trim());
       setOtpMode(false);
-      await finishLogin(pendingAuth.accessToken, pendingAuth.user);
-      setPendingAuth(null);
-    } else {
-      setOtpError('Incorrect code. Check simulated code in notification toast.');
+      setPendingEmail('');
+      setOtpCode('');
+      await finishLogin(accessToken, user);
+    } catch (err) {
+      setOtpError(err.message || 'Incorrect or expired code.');
+    }
+  };
+
+  const resendCode = async () => {
+    try {
+      const result = authMethod === 'face' ? await loginWithFace(pendingEmail) : await login(email.trim(), password);
+      if (result.requiresTwoFactor) {
+        setPendingEmail(result.email);
+        setOtpCode('');
+        setOtpError('');
+        toast('info', `New code sent to <strong>${result.email}</strong>.`);
+      } else {
+        // 2FA got turned off server-side mid-flow — just finish signing in.
+        setOtpMode(false);
+        await finishLogin(result.accessToken, result.user);
+      }
+    } catch (err) {
+      setOtpError(err.message || 'Could not resend the code.');
     }
   };
 
@@ -160,7 +172,7 @@ export default function LoginScreen() {
             {/* Title */}
             <h1 className="login-title">Two-Factor Authentication</h1>
             <p className="login-description">
-              We've sent a 6-digit verification code to your device.<br />
+              We've emailed a 6-digit verification code to {pendingEmail || 'your inbox'}.<br />
               Enter the code below to complete sign in.
             </p>
 
@@ -188,14 +200,14 @@ export default function LoginScreen() {
               <button
                 type="button"
                 className="login-forgot-btn"
-                onClick={() => sendOtpSim(pendingAuth?.user)}
+                onClick={resendCode}
               >
                 Resend Code
               </button>
               <button
                 type="button"
                 className="login-forgot-btn"
-                onClick={() => { setOtpMode(false); setPendingAuth(null); }}
+                onClick={() => { setOtpMode(false); setPendingEmail(''); setOtpCode(''); setOtpError(''); }}
               >
                 Back to Login
               </button>
@@ -326,6 +338,7 @@ export default function LoginScreen() {
         onMatch={async (profile) => {
           setFaceOpen(false);
           try {
+            setAuthMethod('face');
             await proceedAfterAuth(await loginWithFace(profile.email));
           } catch (err) {
             toast('error', err.message || 'Face sign-in failed.');
