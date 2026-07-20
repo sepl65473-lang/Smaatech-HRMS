@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Install client dependencies
+        run: npm --prefix client install
+
+      - name: Install server dependencies
+        run: npm --prefix server install
+
+      - name: Lint client
+        run: npm --prefix client run lint
+
+      - name: Test server
+        run: npm --prefix server run test
+
+      - name: Test client
+        run: npm --prefix client run test
+
+      - name: Build client
+        run: npm --prefix client run build
