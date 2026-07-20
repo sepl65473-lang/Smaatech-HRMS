@@ -84,6 +84,21 @@ export function HRMSProvider({ children }) {
   }, []);
 
 
+  // Local-only echo for actions the server already logs via logAudit() on the
+  // mutating request itself — gives instant Activity history feedback without
+  // writing a second, duplicate AuditLog document for the same real event.
+  const auditLocal = useCallback((action, subject, details = '') => {
+    setAuditLog((list) => [{
+      id: uid('audit'),
+      action,
+      subject,
+      details,
+      actor: currentUser?.name || 'System',
+      role: currentUser?.role || '',
+      at: new Date().toISOString(),
+    }, ...list].slice(0, 100));
+  }, [currentUser]);
+
   const audit = useCallback(async (action, subject, details = '') => {
     try {
       const created = await auditLogsApi.create({ action, subject, details });
@@ -272,7 +287,7 @@ export function HRMSProvider({ children }) {
     setEmployees((list) => [created, ...list]);
     setAttendance((list) => [attendanceRow, ...list]);
     setPayroll((list) => [payrollRow, ...list]);
-    audit('Employee added', created.name, created.dept);
+    auditLocal('Employee added', created.name, created.dept);
     if (!silent) toast('success', `<strong>${created.name}</strong> added to the team`);
     return created;
   };
@@ -314,7 +329,7 @@ export function HRMSProvider({ children }) {
     if (Object.keys(linkedPatch).length) {
       setLeaves((list) => list.map((l) => (l.empId === id ? { ...l, ...linkedPatch } : l)));
     }
-    audit('Employee updated', updated.name, updated.dept);
+    auditLocal('Employee updated', updated.name, updated.dept);
     toast('success', `<strong>${updated.name}</strong> updated`);
     return updated;
   };
@@ -345,7 +360,7 @@ export function HRMSProvider({ children }) {
     // employeeId on next login/refresh/me (see sanitizeEmployeeLink in
     // server/src/routes/auth.js) — no client-side cleanup needed here.
 
-    audit('Employee removed', emp ? emp.name : id, 'Linked records removed');
+    auditLocal('Employee removed', emp ? emp.name : id, 'Linked records removed');
     toast('info', `<strong>${emp ? emp.name : 'Employee'}</strong> removed`);
   };
 
@@ -410,7 +425,7 @@ export function HRMSProvider({ children }) {
   const addUserAccount = async (data) => {
     const created = await usersApi.create(data);
     setUsers((list) => [created, ...list]);
-    audit('Login created', created.name, created.email);
+    auditLocal('Login created', created.name, created.email);
     toast('success', `Login created for <strong>${created.name}</strong>`);
     return created;
   };
@@ -418,7 +433,7 @@ export function HRMSProvider({ children }) {
   const updateUserAccount = async (id, patch) => {
     const updated = await usersApi.update(id, patch);
     setUsers((list) => list.map((u) => (u.id === id ? updated : u)));
-    audit('Login updated', updated.name, updated.email);
+    auditLocal('Login updated', updated.name, updated.email);
     toast('success', `<strong>${updated.name}</strong>'s login updated`);
     return updated;
   };
@@ -427,7 +442,7 @@ export function HRMSProvider({ children }) {
     const user = users.find((u) => u.id === id);
     await usersApi.remove(id);
     setUsers((list) => list.filter((u) => u.id !== id));
-    audit('Login removed', user ? user.name : id);
+    auditLocal('Login removed', user ? user.name : id);
     toast('info', `<strong>${user ? user.name : 'Login'}</strong> removed`);
   };
 
@@ -448,7 +463,7 @@ export function HRMSProvider({ children }) {
     };
     const created = await leavesApi.create(record);
     setLeaves((list) => [created, ...list]);
-    audit('Leave requested', created.name, `${created.type} leave`);
+    auditLocal('Leave requested', created.name, `${created.type} leave`);
     toast('success', `Leave request raised for <strong>${created.name}</strong>`);
     return created;
   };
@@ -488,7 +503,7 @@ export function HRMSProvider({ children }) {
       const nextRole = updated.approvalStages?.[updated.currentStage];
       toast('info', `Stage approved for ${updated.name}${nextRole ? ` — awaiting <strong>${nextRole}</strong>` : ''}`);
     }
-    audit(`Leave ${action === 'declined' ? 'declined' : (updated.status === 'approved' ? 'approved' : 'stage approved')}`, updated.name, `${updated.start} to ${updated.end}`);
+    auditLocal(`Leave ${action === 'declined' ? 'declined' : (updated.status === 'approved' ? 'approved' : 'stage approved')}`, updated.name, `${updated.start} to ${updated.end}`);
     return updated;
   };
   const approveLeave = (id) => setLeaveStatus(id, 'approved');
@@ -497,7 +512,7 @@ export function HRMSProvider({ children }) {
   const deleteLeave = async (id) => {
     await leavesApi.remove(id);
     setLeaves((list) => list.filter((l) => l.id !== id));
-    audit('Leave deleted', id);
+    auditLocal('Leave deleted', id);
     toast('info', 'Leave request deleted');
   };
 
@@ -624,7 +639,7 @@ export function HRMSProvider({ children }) {
       components: { earnings, deductions },
     });
     setPayroll((list) => list.map((p) => (p.id === id ? updated : p)));
-    audit('Salary structure updated', updated.name, updated.cycle);
+    auditLocal('Salary structure updated', updated.name, updated.cycle);
     toast('success', `Salary structure updated for <strong>${updated.name}</strong>`);
     return updated;
   };
@@ -632,7 +647,7 @@ export function HRMSProvider({ children }) {
   const markPaid = async (id) => {
     const updated = await payrollApi.update(id, { status: 'paid' });
     setPayroll((list) => list.map((p) => (p.id === id ? updated : p)));
-    audit('Payslip marked paid', updated.name, updated.cycle);
+    auditLocal('Payslip marked paid', updated.name, updated.cycle);
     toast('success', `Slip paid for <strong>${updated.name}</strong>`);
   };
 
@@ -780,7 +795,7 @@ export function HRMSProvider({ children }) {
   const addExpense = async (data) => {
     const created = await expensesApi.create({ status: 'pending', reason: '', ...data });
     setExpenses((list) => [created, ...list]);
-    audit('Expense claim filed', created.name, `${created.category} - ₹${created.amount}`);
+    auditLocal('Expense claim filed', created.name, `${created.category} - ₹${created.amount}`);
     toast('success', `Expense claim of <strong>₹${created.amount}</strong> submitted.`);
     return created;
   };
@@ -792,14 +807,14 @@ export function HRMSProvider({ children }) {
     const updated = status === 'approved' ? await expensesApi.approve(id) : await expensesApi.decline(id, reason);
     setExpenses((list) => list.map((e) => (e.id === id ? updated : e)));
     if (status === 'declined') {
-      audit('Expense claim declined', updated.name, `₹${updated.amount}`);
+      auditLocal('Expense claim declined', updated.name, `₹${updated.amount}`);
       toast('info', `Expense claim for ${updated.name} has been <strong>declined</strong>.`);
     } else if (updated.status === 'approved') {
-      audit('Expense claim approved', updated.name, `₹${updated.amount}`);
+      auditLocal('Expense claim approved', updated.name, `₹${updated.amount}`);
       toast('success', `Expense claim for ${updated.name} has been <strong>approved</strong>.`);
     } else {
       const nextRole = updated.approvalStages?.[updated.currentStage];
-      audit('Expense claim stage approved', updated.name, `₹${updated.amount}`);
+      auditLocal('Expense claim stage approved', updated.name, `₹${updated.amount}`);
       toast('info', `Stage approved for ${updated.name}'s claim${nextRole ? ` — awaiting <strong>${nextRole}</strong>` : ''}`);
     }
     return updated;
@@ -808,7 +823,7 @@ export function HRMSProvider({ children }) {
   const addAsset = async (data) => {
     const created = await assetsApi.create({ status: 'available', assignedToEmpId: null, assignedToEmpName: '', assignedDate: '', ...data });
     setAssets((list) => [created, ...list]);
-    audit('Asset added to inventory', created.name, created.serialNumber);
+    auditLocal('Asset added to inventory', created.name, created.serialNumber);
     toast('success', `Asset <strong>${created.name}</strong> added successfully.`);
     return created;
   };
@@ -816,7 +831,7 @@ export function HRMSProvider({ children }) {
   const assignAsset = async (id, empId, empName, date) => {
     const updated = await assetsApi.update(id, { status: 'assigned', assignedToEmpId: empId, assignedToEmpName: empName, assignedDate: date });
     setAssets((list) => list.map((a) => (a.id === id ? updated : a)));
-    audit('Asset assigned', updated.name, `To ${empName}`);
+    auditLocal('Asset assigned', updated.name, `To ${empName}`);
     toast('success', `Asset <strong>${updated.name}</strong> assigned to ${empName}.`);
     return updated;
   };
@@ -824,7 +839,7 @@ export function HRMSProvider({ children }) {
   const returnAsset = async (id) => {
     const updated = await assetsApi.update(id, { status: 'available', assignedToEmpId: null, assignedToEmpName: '', assignedDate: '' });
     setAssets((list) => list.map((a) => (a.id === id ? updated : a)));
-    audit('Asset returned', updated.name, 'Returned to inventory');
+    auditLocal('Asset returned', updated.name, 'Returned to inventory');
     toast('info', `Asset <strong>${updated.name}</strong> returned to inventory.`);
     return updated;
   };
@@ -832,7 +847,7 @@ export function HRMSProvider({ children }) {
   const addJob = async (data) => {
     const created = await jobsApi.create({ status: 'Open', ...data });
     setJobs((list) => [created, ...list]);
-    audit('Job posting created', created.title, created.department);
+    auditLocal('Job posting created', created.title, created.department);
     toast('success', `Job posting <strong>${created.title}</strong> created.`);
     return created;
   };
@@ -840,7 +855,7 @@ export function HRMSProvider({ children }) {
   const updateJobStatus = async (id, status) => {
     const updated = await jobsApi.update(id, { status });
     setJobs((list) => list.map((j) => (j.id === id ? updated : j)));
-    audit('Job status updated', updated.title, status);
+    auditLocal('Job status updated', updated.title, status);
     toast('info', `Job <strong>${updated.title}</strong> marked as ${status}.`);
     return updated;
   };
@@ -849,7 +864,7 @@ export function HRMSProvider({ children }) {
   const addDocument = async (formData) => {
     const created = await documentsApi.create(formData);
     setDocuments((list) => [created, ...list]);
-    audit('Document uploaded', created.title, created.owner);
+    auditLocal('Document uploaded', created.title, created.owner);
     toast('success', `Document <strong>${created.title}</strong> uploaded successfully.`);
     return created;
   };
@@ -857,7 +872,7 @@ export function HRMSProvider({ children }) {
   const updateDocument = async (id, formData) => {
     const updated = await documentsApi.update(id, formData);
     setDocuments((list) => list.map((d) => (d.id === id ? updated : d)));
-    audit('Document updated', updated.title, updated.owner);
+    auditLocal('Document updated', updated.title, updated.owner);
     toast('success', `Document <strong>${updated.title}</strong> updated.`);
     return updated;
   };
@@ -865,7 +880,7 @@ export function HRMSProvider({ children }) {
   const deleteDocument = async (id) => {
     await documentsApi.remove(id);
     setDocuments((list) => list.filter((d) => d.id !== id));
-    audit('Document deleted', id);
+    auditLocal('Document deleted', id);
     toast('info', 'Document deleted.');
   };
 
@@ -877,7 +892,7 @@ export function HRMSProvider({ children }) {
   const addResignation = async (data) => {
     const created = await resignationsApi.create(data);
     setResignations((list) => [created, ...list]);
-    audit('Resignation filed', created.employeeName, created.resignationDate);
+    auditLocal('Resignation filed', created.employeeName, created.resignationDate);
     toast('success', `Resignation filed successfully.`);
     return created;
   };
@@ -885,7 +900,7 @@ export function HRMSProvider({ children }) {
   const signOffClearance = async (id, clearance) => {
     const updated = await resignationsApi.signOffClearance(id, clearance);
     setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
-    audit(`Clearance sign-off (${clearance.dept})`, updated.employeeName, clearance.status);
+    auditLocal(`Clearance sign-off (${clearance.dept})`, updated.employeeName, clearance.status);
     toast('success', `${clearance.dept} clearance status updated to ${clearance.status}.`);
     return updated;
   };
@@ -893,7 +908,7 @@ export function HRMSProvider({ children }) {
   const processFnF = async (id, fnf) => {
     const updated = await resignationsApi.processFnF(id, fnf);
     setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
-    audit('FnF Settlement processed', updated.employeeName, `Payout: ₹${updated.fnfSettlement.netPayout}`);
+    auditLocal('FnF Settlement processed', updated.employeeName, `Payout: ₹${updated.fnfSettlement.netPayout}`);
     toast('success', `FnF Settlement calculations processed.`);
     return updated;
   };
@@ -905,7 +920,7 @@ export function HRMSProvider({ children }) {
     const empList = await employeesApi.list();
     setEmployees(empList);
 
-    audit('FnF Paid & Employee Terminated', updated.employeeName, 'Payout finalized');
+    auditLocal('FnF Paid & Employee Terminated', updated.employeeName, 'Payout finalized');
     toast('success', `Full & Final payout processed. Employee marked Exited.`);
     return updated;
   };
@@ -913,7 +928,7 @@ export function HRMSProvider({ children }) {
   const updateResignationStatus = async (id, patch) => {
     const updated = await resignationsApi.update(id, patch);
     setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
-    audit('Resignation status updated', updated.employeeName, updated.status);
+    auditLocal('Resignation status updated', updated.employeeName, updated.status);
     toast('info', `Resignation status updated to ${updated.status}.`);
     return updated;
   };
@@ -922,7 +937,7 @@ export function HRMSProvider({ children }) {
   const requestCorrection = async (data) => {
     const created = await attendanceCorrectionsApi.create(data);
     setAttendanceCorrections((list) => [created, ...list]);
-    audit('Attendance correction requested', created.employeeName, created.date);
+    auditLocal('Attendance correction requested', created.employeeName, created.date);
     toast('success', `Attendance correction requested successfully.`);
     return created;
   };
@@ -934,7 +949,7 @@ export function HRMSProvider({ children }) {
     const attList = await attendanceApi.list();
     setAttendance(attList);
 
-    audit('Attendance correction approved', updated.employeeName, updated.date);
+    auditLocal('Attendance correction approved', updated.employeeName, updated.date);
     toast('success', `Correction approved. Attendance marked present.`);
     return updated;
   };
@@ -942,7 +957,7 @@ export function HRMSProvider({ children }) {
   const rejectCorrection = async (id) => {
     const updated = await attendanceCorrectionsApi.reject(id);
     setAttendanceCorrections((list) => list.map((c) => (c.id === id ? updated : c)));
-    audit('Attendance correction rejected', updated.employeeName, updated.date);
+    auditLocal('Attendance correction rejected', updated.employeeName, updated.date);
     toast('info', `Correction request rejected.`);
     return updated;
   };
