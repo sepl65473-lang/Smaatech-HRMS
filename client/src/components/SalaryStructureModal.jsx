@@ -3,13 +3,15 @@ import Modal from './Modal';
 import { IconPlus, IconTrash } from './Icons';
 import { formatINR } from '../lib/helpers';
 
-function ComponentList({ label, items, onChange }) {
+const DEDUCTION_CATEGORIES = ['PF', 'ESI', 'PT', 'TDS', 'Other'];
+
+function ComponentList({ label, items, onChange, categories }) {
   const update = (i, key, value) => {
     const next = items.map((c, idx) => (idx === i ? { ...c, [key]: value } : c));
     onChange(next);
   };
   const remove = (i) => onChange(items.filter((_, idx) => idx !== i));
-  const add = () => onChange([...items, { name: '', amount: 0 }]);
+  const add = () => onChange([...items, categories ? { name: '', amount: 0, category: 'Other' } : { name: '', amount: 0 }]);
   const total = items.reduce((sum, c) => sum + Number(c.amount || 0), 0);
 
   return (
@@ -17,6 +19,11 @@ function ComponentList({ label, items, onChange }) {
       <span className="field-label">{label} <span className="muted-text">· {formatINR(total)}</span></span>
       {items.map((c, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+          {categories && (
+            <select className="input" style={{ maxWidth: 100 }} value={c.category || 'Other'} onChange={(e) => update(i, 'category', e.target.value)}>
+              {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+            </select>
+          )}
           <input className="input" value={c.name} onChange={(e) => update(i, 'name', e.target.value)} placeholder="Component name" />
           <input type="number" className="input" style={{ maxWidth: 130 }} value={c.amount} onChange={(e) => update(i, 'amount', e.target.value)} placeholder="0" />
           <button className="icon-btn sm danger" title="Remove" onClick={() => remove(i)}>
@@ -37,7 +44,7 @@ export default function SalaryStructureModal({ open, slip, onClose, onSave }) {
   useEffect(() => {
     if (open && slip) {
       setEarnings(slip.components?.earnings || [{ name: 'Basic + allowances', amount: slip.gross }]);
-      setDeductions(slip.components?.deductions || [{ name: 'Statutory deductions', amount: slip.deductions }]);
+      setDeductions(slip.components?.deductions || [{ name: 'Statutory deductions', amount: slip.deductions, category: 'Other' }]);
       setLopDays(slip.lopDays || 0);
     }
   }, [open, slip]);
@@ -65,7 +72,7 @@ export default function SalaryStructureModal({ open, slip, onClose, onSave }) {
     >
       <div className="form-grid">
         <ComponentList label="Earnings" items={earnings} onChange={setEarnings} />
-        <ComponentList label="Deductions" items={deductions} onChange={setDeductions} />
+        <ComponentList label="Deductions" items={deductions} onChange={setDeductions} categories={DEDUCTION_CATEGORIES} />
         <label className="field field-full">
           <span className="field-label">LOP (loss of pay) days this cycle</span>
           <input type="number" min="0" max="31" className="input" value={lopDays} onChange={(e) => setLopDays(e.target.value)} />

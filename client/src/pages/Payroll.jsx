@@ -172,7 +172,16 @@ export default function Payroll() {
             <div className="payslip-row"><span>Department</span><strong>{slip.dept}</strong></div>
             <div className="payslip-row"><span>Cycle</span><strong>{slip.cycle}</strong></div>
             <div className="payslip-row"><span>Gross salary</span><strong>{formatINR(slip.gross)}</strong></div>
-            <div className="payslip-row"><span>Deductions</span><strong>- {formatINR(slip.deductions)}</strong></div>
+            {slip.components?.deductions?.length ? (
+              slip.components.deductions.map((d, i) => (
+                <div className="payslip-row" key={i}>
+                  <span>{d.name || d.category}{d.category && d.category !== 'Other' ? ` (${d.category})` : ''}</span>
+                  <strong>- {formatINR(d.amount)}</strong>
+                </div>
+              ))
+            ) : (
+              <div className="payslip-row"><span>Deductions</span><strong>- {formatINR(slip.deductions)}</strong></div>
+            )}
             {slip.lopDays > 0 && (
               <div className="payslip-row"><span>LOP ({slip.lopDays} days)</span><strong>- {formatINR(slip.lopAmount || 0)}</strong></div>
             )}

@@ -8,6 +8,7 @@ const emptyForm = (depts, locs) => ({
   email: '', phone: '', status: 'active', joinDate: '', dob: '', salary: '',
   bankAccount: '', ifsc: '', managerId: '', photo: '',
   employmentType: 'Full-time',
+  pan: '', uan: '', esiNumber: '', taxRegime: 'new', state: '',
 });
 
 const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Contract', 'Intern'];
@@ -102,7 +103,9 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
     if (form.salary && Number(form.salary) < 0) er.salary = 'Cannot be negative';
     if (canCreateLogin && createLogin) {
       if (!/^\S+@\S+\.\S+$/.test(loginEmail)) er.loginEmail = 'Enter a valid login email';
-      if (!loginPassword || loginPassword.length < 6) er.loginPassword = 'Password must be at least 6 characters';
+      if (!loginPassword || loginPassword.length < 8 || !/[A-Za-z]/.test(loginPassword) || !/[0-9]/.test(loginPassword)) {
+        er.loginPassword = 'Password must be at least 8 characters and include a letter and a number';
+      }
     }
     setErrors(er);
     return Object.keys(er).length === 0;
@@ -221,6 +224,24 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
         </Field>
         <Field label="IFSC code">
           <input className="input" value={form.ifsc} onChange={set('ifsc')} placeholder="e.g. HDFC0001234" />
+        </Field>
+        <Field label="State (for Professional Tax)">
+          <input className="input" value={form.state} onChange={set('state')} placeholder="e.g. Karnataka" />
+        </Field>
+        <Field label="PAN">
+          <input className="input" style={{ textTransform: 'uppercase' }} value={form.pan} onChange={set('pan')} placeholder="ABCDE1234F" />
+        </Field>
+        <Field label="PF UAN">
+          <input className="input" value={form.uan} onChange={set('uan')} placeholder="12-digit UAN" />
+        </Field>
+        <Field label="ESI number">
+          <input className="input" value={form.esiNumber} onChange={set('esiNumber')} placeholder="If ESI-eligible" />
+        </Field>
+        <Field label="Tax regime">
+          <select className="input" value={form.taxRegime} onChange={set('taxRegime')}>
+            <option value="new">New regime</option>
+            <option value="old">Old regime</option>
+          </select>
         </Field>
       </div>
 

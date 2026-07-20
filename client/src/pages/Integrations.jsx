@@ -27,6 +27,19 @@ export default function Integrations() {
     () => payroll.filter((p) => (p.cycle || 'Current') === activeCycle),
     [payroll, activeCycle],
   );
+  const STATUTORY_LABELS = { PF: 'Provident Fund', ESI: 'ESI', PT: 'Professional Tax', TDS: 'TDS', Other: 'Other deductions' };
+  const deductionsByCategory = useMemo(() => {
+    const byCategory = { PF: 0, ESI: 0, PT: 0, TDS: 0, Other: 0 };
+    cyclePayroll.forEach((p) => {
+      const items = p.components?.deductions;
+      if (items?.length) {
+        items.forEach((d) => { byCategory[d.category || 'Other'] += Number(d.amount || 0); });
+      } else {
+        byCategory.Other += Number(p.deductions || 0);
+      }
+    });
+    return Object.entries(byCategory).filter(([, amount]) => amount > 0);
+  }, [cyclePayroll]);
 
   const testConnection = (deviceId) => {
     setDevices((list) => list.map((d) => (d.id === deviceId ? { ...d, status: 'pinging' } : d)));
@@ -248,6 +261,12 @@ export default function Integrations() {
               <div className="settings-row-label">Statutory liabilities</div>
               <span className="mono">{formatINR(cyclePayroll.reduce((s, p) => s + p.deductions, 0))}</span>
             </div>
+            {deductionsByCategory.map(([cat, amount]) => (
+              <div className="settings-row" key={cat} style={{ paddingLeft: 24 }}>
+                <div className="settings-row-sub">{STATUTORY_LABELS[cat]}</div>
+                <span className="mono muted-text">{formatINR(amount)}</span>
+              </div>
+            ))}
             <div className="settings-row">
               <div className="settings-row-label">Net bank outflow</div>
               <span className="mono">{formatINR(cyclePayroll.reduce((s, p) => s + p.net, 0))}</span>

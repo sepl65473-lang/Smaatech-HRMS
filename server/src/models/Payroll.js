@@ -14,7 +14,11 @@ const payrollSchema = new mongoose.Schema({
   components: {
     type: {
       earnings: [{ name: String, amount: Number }],
-      deductions: [{ name: String, amount: Number }],
+      // category lets a deduction be tagged as a real statutory scheme
+      // (PF/ESI/PT/TDS) instead of a free-text-only line — HR/Finance still
+      // enters the amount, this only makes the payslip/ledger export able
+      // to itemize by scheme instead of one opaque total.
+      deductions: [{ name: String, amount: Number, category: { type: String, enum: ['PF', 'ESI', 'PT', 'TDS', 'Other'], default: 'Other' } }],
     },
     default: undefined,
   },

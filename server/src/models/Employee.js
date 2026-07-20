@@ -29,6 +29,17 @@ const employeeSchema = new mongoose.Schema({
     phone: { type: String, default: '' },
   },
   bankName: { type: String, default: '' },
+
+  // Statutory identity — needed to file/verify PF, ESI, PT and TDS but the
+  // app does not compute those amounts itself (rates and PT slabs vary by
+  // state and change over time); HR/Finance still enters payroll deduction
+  // amounts manually, this just carries the reference numbers.
+  pan: { type: String, default: '' },
+  uan: { type: String, default: '' },
+  esiNumber: { type: String, default: '' },
+  taxRegime: { type: String, enum: ['old', 'new'], default: 'new' },
+  state: { type: String, default: '' }, // for Professional Tax — distinct from `loc` (city)
+
   skills: { type: [String], default: [] },
   education: [{
     degree: String,
