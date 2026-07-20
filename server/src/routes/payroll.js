@@ -4,7 +4,8 @@ import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 
 import { logAudit } from '../lib/auditLogger.js';
 import User from '../models/User.js';
-import { sendNotification } from '../lib/notificationService.js';
+import { sendNotification, resolveChannels, fillTemplate } from '../lib/notificationService.js';
+import { getSettingsDoc } from './settings.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -36,13 +37,18 @@ router.post('/', requireRole('HR Manager', 'Finance Lead'), async (req, res) => 
     try {
       const recipientUser = await User.findOne({ employeeId: created.empId });
       if (recipientUser) {
+        const settingsDoc = await getSettingsDoc(req.auth.company);
         await sendNotification({
           recipientId: recipientUser._id,
           title: 'Payslip Ready',
           message: `Your payslip for cycle ${created.cycle} has been processed and is ready.`,
           type: 'payroll',
           actionUrl: '/payroll',
-          channels: ['in-app', 'email', 'sms', 'whatsapp', 'push'],
+          channels: resolveChannels(settingsDoc, 'payroll'),
+          emailOverride: fillTemplate(settingsDoc.notificationTemplates?.email?.payrollSlip, {
+            employee: created.name,
+            date: created.cycle,
+          }),
           company: req.auth.company,
         });
       }
@@ -68,15 +74,22 @@ router.patch('/:id', requireRole('HR Manager', 'Finance Lead'), async (req, res)
     try {
       const recipientUser = await User.findOne({ employeeId: updated.empId });
       if (recipientUser) {
+        const settingsDoc = await getSettingsDoc(req.auth.company);
         await sendNotification({
           recipientId: recipientUser._id,
           title: isPaid ? 'Salary Disbursed' : 'Payslip Ready',
-          message: isPaid 
+          message: isPaid
             ? `Your salary for cycle ${updated.cycle} has been disbursed.`
             : `Your payslip for cycle ${updated.cycle} has been processed and is ready.`,
           type: 'payroll',
           actionUrl: '/payroll',
-          channels: ['in-app', 'email', 'sms', 'whatsapp', 'push'],
+          channels: resolveChannels(settingsDoc, 'payroll'),
+          emailOverride: isProcessed
+            ? fillTemplate(settingsDoc.notificationTemplates?.email?.payrollSlip, {
+                employee: updated.name,
+                date: updated.cycle,
+              })
+            : null,
           company: req.auth.company,
         });
       }

@@ -4,7 +4,7 @@ import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { getSettingsDoc } from './settings.js';
 import { logAudit } from '../lib/auditLogger.js';
 import User from '../models/User.js';
-import { sendNotification } from '../lib/notificationService.js';
+import { sendNotification, resolveChannels, fillTemplate } from '../lib/notificationService.js';
 
 // Falls back to this sequence when HR hasn't configured Settings > Workflows
 // yet — matches the default the Workflows page itself shows unconfigured.
@@ -53,6 +53,7 @@ router.post('/', async (req, res) => {
   // Notify HR Managers
   try {
     const hrManagers = await User.find({ role: 'HR Manager', company: req.auth.company });
+    const channels = resolveChannels(settingsDoc, 'leave');
     for (const hr of hrManagers) {
       await sendNotification({
         recipientId: hr._id,
@@ -60,7 +61,7 @@ router.post('/', async (req, res) => {
         message: `${created.name} (${created.dept}) has filed a ${created.type} leave request from ${created.start} to ${created.end}.`,
         type: 'leave',
         actionUrl: '/leave',
-        channels: ['in-app', 'email', 'sms', 'whatsapp', 'push'],
+        channels,
         company: req.auth.company,
       });
     }
@@ -114,13 +115,18 @@ router.post('/:id/approve', async (req, res) => {
     try {
       const recipientUser = await User.findOne({ employeeId: leave.empId });
       if (recipientUser) {
+        const settingsDoc = await getSettingsDoc(req.auth.company);
         await sendNotification({
           recipientId: recipientUser._id,
           title: 'Leave Request Approved',
           message: `Your ${leave.type} leave request from ${leave.start} to ${leave.end} has been approved.`,
           type: 'leave',
           actionUrl: '/leave',
-          channels: ['in-app', 'email', 'sms', 'whatsapp', 'push'],
+          channels: resolveChannels(settingsDoc, 'leave'),
+          emailOverride: fillTemplate(settingsDoc.notificationTemplates?.email?.leaveApproval, {
+            employee: leave.name,
+            date: `${leave.start} to ${leave.end}`,
+          }),
           company: req.auth.company,
         });
       }
@@ -155,13 +161,14 @@ router.post('/:id/decline', async (req, res) => {
   try {
     const recipientUser = await User.findOne({ employeeId: leave.empId });
     if (recipientUser) {
+      const settingsDoc = await getSettingsDoc(req.auth.company);
       await sendNotification({
         recipientId: recipientUser._id,
         title: 'Leave Request Declined',
         message: `Your ${leave.type} leave request from ${leave.start} to ${leave.end} has been declined.`,
         type: 'leave',
         actionUrl: '/leave',
-        channels: ['in-app', 'email', 'sms', 'whatsapp', 'push'],
+        channels: resolveChannels(settingsDoc, 'leave'),
         company: req.auth.company,
       });
     }

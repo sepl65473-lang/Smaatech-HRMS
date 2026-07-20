@@ -11,6 +11,7 @@ function Toggle({ on, onClick }) {
 }
 
 const CHANNELS = ['In-app', 'Email', 'WhatsApp', 'SMS'];
+const LIVE_CHANNELS = ['In-app', 'Email'];
 
 function ChannelRow({ label, sub, selected, onToggle }) {
   return (
@@ -20,15 +21,21 @@ function ChannelRow({ label, sub, selected, onToggle }) {
         <div className="settings-row-sub">{sub}</div>
       </div>
       <div className="filter-chips">
-        {CHANNELS.map((ch) => (
-          <button
-            key={ch}
-            className={`chip ${selected.includes(ch) ? 'active' : ''}`}
-            onClick={() => onToggle(ch)}
-          >
-            {ch}
-          </button>
-        ))}
+        {CHANNELS.map((ch) => {
+          const live = LIVE_CHANNELS.includes(ch);
+          return (
+            <button
+              key={ch}
+              className={`chip ${selected.includes(ch) ? 'active' : ''}`}
+              disabled={!live}
+              title={live ? undefined : 'Not connected yet — needs a WhatsApp/SMS provider set up first'}
+              style={live ? undefined : { opacity: 0.45, cursor: 'not-allowed' }}
+              onClick={() => live && onToggle(ch)}
+            >
+              {ch}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -359,16 +366,6 @@ export default function Settings() {
             </label>
           </div>
           <div className="modal-actions" style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={!twilioSid && !smtpHost}
-              onClick={() => {
-                toast('success', `<strong>Test alert triggered!</strong> SMS/WhatsApp sent to +91-9999999999 & Email verification queued for <strong>${currentUser.email || 'admin@smaatech.co'}</strong>.`);
-              }}
-            >
-              Test Alert
-            </button>
             <button
               type="button"
               className="btn"

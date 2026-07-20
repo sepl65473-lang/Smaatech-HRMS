@@ -14,7 +14,27 @@ function getTransporter() {
   return transporter;
 }
 
-export async function sendNotification({ recipientId, title, message, type = 'system', actionUrl = '', channels = ['in-app'], company = 'Smaatech' }) {
+// Settings.notifyChannels stores display labels ('In-app','Email','WhatsApp',
+// 'SMS'); lower-cased they match the internal channel keys used below.
+export function resolveChannels(settingsDoc, category, fallback = ['in-app']) {
+  const configured = settingsDoc?.notifyChannels?.[category];
+  if (!configured || !configured.length) return fallback;
+  return configured.map((c) => String(c).toLowerCase());
+}
+
+// Settings.notificationTemplates entries look like "Subject: X\n\nBody..."
+// with {placeholder} tokens. Returns null if no template is configured, so
+// callers can fall back to their existing hardcoded title/message.
+export function fillTemplate(raw, vars = {}) {
+  if (!raw || !raw.trim()) return null;
+  const subjectMatch = raw.match(/^Subject:\s*(.+?)\r?\n\r?\n/);
+  const subject = subjectMatch ? subjectMatch[1].trim() : null;
+  const body = subjectMatch ? raw.slice(subjectMatch[0].length) : raw;
+  const fill = (s) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(`{${k}}`).join(v ?? ''), s);
+  return { subject: subject ? fill(subject) : null, body: fill(body).trim() };
+}
+
+export async function sendNotification({ recipientId, title, message, type = 'system', actionUrl = '', channels = ['in-app'], emailOverride = null, company = 'Smaatech' }) {
   try {
     // 1. In-app notification creation
     let dbNotif = null;
@@ -46,12 +66,14 @@ export async function sendNotification({ recipientId, title, message, type = 'sy
     if (channels.includes('email') && emailTo) {
       const transport = getTransporter();
       if (transport) {
+        const subject = emailOverride?.subject || title;
+        const body = emailOverride?.body || message;
         await transport.sendMail({
           from: `"Smaatech HRMS" <${process.env.SMTP_USER}>`,
           to: emailTo,
-          subject: title,
-          text: message,
-          html: `<p>${message.replace(/\n/g, '<br>')}</p>`,
+          subject,
+          text: body,
+          html: `<p>${body.replace(/\n/g, '<br>')}</p>`,
         });
         console.log(`[Notification Service] Real email sent to ${emailTo}`);
       } else {
