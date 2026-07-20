@@ -838,22 +838,41 @@ export function HRMSProvider({ children }) {
   // Same stage-aware approve/decline pattern as leave (see setLeaveStatus) —
   // goes through routes/expenses.js's dedicated endpoints instead of a plain
   // status PATCH, so the server can enforce Settings > Workflows.
-  const updateExpenseStatus = async (id, status, reason = '') => {
+  const updateExpenseStatus = async (id, status, reason = '', opts = {}) => {
     const updated = status === 'approved' ? await expensesApi.approve(id) : await expensesApi.decline(id, reason);
     setExpenses((list) => list.map((e) => (e.id === id ? updated : e)));
     if (status === 'declined') {
       auditLocal('Expense claim declined', updated.name, `₹${updated.amount}`);
-      toast('info', `Expense claim for ${updated.name} has been <strong>declined</strong>.`);
+      if (!opts.silent) toast('info', `Expense claim for ${updated.name} has been <strong>declined</strong>.`);
     } else if (updated.status === 'approved') {
       auditLocal('Expense claim approved', updated.name, `₹${updated.amount}`);
-      toast('success', `Expense claim for ${updated.name} has been <strong>approved</strong>.`);
+      if (!opts.silent) toast('success', `Expense claim for ${updated.name} has been <strong>approved</strong>.`);
     } else {
       const nextRole = updated.approvalStages?.[updated.currentStage];
       auditLocal('Expense claim stage approved', updated.name, `₹${updated.amount}`);
-      toast('info', `Stage approved for ${updated.name}'s claim${nextRole ? ` — awaiting <strong>${nextRole}</strong>` : ''}`);
+      if (!opts.silent) toast('info', `Stage approved for ${updated.name}'s claim${nextRole ? ` — awaiting <strong>${nextRole}</strong>` : ''}`);
     }
     return updated;
   };
+
+  // Bulk approve/decline — same Promise.allSettled-over-existing-endpoint
+  // pattern as bulkSetLeaveStatus, for the same reason: the server already
+  // owns the stage/role check per claim, so a batch just needs to report
+  // which rows it couldn't act on rather than blocking the rest.
+  const bulkSetExpenseStatus = async (ids, status) => {
+    const results = await Promise.allSettled(ids.map((id) => updateExpenseStatus(id, status, '', { silent: true })));
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.length - succeeded;
+    const verb = status === 'approved' ? 'approved' : 'declined';
+    if (failed === 0) {
+      toast('success', `${succeeded} expense claim${succeeded === 1 ? '' : 's'} ${verb}.`);
+    } else {
+      toast('info', `${succeeded} ${verb}, ${failed} skipped (already decided or not your approval stage).`);
+    }
+    return { succeeded, failed };
+  };
+  const bulkApproveExpenses = (ids) => bulkSetExpenseStatus(ids, 'approved');
+  const bulkDeclineExpenses = (ids) => bulkSetExpenseStatus(ids, 'declined');
 
   const addAsset = async (data) => {
     const created = await assetsApi.create({ status: 'available', assignedToEmpId: null, assignedToEmpName: '', assignedDate: '', ...data });
@@ -1129,7 +1148,7 @@ export function HRMSProvider({ children }) {
     canAccess: contextCanAccess,
     canDo: contextCanDo,
     addRole, updateRole, deleteRole,
-    addExpense, updateExpenseStatus,
+    addExpense, updateExpenseStatus, bulkApproveExpenses, bulkDeclineExpenses,
     addAsset, assignAsset, returnAsset, importAssets,
     addJob, updateJobStatus, importJobs,
     // employees

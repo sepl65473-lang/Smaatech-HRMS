@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import Modal from '../components/Modal';
@@ -7,14 +7,19 @@ import { formatINR } from '../lib/helpers';
 const DEFAULT_STAGES = ['Finance Lead', 'HR Director']; // mirrors server/src/routes/expenses.js's fallback
 
 export default function Expenses() {
-  const { expenses, currentUser, employees, addExpense, updateExpenseStatus } = useHRMS();
-  
+  const {
+    expenses, currentUser, employees, addExpense, updateExpenseStatus,
+    bulkApproveExpenses, bulkDeclineExpenses,
+  } = useHRMS();
+
   // Local state
   const [formOpen, setFormOpen] = useState(false);
   const [claimForm, setClaimForm] = useState({ category: 'Travel & Lodging', amount: '', description: '', receiptUrl: '' });
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [actionClaim, setActionClaim] = useState(null); // { claim, status }
   const [actionReason, setActionReason] = useState('');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const isEmployee = currentUser.role === 'Employee';
 
@@ -79,6 +84,40 @@ export default function Expenses() {
     setActionReason('');
   };
 
+  const canActOn = (exp) => {
+    const stages = exp.approvalStages?.length ? exp.approvalStages : DEFAULT_STAGES;
+    const requiredRole = stages[exp.currentStage || 0] || stages[stages.length - 1];
+    return currentUser.role === 'HR Director' || currentUser.role === requiredRole;
+  };
+  const selectableIds = useMemo(
+    () => (isEmployee ? [] : filteredExpenses.filter((exp) => exp.status === 'pending' && canActOn(exp)).map((exp) => exp.id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredExpenses, isEmployee, currentUser.role],
+  );
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => (prev.size === selectableIds.length ? new Set() : new Set(selectableIds)));
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+  useEffect(() => { clearSelection(); }, [filteredExpenses.length]);
+
+  const runBulk = async (status) => {
+    setBulkBusy(true);
+    try {
+      const fn = status === 'approved' ? bulkApproveExpenses : bulkDeclineExpenses;
+      await fn([...selectedIds]);
+      clearSelection();
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div className="page-wrap active">
       {/* Stats header (Visible only to Admin/Finance) */}
@@ -116,6 +155,29 @@ export default function Expenses() {
           )}
         </div>
 
+        {selectableIds.length > 0 && (
+          <div className="list-toolbar" style={{ padding: '0 16px' }}>
+            <label className="inline-select" style={{ gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={selectedIds.size > 0 && selectedIds.size === selectableIds.length}
+                onChange={toggleSelectAll}
+              />
+              <span>{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</span>
+            </label>
+            {selectedIds.size > 0 && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="mini-btn approve" disabled={bulkBusy} onClick={() => runBulk('approved')}>
+                  Approve selected
+                </button>
+                <button className="mini-btn danger" disabled={bulkBusy} onClick={() => runBulk('declined')}>
+                  Decline selected
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {filteredExpenses.length === 0 ? (
           <div className="empty">No expense claims found.</div>
         ) : (
@@ -123,6 +185,7 @@ export default function Expenses() {
             <table className="table">
               <thead>
                 <tr>
+                  {selectableIds.length > 0 && <th></th>}
                   {!isEmployee && <th>Employee</th>}
                   <th>Date</th>
                   <th>Category</th>
@@ -136,6 +199,13 @@ export default function Expenses() {
               <tbody>
                 {filteredExpenses.map((exp) => (
                   <tr key={exp.id}>
+                    {selectableIds.length > 0 && (
+                      <td>
+                        {exp.status === 'pending' && canActOn(exp) && (
+                          <input type="checkbox" checked={selectedIds.has(exp.id)} onChange={() => toggleSelect(exp.id)} />
+                        )}
+                      </td>
+                    )}
                     {!isEmployee && (
                       <td>
                         <div className="emp-cell">
