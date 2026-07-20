@@ -116,6 +116,18 @@ export default function Settings() {
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
+  const refreshSessions = () => { loadSessions().then(setSessions).catch(() => {}); };
+  useEffect(() => { refreshSessions(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRevokeSession = async (id) => {
+    await revokeSession(id);
+    refreshSessions();
+  };
+  const handleRevokeOthers = async () => {
+    await revokeOtherSessions();
+    refreshSessions();
+  };
+
   const designations = settings.designations || [];
 
   const deptCategory = masterCategories.find((c) => c.code === 'departments');
@@ -259,6 +271,36 @@ export default function Settings() {
             <Row label="Two-factor authentication" sub="Extra security on sign-in"
               on={settings.twoFactor} onToggle={() => toggleSetting('twoFactor')} />
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">Active sessions</div>
+            <div className="card-sub">Devices currently signed in to your account</div>
+          </div>
+          {sessions.length > 1 && (
+            <button className="btn btn-ghost" onClick={handleRevokeOthers}>Sign out other sessions</button>
+          )}
+        </div>
+        <div className="settings-rows">
+          {sessions.length === 0 && <div className="empty">No active sessions.</div>}
+          {sessions.map((s) => (
+            <div className="settings-row" key={s.id}>
+              <div>
+                <div className="settings-row-label">
+                  {s.userAgent || 'Unknown device'}{s.current && <span className="state-badge approved" style={{ marginLeft: 8 }}>This device</span>}
+                </div>
+                <div className="settings-row-sub">
+                  Signed in {new Date(s.createdAt).toLocaleString('en-IN')}{s.ip ? ` · ${s.ip}` : ''}
+                </div>
+              </div>
+              {!s.current && (
+                <button className="mini-btn danger" onClick={() => handleRevokeSession(s.id)}>Sign out</button>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
