@@ -13,6 +13,11 @@ const userSchema = new mongoose.Schema({
   // the real address — replaces the old client-simulated toast.
   otpHash: { type: String, default: null },
   otpExpiresAt: { type: Date, default: null },
+  // Login 2FA code — deliberately separate from otpHash (password reset):
+  // a leaked/shoulder-surfed login code must never double as a
+  // password-reset credential.
+  loginOtpHash: { type: String, default: null },
+  loginOtpExpiresAt: { type: Date, default: null },
   // Per-account brute-force lockout — reset to 0/null on any successful login.
   failedLoginAttempts: { type: Number, default: 0 },
   lockedUntil: { type: Date, default: null },
@@ -28,6 +33,8 @@ userSchema.set('toJSON', {
     delete ret.passwordHash;
     delete ret.otpHash;
     delete ret.otpExpiresAt;
+    delete ret.loginOtpHash;
+    delete ret.loginOtpExpiresAt;
     delete ret.failedLoginAttempts;
     delete ret.lockedUntil;
   },

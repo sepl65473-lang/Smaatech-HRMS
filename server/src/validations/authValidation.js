@@ -15,6 +15,11 @@ export const forgotPasswordSchema = Joi.object({
   email: Joi.string().email().required().trim(),
 });
 
+export const verifyTwoFactorSchema = Joi.object({
+  email: Joi.string().email().required().trim(),
+  otp: Joi.string().required().length(6),
+});
+
 export const resetPasswordSchema = Joi.object({
   email: Joi.string().email().required().trim(),
   otp: Joi.string().required().length(6),

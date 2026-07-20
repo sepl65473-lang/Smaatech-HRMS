@@ -10,8 +10,9 @@ import {
 } from '../lib/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validation.js';
-import { loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validations/authValidation.js';
+import { loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyTwoFactorSchema } from '../validations/authValidation.js';
 import { sendOtpEmail } from '../lib/mailer.js';
+import { getSettingsDoc } from './settings.js';
 
 const router = Router();
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -56,6 +57,31 @@ async function issueSession(res, user, req) {
   return accessToken;
 }
 
+// Returns true if a 2FA challenge was sent and the caller must stop (a
+// response was already written); false if the caller should proceed to
+// issue a real session immediately. Real second factor: the code is
+// generated and hashed server-side and only ever leaves via email — unlike
+// the old client-simulated version, nothing usable is returned here.
+async function maybeStartTwoFactor(user, res) {
+  const settingsDoc = await getSettingsDoc(user.company);
+  if (!settingsDoc.twoFactor) return false;
+
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  user.loginOtpHash = await bcrypt.hash(otp, 10);
+  user.loginOtpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
+  await user.save();
+
+  try {
+    await sendOtpEmail(user.email, otp, 'sign-in verification');
+  } catch (err) {
+    console.error('[auth] failed to send 2FA OTP email:', err.message);
+    res.status(502).json({ error: { code: 'EMAIL_FAILED', message: 'Could not send the verification email. Try again shortly.' } });
+    return true;
+  }
+  res.json({ requiresTwoFactor: true, email: user.email });
+  return true;
+}
+
 router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
   const { email, password } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
@@ -86,6 +112,7 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
     await user.save();
   }
   await sanitizeEmployeeLink(user);
+  if (await maybeStartTwoFactor(user, res)) return;
   const accessToken = await issueSession(res, user, req);
   res.json({ accessToken, user });
 });
@@ -106,6 +133,43 @@ router.post('/face-login', loginLimiter, async (req, res) => {
   if (user.active === false) {
     return res.status(403).json({ error: { code: 'ACCOUNT_DISABLED', message: 'This account has been deactivated.' } });
   }
+  await sanitizeEmployeeLink(user);
+  if (await maybeStartTwoFactor(user, res)) return;
+  const accessToken = await issueSession(res, user, req);
+  res.json({ accessToken, user });
+});
+
+// Completes the 2FA handshake started by /login or /face-login. A wrong
+// code counts toward the same failedLoginAttempts/lockedUntil lockout as a
+// wrong password — closes the gap where an IP-rotating attacker could
+// otherwise keep guessing the 6-digit code past what loginLimiter alone stops.
+router.post('/verify-2fa', loginLimiter, validate(verifyTwoFactorSchema), async (req, res) => {
+  const { email, otp } = req.body || {};
+  const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
+  if (!user || !user.loginOtpHash || !user.loginOtpExpiresAt || user.loginOtpExpiresAt < new Date()) {
+    return res.status(400).json({ error: { code: 'INVALID_OTP', message: 'Code expired or not requested — sign in again to get a new code.' } });
+  }
+  if (user.active === false) {
+    return res.status(403).json({ error: { code: 'ACCOUNT_DISABLED', message: 'This account has been deactivated.' } });
+  }
+  const otpValid = await bcrypt.compare(String(otp || ''), user.loginOtpHash);
+  if (!otpValid) {
+    user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+    if (user.failedLoginAttempts >= LOCK_THRESHOLD) {
+      user.lockedUntil = new Date(Date.now() + LOCK_DURATION_MS);
+      user.failedLoginAttempts = 0;
+    }
+    await user.save();
+    return res.status(400).json({ error: { code: 'INVALID_OTP', message: 'Incorrect verification code.' } });
+  }
+
+  user.loginOtpHash = null;
+  user.loginOtpExpiresAt = null;
+  if (user.failedLoginAttempts || user.lockedUntil) {
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = null;
+  }
+  await user.save();
   await sanitizeEmployeeLink(user);
   const accessToken = await issueSession(res, user, req);
   res.json({ accessToken, user });
