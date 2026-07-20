@@ -5,6 +5,7 @@ import User from '../models/User.js';
 import Employee from '../models/Employee.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { logAudit } from '../lib/auditLogger.js';
+import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from '../lib/passwordPolicy.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -28,8 +29,8 @@ router.post('/', requireRole(), async (req, res) => {
   if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
     return res.status(400).json({ error: { code: 'INVALID_EMAIL', message: 'Enter a valid email.' } });
   }
-  if (!password || password.length < 6) {
-    return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: 'Password must be at least 6 characters.' } });
+  if (!isStrongPassword(password)) {
+    return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: PASSWORD_POLICY_MESSAGE } });
   }
   if (!VALID_ROLES.includes(role)) {
     return res.status(400).json({ error: { code: 'INVALID_ROLE', message: 'Unrecognised role.' } });
@@ -90,8 +91,8 @@ router.patch('/:id', requireRole(), async (req, res) => {
   }
   if (active != null) patch.active = Boolean(active);
   if (password) {
-    if (password.length < 6) {
-      return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: 'Password must be at least 6 characters.' } });
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: PASSWORD_POLICY_MESSAGE } });
     }
     patch.passwordHash = await bcrypt.hash(password, 10);
   }

@@ -91,6 +91,7 @@ export default function Settings() {
     settings, employees, currentUser, updateSettings, toggleSetting, resetDatabase, auditLog, toast, enrollFace,
     users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount,
     masterCategories, masterValues, addMasterValue, deleteMasterValue,
+    loadSessions, revokeSession, revokeOtherSessions,
   } = useHRMS();
   const [orgName, setOrgName] = useState('');
   const [workWeek, setWorkWeek] = useState('5-day');
@@ -100,6 +101,7 @@ export default function Settings() {
   const [editingUser, setEditingUser] = useState(null);
   const [confirmRemoveUser, setConfirmRemoveUser] = useState(null);
   const [faceEnrollUser, setFaceEnrollUser] = useState(null);
+  const [sessions, setSessions] = useState([]);
 
   // Notification Template states
   const [templateChannel, setTemplateChannel] = useState('email');

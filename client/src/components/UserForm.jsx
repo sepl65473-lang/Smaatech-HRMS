@@ -25,8 +25,10 @@ export default function UserForm({ open, user, employees, onClose, onSave }) {
     if (!/^\S+@\S+\.\S+$/.test(form.email)) er.email = 'Enter a valid email';
     // Password is required to create a login; on edit, a blank field means
     // "leave the current password unchanged" rather than forcing a reset.
-    if (!isEdit && (!form.password || form.password.length < 6)) er.password = 'Password must be at least 6 characters';
-    else if (form.password && form.password.length < 6) er.password = 'Password must be at least 6 characters';
+    const weakPasswordMsg = 'Password must be at least 8 characters and include a letter and a number';
+    const isWeak = (pw) => pw.length < 8 || !/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw);
+    if (!isEdit && (!form.password || isWeak(form.password))) er.password = weakPasswordMsg;
+    else if (form.password && isWeak(form.password)) er.password = weakPasswordMsg;
     setErrors(er);
     if (Object.keys(er).length) return;
     onSave({
@@ -86,7 +88,7 @@ export default function UserForm({ open, user, employees, onClose, onSave }) {
             type="password"
             value={form.password}
             onChange={set('password')}
-            placeholder={isEdit ? 'Leave blank to keep current password' : 'At least 6 characters'}
+            placeholder={isEdit ? 'Leave blank to keep current password' : 'At least 8 characters, with a letter and a number'}
           />
           {errors.password && <span className="field-error">{errors.password}</span>}
         </label>

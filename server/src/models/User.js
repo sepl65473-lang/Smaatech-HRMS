@@ -13,6 +13,9 @@ const userSchema = new mongoose.Schema({
   // the real address — replaces the old client-simulated toast.
   otpHash: { type: String, default: null },
   otpExpiresAt: { type: Date, default: null },
+  // Per-account brute-force lockout — reset to 0/null on any successful login.
+  failedLoginAttempts: { type: Number, default: 0 },
+  lockedUntil: { type: Date, default: null },
 }, { timestamps: true });
 
 userSchema.set('toJSON', {
@@ -25,6 +28,8 @@ userSchema.set('toJSON', {
     delete ret.passwordHash;
     delete ret.otpHash;
     delete ret.otpExpiresAt;
+    delete ret.failedLoginAttempts;
+    delete ret.lockedUntil;
   },
 });
 

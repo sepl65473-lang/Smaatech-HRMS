@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
@@ -14,6 +15,19 @@ import { sendOtpEmail } from '../lib/mailer.js';
 
 const router = Router();
 const OTP_TTL_MS = 10 * 60 * 1000;
+const LOCK_THRESHOLD = 5;
+const LOCK_DURATION_MS = 15 * 60 * 1000;
+
+// The app-wide 300/15min limiter (index.js) is shared across every /api/*
+// route, so it does little to stop credential stuffing on login/face-login
+// specifically. This one is scoped tighter and just to those two routes.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many login attempts from this network. Please try again in a few minutes.' } },
+});
 
 // Guards against a dangling employeeId (e.g. a demo/data reseed deleted the
 // employee a user account was linked to) so a login/refresh/me response
@@ -42,15 +56,34 @@ async function issueSession(res, user, req) {
   return accessToken;
 }
 
-router.post('/login', validate(loginSchema), async (req, res) => {
+router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
   const { email, password } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
+
+  if (user?.lockedUntil && user.lockedUntil > new Date()) {
+    const minutes = Math.ceil((user.lockedUntil - new Date()) / 60000);
+    return res.status(423).json({ error: { code: 'ACCOUNT_LOCKED', message: `Too many failed attempts. Try again in ${minutes} minute(s).` } });
+  }
+
   const valid = user && await bcrypt.compare(password || '', user.passwordHash);
   if (!valid) {
+    if (user) {
+      user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+      if (user.failedLoginAttempts >= LOCK_THRESHOLD) {
+        user.lockedUntil = new Date(Date.now() + LOCK_DURATION_MS);
+        user.failedLoginAttempts = 0;
+      }
+      await user.save();
+    }
     return res.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' } });
   }
   if (user.active === false) {
     return res.status(403).json({ error: { code: 'ACCOUNT_DISABLED', message: 'This account has been deactivated.' } });
+  }
+  if (user.failedLoginAttempts || user.lockedUntil) {
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = null;
+    await user.save();
   }
   await sanitizeEmployeeLink(user);
   const accessToken = await issueSession(res, user, req);
@@ -64,7 +97,7 @@ router.post('/login', validate(loginSchema), async (req, res) => {
 // verification is scoped for a later phase (see the project plan); until
 // then this is a lower-assurance login path than password auth, kept only
 // because the app already advertises "sign in with face" as a feature.
-router.post('/face-login', async (req, res) => {
+router.post('/face-login', loginLimiter, async (req, res) => {
   const { email } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   if (!user) {
@@ -109,6 +142,51 @@ router.post('/logout', async (req, res) => {
   }
   res.clearCookie(REFRESH_COOKIE_NAME, { path: '/api/v1/auth' });
   res.json({ ok: true });
+});
+
+// Lets a signed-in user see every device/browser currently holding a live
+// refresh token for their account, and revoke any of them individually —
+// e.g. "I forgot to log out of a shared computer."
+router.get('/sessions', requireAuth, async (req, res) => {
+  const currentToken = req.cookies?.[REFRESH_COOKIE_NAME];
+  const currentHash = currentToken ? hashToken(currentToken) : null;
+  const sessions = await RefreshToken.find({
+    userId: req.auth.sub,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  }).sort({ createdAt: -1 });
+  res.json(sessions.map((s) => ({
+    id: String(s._id),
+    userAgent: s.userAgent || '',
+    ip: s.ip || '',
+    createdAt: s.createdAt,
+    current: s.tokenHash === currentHash,
+  })));
+});
+
+router.delete('/sessions/:id', requireAuth, async (req, res) => {
+  const session = await RefreshToken.findOne({ _id: req.params.id, userId: req.auth.sub });
+  if (!session) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Session not found.' } });
+  session.revokedAt = new Date();
+  await session.save();
+
+  const currentToken = req.cookies?.[REFRESH_COOKIE_NAME];
+  if (currentToken && hashToken(currentToken) === session.tokenHash) {
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: '/api/v1/auth' });
+  }
+  res.json({ ok: true });
+});
+
+// "Log out everywhere else" — revokes every other live session, leaving the
+// caller's own current one untouched.
+router.post('/sessions/revoke-others', requireAuth, async (req, res) => {
+  const currentToken = req.cookies?.[REFRESH_COOKIE_NAME];
+  const currentHash = currentToken ? hashToken(currentToken) : null;
+  const result = await RefreshToken.updateMany(
+    { userId: req.auth.sub, revokedAt: null, tokenHash: { $ne: currentHash } },
+    { revokedAt: new Date() },
+  );
+  res.json({ revoked: result.modifiedCount });
 });
 
 router.get('/me', requireAuth, async (req, res) => {

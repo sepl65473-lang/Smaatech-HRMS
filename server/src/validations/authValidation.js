@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { PASSWORD_MIN_LENGTH, PASSWORD_POLICY_MESSAGE } from '../lib/passwordPolicy.js';
 
 export const loginSchema = Joi.object({
   email: Joi.string().email().required().trim().messages({
@@ -17,5 +18,12 @@ export const forgotPasswordSchema = Joi.object({
 export const resetPasswordSchema = Joi.object({
   email: Joi.string().email().required().trim(),
   otp: Joi.string().required().length(6),
-  newPassword: Joi.string().min(6).required(),
+  newPassword: Joi.string()
+    .min(PASSWORD_MIN_LENGTH)
+    .pattern(/^(?=.*[A-Za-z])(?=.*\d).+$/)
+    .required()
+    .messages({
+      'string.min': PASSWORD_POLICY_MESSAGE,
+      'string.pattern.base': PASSWORD_POLICY_MESSAGE,
+    }),
 });

@@ -220,6 +220,9 @@ export const authApi = {
     apiFetch('/auth/forgot-password', { method: 'POST', body: { email }, skipAuth: true }),
   resetPassword: (email, otp, newPassword) =>
     apiFetch('/auth/reset-password', { method: 'POST', body: { email, otp, newPassword }, skipAuth: true }),
+  sessions: () => apiFetch('/auth/sessions'),
+  revokeSession: (id) => apiFetch(`/auth/sessions/${id}`, { method: 'DELETE' }),
+  revokeOtherSessions: () => apiFetch('/auth/sessions/revoke-others', { method: 'POST' }),
 };
 
 // Load everything at once for the app shell. Requires an authenticated
