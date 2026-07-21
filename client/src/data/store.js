@@ -242,6 +242,8 @@ export const authApi = {
     apiFetch('/auth/forgot-password', { method: 'POST', body: { email }, skipAuth: true }),
   resetPassword: (email, otp, newPassword) =>
     apiFetch('/auth/reset-password', { method: 'POST', body: { email, otp, newPassword }, skipAuth: true }),
+  changePassword: (currentPassword, newPassword) =>
+    apiFetch('/auth/change-password', { method: 'POST', body: { currentPassword, newPassword } }),
   sessions: () => apiFetch('/auth/sessions'),
   revokeSession: (id) => apiFetch(`/auth/sessions/${id}`, { method: 'DELETE' }),
   revokeOtherSessions: () => apiFetch('/auth/sessions/revoke-others', { method: 'POST' }),

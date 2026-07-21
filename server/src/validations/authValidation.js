@@ -32,3 +32,17 @@ export const resetPasswordSchema = Joi.object({
       'string.pattern.base': PASSWORD_POLICY_MESSAGE,
     }),
 });
+
+export const changePasswordSchema = Joi.object({
+  currentPassword: Joi.string().required().messages({
+    'any.required': 'Current password is required',
+  }),
+  newPassword: Joi.string()
+    .min(PASSWORD_MIN_LENGTH)
+    .pattern(/^(?=.*[A-Za-z])(?=.*\d).+$/)
+    .required()
+    .messages({
+      'string.min': PASSWORD_POLICY_MESSAGE,
+      'string.pattern.base': PASSWORD_POLICY_MESSAGE,
+    }),
+});

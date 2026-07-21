@@ -200,6 +200,7 @@ export function HRMSProvider({ children }) {
 
   const forgotPassword = useCallback((email) => authApi.forgotPassword(email), []);
   const resetPassword = useCallback((email, otp, newPassword) => authApi.resetPassword(email, otp, newPassword), []);
+  const changePassword = useCallback((currentPassword, newPassword) => authApi.changePassword(currentPassword, newPassword), []);
 
   const searchAuditLog = useCallback((params) => auditLogsApi.search(params), []);
   const searchEmployees = useCallback((params) => employeesApi.search(params), []);
@@ -1132,7 +1133,7 @@ export function HRMSProvider({ children }) {
   const pendingLeaves = leaves.filter((l) => l.status === 'pending');
 
   const value = {
-    isAuthenticated: Boolean(authUser), login, loginWithFace, verifyTwoFactor, finishLogin, logout, forgotPassword, resetPassword,
+    isAuthenticated: Boolean(authUser), login, loginWithFace, verifyTwoFactor, finishLogin, logout, forgotPassword, resetPassword, changePassword,
     loadSessions, revokeSession, revokeOtherSessions, searchAuditLog, searchEmployees,
     booting, loading, lastSyncedAt,
     employees, leaves, attendance, payroll,

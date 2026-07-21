@@ -10,7 +10,7 @@ import {
 } from '../lib/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validation.js';
-import { loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyTwoFactorSchema } from '../validations/authValidation.js';
+import { loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyTwoFactorSchema, changePasswordSchema } from '../validations/authValidation.js';
 import { sendOtpEmail } from '../lib/mailer.js';
 import { getSettingsDoc } from './settings.js';
 
@@ -261,6 +261,37 @@ router.get('/me', requireAuth, async (req, res) => {
   }
   await sanitizeEmployeeLink(user);
   res.json({ user });
+});
+
+// Self-service password change for a signed-in user of any role — distinct
+// from /reset-password (unauthenticated, OTP-based, for when you're locked
+// out) and from HR Director's PATCH /users/:id (an admin resetting someone
+// ELSE's password, which correctly doesn't need to know their old one).
+// This one requires proving the current password first, so a stolen access
+// token alone can't silently take over the account.
+router.post('/change-password', requireAuth, validate(changePasswordSchema), async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  const user = await User.findById(req.auth.sub);
+  if (!user) return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'Session expired.' } });
+
+  const valid = await bcrypt.compare(currentPassword || '', user.passwordHash);
+  if (!valid) {
+    return res.status(400).json({ error: { code: 'INVALID_PASSWORD', message: 'Current password is incorrect.' } });
+  }
+
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  await user.save();
+
+  // Revoke every other live session — if the old password had leaked, this
+  // signs out anything already using it, leaving only this session active.
+  const currentToken = req.cookies?.[REFRESH_COOKIE_NAME];
+  const currentHash = currentToken ? hashToken(currentToken) : null;
+  await RefreshToken.updateMany(
+    { userId: user._id, revokedAt: null, tokenHash: { $ne: currentHash } },
+    { revokedAt: new Date() },
+  );
+
+  res.json({ ok: true });
 });
 
 // Sends a real 6-digit code to the account's actual email — replaces the

@@ -6,6 +6,7 @@ import {
   IconBell, IconMenu, IconPlus, IconMail, IconHelp, IconChevronDown, IconLogOut,
 } from './Icons';
 import Avatar from './Avatar';
+import ChangePasswordModal from './ChangePasswordModal';
 
 const TITLES = {
   '/': null, // special-cased to greeting
@@ -39,6 +40,7 @@ export default function Topbar({ onMenu, onAddEmployee }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const topbarRef = useRef(null);
   const searchInputRef = useRef(null);
 
@@ -252,6 +254,9 @@ export default function Topbar({ onMenu, onAddEmployee }) {
               <button className="popover-row" onClick={() => { navigate('/settings'); setProfileOpen(false); }}>
                 <span className="popover-title">Settings</span>
               </button>
+              <button className="popover-row" onClick={() => { setChangePasswordOpen(true); setProfileOpen(false); }}>
+                <span className="popover-title">Change password</span>
+              </button>
               <button className="popover-row" onClick={logout}>
                 <span className="popover-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <IconLogOut width="13" height="13" /> Sign out
@@ -264,6 +269,8 @@ export default function Topbar({ onMenu, onAddEmployee }) {
           <IconPlus width="14" height="14" /> Add Employee
         </button>
       </div>
+
+      <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
     </div>
   );
 }
