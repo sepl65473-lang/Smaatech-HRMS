@@ -93,6 +93,8 @@ router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
   if (parts.length !== 3 || !mongoose.Types.ObjectId.isValid(employeeId) || !['birthday', 'anniv'].includes(type) || !year) {
     return res.status(400).json({ error: { code: 'INVALID_ID', message: 'Invalid celebration id.' } });
   }
+  const employee = await Employee.findOne({ _id: employeeId, ...companyFilter(req) });
+  if (!employee) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Employee not found.' } });
   await Wish.findOneAndUpdate(
     { employeeId, type, year },
     { employeeId, type, year },

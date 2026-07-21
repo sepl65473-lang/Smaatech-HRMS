@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
 router.patch('/:id/read', async (req, res) => {
   try {
     const updated = await Notification.findOneAndUpdate(
-      { _id: req.params.id, $or: [{ recipientId: req.auth.id }, { recipientId: null }] },
+      { _id: req.params.id, ...companyFilter(req), $or: [{ recipientId: req.auth.id }, { recipientId: null }] },
       { read: true },
       { new: true }
     );
@@ -53,6 +53,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const deleted = await Notification.findOneAndDelete({
       _id: req.params.id,
+      ...companyFilter(req),
       $or: [{ recipientId: req.auth.id }, { recipientId: null }],
     });
     if (!deleted) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Notification not found.' } });

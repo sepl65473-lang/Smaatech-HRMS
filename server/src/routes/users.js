@@ -43,7 +43,7 @@ router.post('/', requireRole(), async (req, res) => {
 
   let empId = null;
   if (employeeId) {
-    if (!mongoose.Types.ObjectId.isValid(employeeId) || !(await Employee.exists({ _id: employeeId }))) {
+    if (!mongoose.Types.ObjectId.isValid(employeeId) || !(await Employee.exists({ _id: employeeId, ...companyFilter(req) }))) {
       return res.status(404).json({ error: { code: 'EMPLOYEE_NOT_FOUND', message: 'Linked employee record not found.' } });
     }
     empId = employeeId;
@@ -83,7 +83,7 @@ router.patch('/:id', requireRole(), async (req, res) => {
     if (!employeeId) {
       patch.employeeId = null;
     } else {
-      if (!mongoose.Types.ObjectId.isValid(employeeId) || !(await Employee.exists({ _id: employeeId }))) {
+      if (!mongoose.Types.ObjectId.isValid(employeeId) || !(await Employee.exists({ _id: employeeId, ...companyFilter(req) }))) {
         return res.status(404).json({ error: { code: 'EMPLOYEE_NOT_FOUND', message: 'Linked employee record not found.' } });
       }
       patch.employeeId = employeeId;

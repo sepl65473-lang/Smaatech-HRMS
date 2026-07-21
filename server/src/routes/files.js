@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import Attendance from '../models/Attendance.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, companyFilter } from '../middleware/auth.js';
 import { readPhoto } from '../lib/photoStorage.js';
 
 const router = Router();
@@ -14,7 +14,7 @@ router.get('/attendance/:attendanceId/:which', async (req, res) => {
   if (which !== 'checkIn' && which !== 'checkOut') {
     return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'which must be checkIn or checkOut.' } });
   }
-  const row = await Attendance.findById(attendanceId);
+  const row = await Attendance.findOne({ _id: attendanceId, ...companyFilter(req) });
   if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attendance row not found.' } });
 
   const isAdmin = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
