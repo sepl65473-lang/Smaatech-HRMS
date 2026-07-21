@@ -22,9 +22,12 @@ const LOCK_DURATION_MS = 15 * 60 * 1000;
 // The app-wide 300/15min limiter (index.js) is shared across every /api/*
 // route, so it does little to stop credential stuffing on login/face-login
 // specifically. This one is scoped tighter and just to those two routes.
+// Relaxed under test (Vitest sets NODE_ENV=test) — integration tests make
+// many rapid, legitimate login/verify calls from the same "IP" and would
+// otherwise trip this real limit for reasons unrelated to what's under test.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many login attempts from this network. Please try again in a few minutes.' } },
