@@ -75,10 +75,7 @@ async function maybeStartTwoFactor(user, res) {
     await sendOtpEmail(user.email, otp, 'sign-in verification');
   } catch (err) {
     console.error('[auth] failed to send 2FA OTP email:', err.message);
-    // TEMPORARY diagnostic detail — no secret values, just the failure
-    // reason, to pin down a Render SMTP-config issue without dashboard
-    // access. Revert to the generic message once diagnosed.
-    res.status(502).json({ error: { code: 'EMAIL_FAILED', message: 'Could not send the verification email. Try again shortly.', debug: err.message } });
+    res.status(502).json({ error: { code: 'EMAIL_FAILED', message: 'Could not send the verification email. Try again shortly.' } });
     return true;
   }
   res.json({ requiresTwoFactor: true, email: user.email });
