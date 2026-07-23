@@ -1,16 +1,37 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
-import fs from 'node:fs';
 import Document from '../models/Document.js';
 import { requireAuth, companyFilter } from '../middleware/auth.js';
-import { savePhoto, readPhoto } from '../lib/photoStorage.js';
+import { savePhoto, readPhoto, deleteFileRef, wrapUpload } from '../lib/photoStorage.js';
 import { logAudit } from '../lib/auditLogger.js';
 
 const router = Router();
 router.use(requireAuth);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const ALLOWED_DOCUMENT_MIMES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+const upload = wrapUpload(multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_DOCUMENT_MIMES.has(file.mimetype)) {
+      return cb(new Error('Unsupported file type. Allowed: PDF, JPEG/PNG, Word, Excel.'));
+    }
+    cb(null, true);
+  },
+}).single('file'));
+
+// Client-settable document metadata — fileRef/company/reminderSent are
+// always server-computed and must never come straight from the request body.
+const ALLOWED_DOCUMENT_FIELDS = ['title', 'owner', 'ownerId', 'folder', 'type', 'visibility', 'expiryDate'];
 
 // List all documents based on company scoped rules and role visibilities
 router.get('/', async (req, res) => {
@@ -41,7 +62,7 @@ router.get('/', async (req, res) => {
 });
 
 // Create document metadata and upload file to disk
-router.post('/', upload.single('file'), async (req, res) => {
+router.post('/', upload, async (req, res) => {
   // Only HR can upload/create documents
   const isHR = ['HR Director', 'HR Manager'].includes(req.auth.role);
   if (!isHR) {
@@ -73,7 +94,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 });
 
 // Update document details
-router.patch('/:id', upload.single('file'), async (req, res) => {
+router.patch('/:id', upload, async (req, res) => {
   const before = await Document.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
 
@@ -82,21 +103,17 @@ router.patch('/:id', upload.single('file'), async (req, res) => {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Only HR personnel can edit documents.' } });
   }
 
-  const updateData = { ...(req.body || {}) };
+  const updateData = {};
+  for (const field of ALLOWED_DOCUMENT_FIELDS) {
+    if (req.body?.[field] !== undefined) updateData[field] = req.body[field];
+  }
+
   if (req.file) {
     // Save new file and remove old one
     const ext = path.extname(req.file.originalname) || '.pdf';
     const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
     updateData.fileRef = savePhoto('documents', filename, req.file.buffer);
-
-    if (before.fileRef) {
-      try {
-        const oldPath = path.resolve(import.meta.dirname, '../../uploads', before.fileRef);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      } catch (err) {
-        console.warn('Failed to delete old file:', err);
-      }
-    }
+    if (before.fileRef) deleteFileRef(before.fileRef);
   }
 
   // Reset reminder flag if expiryDate gets modified
@@ -120,15 +137,7 @@ router.delete('/:id', async (req, res) => {
   }
 
   await Document.findByIdAndDelete(req.params.id);
-
-  if (before.fileRef) {
-    try {
-      const filePath = path.resolve(import.meta.dirname, '../../uploads', before.fileRef);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    } catch (err) {
-      console.warn('Failed to delete file from disk:', err);
-    }
-  }
+  if (before.fileRef) deleteFileRef(before.fileRef);
 
   await logAudit(req, { action: 'Document removed', subject: before.title, before });
   res.json({ id: req.params.id });

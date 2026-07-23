@@ -4,10 +4,18 @@ import User from '../models/User.js';
 import FaceDescriptor from '../models/FaceDescriptor.js';
 import { requireAuth, companyFilter } from '../middleware/auth.js';
 import { extractDescriptor } from '../lib/faceEngine.js';
-import { savePhoto } from '../lib/photoStorage.js';
+import { savePhoto, wrapUpload } from '../lib/photoStorage.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const upload = wrapUpload(multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_IMAGE_MIMES.has(file.mimetype)) return cb(new Error('Enrollment photo must be a JPEG, PNG, or WebP image.'));
+    cb(null, true);
+  },
+}).single('photo'));
 
 router.use(requireAuth);
 
@@ -18,7 +26,7 @@ router.use(requireAuth);
 // so both lookups are supported). Either way, the descriptor is computed
 // here, server-side, from the uploaded photo — never accepted as a
 // client-supplied value.
-router.post('/enroll', upload.single('photo'), async (req, res) => {
+router.post('/enroll', upload, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: { code: 'NO_PHOTO', message: 'No photo uploaded.' } });
   }

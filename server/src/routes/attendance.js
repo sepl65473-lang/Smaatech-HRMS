@@ -8,11 +8,26 @@ import { resolveShiftForToday, isLate, isEarlyExit, nowTimeIST } from '../lib/sh
 import { parseDeviceInfo, clientIp } from '../lib/deviceInfo.js';
 import { reverseGeocode } from '../lib/geocode.js';
 import { extractDescriptor, matchDescriptor } from '../lib/faceEngine.js';
-import { savePhoto } from '../lib/photoStorage.js';
+import { savePhoto, wrapUpload } from '../lib/photoStorage.js';
 import { getSettingsDoc } from './settings.js';
 
 const SHARED_DEVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const upload = wrapUpload(multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_IMAGE_MIMES.has(file.mimetype)) return cb(new Error('Check-in photo must be a JPEG, PNG, or WebP image.'));
+    cb(null, true);
+  },
+}).single('photo'));
+
+// Client-settable roster fields for the HR-override PATCH — photo refs,
+// company, and empId are always server-computed/scoped and must never come
+// straight from the request body (that was the source of an earlier
+// mass-assignment bug letting a caller point checkInPhotoRef/company at
+// arbitrary values).
+const ALLOWED_ATTENDANCE_FIELDS = ['name', 'dept', 'status', 'checkIn', 'checkOut'];
 
 // Buddy-punching signal: the same physical device checking in for two
 // different employees within a short window. A flag for HR review, not a
@@ -52,7 +67,11 @@ router.post('/', requireRole('HR Manager'), async (req, res) => {
 });
 
 router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
-  const updated = await Attendance.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, req.body || {}, { new: true });
+  const patch = {};
+  for (const field of ALLOWED_ATTENDANCE_FIELDS) {
+    if (req.body?.[field] !== undefined) patch[field] = req.body[field];
+  }
+  const updated = await Attendance.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, patch, { new: true });
   if (!updated) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attendance row not found.' } });
   res.json(updated);
 });
@@ -204,7 +223,7 @@ async function handlePunch(req, res, direction) {
   res.json(updated);
 }
 
-router.post('/:id/check-in', upload.single('photo'), (req, res) => handlePunch(req, res, 'in'));
-router.post('/:id/check-out', upload.single('photo'), (req, res) => handlePunch(req, res, 'out'));
+router.post('/:id/check-in', upload, (req, res) => handlePunch(req, res, 'in'));
+router.post('/:id/check-out', upload, (req, res) => handlePunch(req, res, 'out'));
 
 export default router;
