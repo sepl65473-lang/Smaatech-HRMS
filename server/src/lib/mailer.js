@@ -1,30 +1,50 @@
+import dns from 'node:dns';
 import nodemailer from 'nodemailer';
 
-let transporter = null;
+const SMTP_HOST = 'smtp.gmail.com';
 
-function getTransporter() {
-  if (transporter) return transporter;
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
-  transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
+// nodemailer's own hostname resolver ignores the `family` option and instead
+// decides IPv4-vs-IPv6 by inspecting the machine's network interfaces; on
+// Render's containers that check misreports IPv6 as usable, so it only ever
+// tries Gmail's IPv6 address — which Render has no outbound route for
+// (ENETUNREACH). Resolving the A record ourselves and passing a literal IP
+// as `host` skips that logic entirely (nodemailer treats an IP literal as
+// already-resolved). `servername` keeps TLS validating against the real
+// hostname despite `host` being an IP.
+async function resolveSmtpHost() {
+  try {
+    const addresses = await dns.promises.resolve4(SMTP_HOST);
+    if (addresses[0]) return addresses[0];
+  } catch {
+    // fall through to the hostname below
+  }
+  return SMTP_HOST;
+}
+
+function buildTransporter(host) {
+  return nodemailer.createTransport({
+    host,
+    servername: SMTP_HOST,
     port: 587,
     secure: false,
     requireTLS: true,
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    family: 4,
     connectionTimeout: 8000,
   });
-  return transporter;
 }
 
 // Real email delivery — replaces the old in-app-toast "simulated OTP".
 // If SMTP isn't configured yet, this throws rather than silently pretending
 // to send, so the caller can surface a clear error instead of a fake success.
 export async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
-  const t = getTransporter();
-  if (!t) throw new Error('Email sending is not configured (SMTP_USER/SMTP_PASS missing).');
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error('Email sending is not configured (SMTP_USER/SMTP_PASS missing).');
+  }
 
-  await t.sendMail({
+  const host = await resolveSmtpHost();
+  const transporter = buildTransporter(host);
+
+  await transporter.sendMail({
     from: `"Smaatech HRMS" <${process.env.SMTP_USER}>`,
     to: toEmail,
     subject: `Your verification code: ${otp}`,
