@@ -1,18 +1,7 @@
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
-import nodemailer from 'nodemailer';
-
-let transporter = null;
-function getTransporter() {
-  if (transporter) return transporter;
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  });
-  return transporter;
-}
+import { sendEmail } from './mailer.js';
 
 // Settings.notifyChannels stores display labels ('In-app','Email','WhatsApp',
 // 'SMS'); lower-cased they match the internal channel keys used below.
@@ -64,20 +53,13 @@ export async function sendNotification({ recipientId, title, message, type = 'sy
 
     // 3. Process email channel
     if (channels.includes('email') && emailTo) {
-      const transport = getTransporter();
-      if (transport) {
+      if (process.env.BREVO_API_KEY && process.env.SMTP_USER) {
         const subject = emailOverride?.subject || title;
         const body = emailOverride?.body || message;
-        await transport.sendMail({
-          from: `"Smaatech HRMS" <${process.env.SMTP_USER}>`,
-          to: emailTo,
-          subject,
-          text: body,
-          html: `<p>${body.replace(/\n/g, '<br>')}</p>`,
-        });
+        await sendEmail({ to: emailTo, subject, text: body });
         console.log(`[Notification Service] Real email sent to ${emailTo}`);
       } else {
-        console.log(`[Notification Service] [Email Scaffolding] (SMTP not configured) to ${emailTo}: "${title}" - "${message}"`);
+        console.log(`[Notification Service] [Email Scaffolding] (email not configured) to ${emailTo}: "${title}" - "${message}"`);
       }
     }
 

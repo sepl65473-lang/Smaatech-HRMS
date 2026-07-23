@@ -1,51 +1,44 @@
-import dns from 'node:dns';
-import nodemailer from 'nodemailer';
+// Render's free-tier services block all outbound SMTP ports (25/465/587),
+// so raw SMTP (via nodemailer) can never reach Gmail from production —
+// every send silently times out. Brevo's transactional email HTTP API goes
+// over regular HTTPS (443), which is never blocked, so we call that
+// directly instead of speaking SMTP at all.
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
-const SMTP_HOST = 'smtp.gmail.com';
-
-// nodemailer's own hostname resolver ignores the `family` option and instead
-// decides IPv4-vs-IPv6 by inspecting the machine's network interfaces; on
-// Render's containers that check misreports IPv6 as usable, so it only ever
-// tries Gmail's IPv6 address — which Render has no outbound route for
-// (ENETUNREACH). Resolving the A record ourselves and passing a literal IP
-// as `host` skips that logic entirely (nodemailer treats an IP literal as
-// already-resolved). `servername` keeps TLS validating against the real
-// hostname despite `host` being an IP.
-async function resolveSmtpHost() {
-  try {
-    const addresses = await dns.promises.resolve4(SMTP_HOST);
-    if (addresses[0]) return addresses[0];
-  } catch {
-    // fall through to the hostname below
+export async function sendEmail({ to, subject, text, html }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const fromEmail = process.env.SMTP_USER;
+  if (!apiKey || !fromEmail) {
+    throw new Error('Email sending is not configured (BREVO_API_KEY/SMTP_USER missing).');
   }
-  return SMTP_HOST;
-}
 
-function buildTransporter(host) {
-  return nodemailer.createTransport({
-    host,
-    servername: SMTP_HOST,
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    connectionTimeout: 8000,
+  const res = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'api-key': apiKey,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: 'Smaatech HRMS', email: fromEmail },
+      to: [{ email: to }],
+      subject,
+      textContent: text,
+      htmlContent: html || `<p>${text.replace(/\n/g, '<br>')}</p>`,
+    }),
   });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Brevo send failed (${res.status}): ${body.slice(0, 300)}`);
+  }
 }
 
 // Real email delivery — replaces the old in-app-toast "simulated OTP".
-// If SMTP isn't configured yet, this throws rather than silently pretending
+// If email isn't configured yet, this throws rather than silently pretending
 // to send, so the caller can surface a clear error instead of a fake success.
 export async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    throw new Error('Email sending is not configured (SMTP_USER/SMTP_PASS missing).');
-  }
-
-  const host = await resolveSmtpHost();
-  const transporter = buildTransporter(host);
-
-  await transporter.sendMail({
-    from: `"Smaatech HRMS" <${process.env.SMTP_USER}>`,
+  await sendEmail({
     to: toEmail,
     subject: `Your verification code: ${otp}`,
     text: `Your verification code for ${purpose} is ${otp}. It expires in 10 minutes. If you didn't request this, you can ignore this email.`,
