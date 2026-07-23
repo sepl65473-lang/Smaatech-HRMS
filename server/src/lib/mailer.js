@@ -6,11 +6,13 @@ function getTransporter() {
   if (transporter) return transporter;
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
   transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    // Render's containers resolve smtp.gmail.com to an IPv6 address they
-    // have no outbound route for (ENETUNREACH) — force IPv4, which works.
     family: 4,
+    connectionTimeout: 8000,
   });
   return transporter;
 }
