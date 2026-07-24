@@ -191,6 +191,7 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
       </div>
 
       <div className="form-grid">
+        <div className="form-section-label">Basic details</div>
         <Field label="Full name" error={errors.name} full>
           <input className="input" value={form.name} onChange={set('name')} placeholder="e.g. Aarav Patel" />
         </Field>
@@ -228,6 +229,8 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
             {EMPLOYMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
           </select>
         </Field>
+
+        <div className="form-section-label">Contact <span className="hint">optional</span></div>
         <Field label="Email" error={errors.email}>
           <input className="input" value={form.email} onChange={set('email')} placeholder="name@smaatech.co" />
         </Field>
@@ -240,6 +243,8 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
         <Field label="Date of birth">
           <input type="date" className="input" value={form.dob} onChange={set('dob')} />
         </Field>
+
+        <div className="form-section-label">Compensation &amp; banking <span className="hint">optional — can add later</span></div>
         <Field label="Monthly gross (₹)" error={errors.salary}>
           <input type="number" className="input" value={form.salary} onChange={set('salary')} placeholder="0" />
         </Field>
@@ -249,6 +254,8 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
         <Field label="IFSC code">
           <input className="input" value={form.ifsc} onChange={set('ifsc')} placeholder="e.g. HDFC0001234" />
         </Field>
+
+        <div className="form-section-label">Statutory details <span className="hint">optional — for payroll compliance</span></div>
         <Field label="State (for Professional Tax)">
           <input className="input" value={form.state} onChange={set('state')} placeholder="e.g. Karnataka" />
         </Field>
