@@ -24,7 +24,12 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
       setForm({ empId: employees[0]?.id || '', type: leaveTypes[0]?.value || 'casual', start: '', end: '', reason: '' });
       setErrors({});
     }
-  }, [open, employees, leaveTypes]);
+    // leaveTypes intentionally excluded: it's rebuilt from getMasterValues()
+    // on every render (a fresh array each call), so including it here would
+    // rerun this effect — and its setState calls — on every render, an
+    // infinite loop (see the identical bug fixed in EmployeeForm.jsx).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, employees]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 

@@ -53,6 +53,8 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
   const [form, setForm] = useState(() => emptyForm(departments, locations));
   const [errors, setErrors] = useState({});
   const [photoError, setPhotoError] = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
   const [createLogin, setCreateLogin] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
@@ -63,12 +65,21 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
     if (open) {
       setForm(employee ? { ...emptyForm(departments, locations), ...employee, salary: String(employee.salary ?? '') } : emptyForm(departments, locations));
       setErrors({});
+      setSubmitError('');
+      setSaving(false);
       setCreateLogin(false);
       setLoginEmail('');
       setLoginPassword('');
       setLoginRole('Employee');
     }
-  }, [open, employee, departments, locations]);
+    // departments/locations intentionally excluded: getMasterValues() builds
+    // a fresh array every call (filter+map), so including them here reruns
+    // this effect — and its setState calls — on every render, an infinite
+    // loop (only masked when a company has no configured master values and
+    // the fallback constant arrays are returned instead). Only open/employee
+    // changing should reset the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, employee]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -111,7 +122,7 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
     return Object.keys(er).length === 0;
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!validate()) return;
     const payload = {
       ...form,
@@ -123,7 +134,15 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
     const loginPayload = canCreateLogin && createLogin
       ? { name: form.name.trim(), email: loginEmail.trim().toLowerCase(), password: loginPassword, role: loginRole }
       : null;
-    onSave(payload, loginPayload);
+    setSubmitError('');
+    setSaving(true);
+    try {
+      await onSave(payload, loginPayload);
+    } catch (err) {
+      setSubmitError(err.message || 'Could not save this employee. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -135,11 +154,16 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
       width={520}
       footer={(
         <>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn" onClick={submit}>{isEdit ? 'Save changes' : 'Add employee'}</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn" onClick={submit} disabled={saving}>
+            {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Add employee')}
+          </button>
         </>
       )}
     >
+      {submitError && (
+        <span className="login-error" style={{ marginBottom: 16 }}>{submitError}</span>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <Avatar name={form.name || '?'} photo={form.photo} size={64} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -269,7 +293,7 @@ export default function EmployeeForm({ open, employee, onClose, onSave }) {
                 </select>
               </Field>
               <Field label="Temporary password" error={errors.loginPassword} full>
-                <input className="input" type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="At least 6 characters" />
+                <input className="input" type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="At least 8 characters, with a letter and a number" />
               </Field>
             </div>
           )}
