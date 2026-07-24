@@ -301,7 +301,7 @@ router.post('/change-password', requireAuth, validate(changePasswordSchema), asy
 // old flow where the client just self-certified an email address with no
 // verification at all. The code itself is never returned in the response;
 // it only ever reaches the user via their inbox.
-router.post('/forgot-password', validate(forgotPasswordSchema), async (req, res) => {
+router.post('/forgot-password', loginLimiter, validate(forgotPasswordSchema), async (req, res) => {
   const { email } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   // Same response whether or not the account exists, so this can't be used
@@ -325,7 +325,11 @@ router.post('/forgot-password', validate(forgotPasswordSchema), async (req, res)
   res.json({ ok: true });
 });
 
-router.post('/reset-password', validate(resetPasswordSchema), async (req, res) => {
+// A wrong code counts toward the same failedLoginAttempts/lockedUntil
+// lockout as a wrong password/2FA guess — closes the gap where an
+// IP-rotating attacker could otherwise keep guessing the 6-digit code past
+// what loginLimiter alone stops (mirrors /verify-2fa).
+router.post('/reset-password', loginLimiter, validate(resetPasswordSchema), async (req, res) => {
   const { email, otp, newPassword } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   if (!user || !user.otpHash || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
@@ -333,12 +337,22 @@ router.post('/reset-password', validate(resetPasswordSchema), async (req, res) =
   }
   const otpValid = await bcrypt.compare(String(otp || ''), user.otpHash);
   if (!otpValid) {
+    user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+    if (user.failedLoginAttempts >= LOCK_THRESHOLD) {
+      user.lockedUntil = new Date(Date.now() + LOCK_DURATION_MS);
+      user.failedLoginAttempts = 0;
+    }
+    await user.save();
     return res.status(400).json({ error: { code: 'INVALID_OTP', message: 'Incorrect verification code.' } });
   }
 
   user.passwordHash = await bcrypt.hash(newPassword, 10);
   user.otpHash = null;
   user.otpExpiresAt = null;
+  if (user.failedLoginAttempts || user.lockedUntil) {
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = null;
+  }
   await user.save();
   res.json({ ok: true });
 });

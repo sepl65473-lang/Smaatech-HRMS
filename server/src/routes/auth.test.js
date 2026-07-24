@@ -140,3 +140,44 @@ describe('POST /auth/change-password', () => {
     expect(newLoginRes.status).toBe(200);
   });
 });
+
+describe('POST /auth/forgot-password + /auth/reset-password', () => {
+  it('does not reveal whether the email is registered', async () => {
+    const res = await request(app).post('/api/v1/auth/forgot-password').send({ email: 'nobody@example.com' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(sendOtpEmail).not.toHaveBeenCalled();
+  });
+
+  it('locks the account after 5 wrong reset codes, same as a wrong password/2FA guess', async () => {
+    await seedUser();
+    await request(app).post('/api/v1/auth/forgot-password').send({ email: EMAIL });
+    expect(sendOtpEmail).toHaveBeenCalledTimes(1);
+
+    for (let i = 0; i < 5; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await request(app).post('/api/v1/auth/reset-password').send({ email: EMAIL, otp: '000000', newPassword: 'NewPass456' });
+      expect(res.status).toBe(400);
+    }
+
+    const lockedRes = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
+    expect(lockedRes.status).toBe(423);
+    expect(lockedRes.body.error.code).toBe('ACCOUNT_LOCKED');
+  });
+
+  it('accepts the correct code and the new password works to sign in', async () => {
+    await seedUser();
+    await Settings.create({ _id: COMPANY, twoFactor: false });
+    await request(app).post('/api/v1/auth/forgot-password').send({ email: EMAIL });
+    const [, sentOtp] = sendOtpEmail.mock.calls[0];
+
+    const wrongRes = await request(app).post('/api/v1/auth/reset-password').send({ email: EMAIL, otp: '000000', newPassword: 'NewPass456' });
+    expect(wrongRes.status).toBe(400);
+
+    const okRes = await request(app).post('/api/v1/auth/reset-password').send({ email: EMAIL, otp: sentOtp, newPassword: 'NewPass456' });
+    expect(okRes.status).toBe(200);
+
+    const newLoginRes = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: 'NewPass456' });
+    expect(newLoginRes.status).toBe(200);
+  });
+});
