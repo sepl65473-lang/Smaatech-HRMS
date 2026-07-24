@@ -1121,6 +1121,7 @@
     display:none;
     align-items:center;
     justify-content:center;
+    padding:24px;
     animation: fadeIn .2s;
   }
   .modal-backdrop.show{display:flex}
@@ -1131,11 +1132,19 @@
     border-radius:14px;
     padding:28px;
     width:min(440px, 90vw);
+    max-height:100%;
     box-shadow:0 20px 60px -10px rgba(0,0,0,0.3);
     animation: rise .3s ease-out;
+    /* Long forms (e.g. Add employee) can exceed the viewport — keep the
+       title and action buttons always reachable and let only the field
+       list scroll, instead of the whole modal overflowing off-screen with
+       no way to get back to the top or down to Save. */
+    display:flex;
+    flex-direction:column;
   }
   .modal-head{
     display:flex; align-items:center; gap:14px; margin-bottom:18px;
+    flex-shrink:0;
   }
   .modal-avatar{
     width:48px;height:48px;
@@ -1183,7 +1192,7 @@
     transition: all .15s;
   }
   .quick-wish:hover{background:var(--ink); color:var(--bg); border-color:var(--ink)}
-  .modal-actions{display:flex; gap:8px; justify-content:flex-end}
+  .modal-actions{display:flex; gap:8px; justify-content:flex-end; flex-shrink:0}
 
   /* ============ PAGE ROUTING ============ */
   .page-wrap{display:none; animation: pageIn .35s ease-out}
@@ -1664,7 +1673,7 @@
   .field-error{font-size:11px; color:var(--red); margin-top:1px}
 
   /* ---- Modal body wrapper ---- */
-  .modal-body{margin-bottom:18px}
+  .modal-body{margin-bottom:18px; overflow-y:auto; min-height:0}
   .modal-body:last-child{margin-bottom:0}
 
   /* ---- Status pills (employee status) ---- */
