@@ -18,11 +18,15 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
 
   const [form, setForm] = useState({ empId: '', type: 'casual', start: '', end: '', reason: '' });
   const [errors, setErrors] = useState({});
+  const [submitError, setSubmitError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
       setForm({ empId: employees[0]?.id || '', type: leaveTypes[0]?.value || 'casual', start: '', end: '', reason: '' });
       setErrors({});
+      setSubmitError('');
+      setSaving(false);
     }
     // leaveTypes intentionally excluded: it's rebuilt from getMasterValues()
     // on every render (a fresh array each call), so including it here would
@@ -35,7 +39,7 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
 
   const days = daysBetween(form.start, form.end);
 
-  const submit = () => {
+  const submit = async () => {
     const er = {};
     if (!form.empId) er.empId = 'Select an employee';
     if (!form.start) er.start = 'Pick a start date';
@@ -43,7 +47,15 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
     if (form.start && form.end && days <= 0) er.end = 'End must be on/after start';
     setErrors(er);
     if (Object.keys(er).length) return;
-    onSave(form);
+    setSubmitError('');
+    setSaving(true);
+    try {
+      await onSave(form);
+    } catch (err) {
+      setSubmitError(err.message || 'Could not raise this leave request. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -55,11 +67,12 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
       width={480}
       footer={(
         <>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn" onClick={submit}>Raise request</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn" onClick={submit} disabled={saving}>{saving ? 'Raising…' : 'Raise request'}</button>
         </>
       )}
     >
+      {submitError && <span className="login-error" style={{ marginBottom: 16 }}>{submitError}</span>}
       <div className="form-grid">
         <label className="field field-full">
           <span className="field-label">Employee</span>

@@ -100,8 +100,15 @@ export default function CsvImportModal({
         employmentType: EMPLOYMENT_TYPES.includes(r.employmenttype) ? r.employmenttype : 'Full-time',
       };
     });
-    await onImport(finalData);
-    close();
+    try {
+      await onImport(finalData);
+      close();
+    } catch {
+      // onImport already surfaced a toast with the specific reason — leave
+      // the modal open (with the row table still visible) instead of
+      // getting stuck on "Importing…" with no way to retry.
+      setImporting(false);
+    }
   };
 
   return (

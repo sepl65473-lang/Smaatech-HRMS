@@ -39,6 +39,7 @@ export default function Resignations() {
   });
 
   const [filterStatus, setFilterStatus] = useState('all'); // all | pending | approved
+  const [payingFnF, setPayingFnF] = useState(false);
 
   const handleResign = async () => {
     if (!reason || !lwd) {
@@ -70,7 +71,14 @@ export default function Resignations() {
   };
 
   const handlePayFnF = async (exitId) => {
-    await payFnF(exitId);
+    setPayingFnF(true);
+    try {
+      await payFnF(exitId);
+    } catch {
+      // payFnF already surfaced a toast with the real reason.
+    } finally {
+      setPayingFnF(false);
+    }
   };
 
   const handleLWDUpdate = async (exitId, newLwd) => {
@@ -280,8 +288,8 @@ export default function Resignations() {
                           {activeResignation.fnfSettlement.status}
                         </span>
                         {activeResignation.fnfSettlement.status === 'Processed' && (isFinance || currentUser.role === 'HR Director') && (
-                          <button className="btn btn-compact approve" onClick={() => handlePayFnF(activeResignation.id)}>
-                            Disburse & Terminate
+                          <button className="btn btn-compact approve" onClick={() => handlePayFnF(activeResignation.id)} disabled={payingFnF}>
+                            {payingFnF ? 'Processing…' : 'Disburse & Terminate'}
                           </button>
                         )}
                       </div>

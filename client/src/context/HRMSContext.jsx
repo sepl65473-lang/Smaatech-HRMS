@@ -210,11 +210,22 @@ export function HRMSProvider({ children }) {
 
   const loadSessions = useCallback(() => authApi.sessions(), []);
   const revokeSession = useCallback(async (id) => {
-    await authApi.revokeSession(id);
+    try {
+      await authApi.revokeSession(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to sign out that session.');
+      throw err;
+    }
     toast('info', 'Session signed out.');
   }, [toast]);
   const revokeOtherSessions = useCallback(async () => {
-    const { revoked } = await authApi.revokeOtherSessions();
+    let revoked;
+    try {
+      ({ revoked } = await authApi.revokeOtherSessions());
+    } catch (err) {
+      toast('error', err.message || 'Failed to sign out other sessions.');
+      throw err;
+    }
     toast('success', `Signed out of ${revoked} other session${revoked === 1 ? '' : 's'}.`);
     return revoked;
   }, [toast]);
@@ -276,30 +287,36 @@ export function HRMSProvider({ children }) {
   //  EMPLOYEES — CRUD
   // ════════════════════════════════════════════════════════════
   const addEmployee = async (data, { silent = false } = {}) => {
-    const created = await employeesApi.create(data);
-    const gross = Number(created.salary || 0);
-    const deductions = Math.round(gross * 0.30);
-    const [attendanceRow, payrollRow] = await Promise.all([
-      attendanceApi.create({
-        empId: created.id,
-        name: created.name,
-        dept: created.dept,
-        date: todayISO(),
-        checkIn: null,
-        checkOut: null,
-        status: created.status === 'on-leave' ? 'leave' : 'absent',
-      }),
-      payrollApi.create({
-        empId: created.id,
-        name: created.name,
-        dept: created.dept,
-        gross,
-        deductions,
-        net: gross - deductions,
-        status: 'ready',
-        cycle: new Date().toISOString().slice(0, 7),
-      }),
-    ]);
+    let created; let attendanceRow; let payrollRow;
+    try {
+      created = await employeesApi.create(data);
+      const gross = Number(created.salary || 0);
+      const deductions = Math.round(gross * 0.30);
+      [attendanceRow, payrollRow] = await Promise.all([
+        attendanceApi.create({
+          empId: created.id,
+          name: created.name,
+          dept: created.dept,
+          date: todayISO(),
+          checkIn: null,
+          checkOut: null,
+          status: created.status === 'on-leave' ? 'leave' : 'absent',
+        }),
+        payrollApi.create({
+          empId: created.id,
+          name: created.name,
+          dept: created.dept,
+          gross,
+          deductions,
+          net: gross - deductions,
+          status: 'ready',
+          cycle: new Date().toISOString().slice(0, 7),
+        }),
+      ]);
+    } catch (err) {
+      toast('error', err.message || 'Failed to add employee.');
+      throw err;
+    }
     setEmployees((list) => [created, ...list]);
     setAttendance((list) => [attendanceRow, ...list]);
     setPayroll((list) => [payrollRow, ...list]);
@@ -309,32 +326,38 @@ export function HRMSProvider({ children }) {
   };
 
   const updateEmployee = async (id, patch) => {
-    const updated = await employeesApi.update(id, patch);
-    const linkedPatch = {
-      ...(patch.name != null ? { name: updated.name } : {}),
-      ...(patch.dept != null ? { dept: updated.dept } : {}),
-    };
-    const attendancePatch = {
-      ...linkedPatch,
-      ...(patch.status != null ? { status: updated.status === 'on-leave' ? 'leave' : 'absent' } : {}),
-    };
-    const gross = Number(updated.salary || 0);
-    const payrollPatch = {
-      ...linkedPatch,
-      ...(patch.salary != null ? {
-        gross,
-        deductions: Math.round(gross * 0.30),
-        net: gross - Math.round(gross * 0.30),
-      } : {}),
-    };
-    const linkedAttendance = attendance.filter((a) => a.empId === id);
-    const linkedPayroll = payroll.filter((p) => p.empId === id);
-    const linkedLeaves = leaves.filter((l) => l.empId === id);
-    await Promise.all([
-      ...linkedAttendance.map((a) => Object.keys(attendancePatch).length ? attendanceApi.update(a.id, attendancePatch) : null),
-      ...linkedPayroll.map((p) => Object.keys(payrollPatch).length ? payrollApi.update(p.id, payrollPatch) : null),
-      ...linkedLeaves.map((l) => Object.keys(linkedPatch).length ? leavesApi.update(l.id, linkedPatch) : null),
-    ].filter(Boolean));
+    let updated; let attendancePatch; let payrollPatch; let linkedPatch;
+    try {
+      updated = await employeesApi.update(id, patch);
+      linkedPatch = {
+        ...(patch.name != null ? { name: updated.name } : {}),
+        ...(patch.dept != null ? { dept: updated.dept } : {}),
+      };
+      attendancePatch = {
+        ...linkedPatch,
+        ...(patch.status != null ? { status: updated.status === 'on-leave' ? 'leave' : 'absent' } : {}),
+      };
+      const gross = Number(updated.salary || 0);
+      payrollPatch = {
+        ...linkedPatch,
+        ...(patch.salary != null ? {
+          gross,
+          deductions: Math.round(gross * 0.30),
+          net: gross - Math.round(gross * 0.30),
+        } : {}),
+      };
+      const linkedAttendance = attendance.filter((a) => a.empId === id);
+      const linkedPayroll = payroll.filter((p) => p.empId === id);
+      const linkedLeaves = leaves.filter((l) => l.empId === id);
+      await Promise.all([
+        ...linkedAttendance.map((a) => Object.keys(attendancePatch).length ? attendanceApi.update(a.id, attendancePatch) : null),
+        ...linkedPayroll.map((p) => Object.keys(payrollPatch).length ? payrollApi.update(p.id, payrollPatch) : null),
+        ...linkedLeaves.map((l) => Object.keys(linkedPatch).length ? leavesApi.update(l.id, linkedPatch) : null),
+      ].filter(Boolean));
+    } catch (err) {
+      toast('error', err.message || 'Failed to update employee.');
+      throw err;
+    }
     setEmployees((list) => list.map((e) => (e.id === id ? updated : e)));
     if (Object.keys(attendancePatch).length) {
       setAttendance((list) => list.map((a) => (a.empId === id ? { ...a, ...attendancePatch } : a)));
@@ -357,14 +380,19 @@ export function HRMSProvider({ children }) {
     const linkedLeaves = leaves.filter((l) => l.empId === id);
     const linkedReviews = reviews.filter((r) => r.empId === id);
     const directReports = employees.filter((e) => e.managerId === id);
-    await Promise.all([
-      employeesApi.remove(id),
-      ...linkedAttendance.map((a) => attendanceApi.remove(a.id)),
-      ...linkedPayroll.map((p) => payrollApi.remove(p.id)),
-      ...linkedLeaves.map((l) => leavesApi.remove(l.id)),
-      ...linkedReviews.map((r) => reviewsApi.remove(r.id)),
-      ...directReports.map((e) => employeesApi.update(e.id, { managerId: null })),
-    ]);
+    try {
+      await Promise.all([
+        employeesApi.remove(id),
+        ...linkedAttendance.map((a) => attendanceApi.remove(a.id)),
+        ...linkedPayroll.map((p) => payrollApi.remove(p.id)),
+        ...linkedLeaves.map((l) => leavesApi.remove(l.id)),
+        ...linkedReviews.map((r) => reviewsApi.remove(r.id)),
+        ...directReports.map((e) => employeesApi.update(e.id, { managerId: null })),
+      ]);
+    } catch (err) {
+      toast('error', err.message || 'Failed to remove employee.');
+      throw err;
+    }
     setEmployees((list) => list
       .filter((e) => e.id !== id)
       .map((e) => (e.managerId === id ? { ...e, managerId: null } : e)));
@@ -439,7 +467,13 @@ export function HRMSProvider({ children }) {
   }, []);
 
   const addUserAccount = async (data) => {
-    const created = await usersApi.create(data);
+    let created;
+    try {
+      created = await usersApi.create(data);
+    } catch (err) {
+      toast('error', err.message || 'Failed to create login.');
+      throw err;
+    }
     setUsers((list) => [created, ...list]);
     auditLocal('Login created', created.name, created.email);
     toast('success', `Login created for <strong>${created.name}</strong>`);
@@ -447,7 +481,13 @@ export function HRMSProvider({ children }) {
   };
 
   const updateUserAccount = async (id, patch) => {
-    const updated = await usersApi.update(id, patch);
+    let updated;
+    try {
+      updated = await usersApi.update(id, patch);
+    } catch (err) {
+      toast('error', err.message || 'Failed to update login.');
+      throw err;
+    }
     setUsers((list) => list.map((u) => (u.id === id ? updated : u)));
     auditLocal('Login updated', updated.name, updated.email);
     toast('success', `<strong>${updated.name}</strong>'s login updated`);
@@ -456,7 +496,12 @@ export function HRMSProvider({ children }) {
 
   const deleteUserAccount = async (id) => {
     const user = users.find((u) => u.id === id);
-    await usersApi.remove(id);
+    try {
+      await usersApi.remove(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to remove login.');
+      throw err;
+    }
     setUsers((list) => list.filter((u) => u.id !== id));
     auditLocal('Login removed', user ? user.name : id);
     toast('info', `<strong>${user ? user.name : 'Login'}</strong> removed`);
@@ -477,7 +522,13 @@ export function HRMSProvider({ children }) {
       reason: data.reason || '',
       status: 'pending',
     };
-    const created = await leavesApi.create(record);
+    let created;
+    try {
+      created = await leavesApi.create(record);
+    } catch (err) {
+      toast('error', err.message || 'Failed to raise leave request.');
+      throw err;
+    }
     setLeaves((list) => [created, ...list]);
     auditLocal('Leave requested', created.name, `${created.type} leave`);
     toast('success', `Leave request raised for <strong>${created.name}</strong>`);
@@ -490,7 +541,13 @@ export function HRMSProvider({ children }) {
   // `updated.status` only actually becomes 'approved' once every configured
   // stage (Settings > Workflows) has signed off.
   const setLeaveStatus = async (id, action, opts = {}) => {
-    const updated = action === 'approved' ? await leavesApi.approve(id) : await leavesApi.decline(id);
+    let updated;
+    try {
+      updated = action === 'approved' ? await leavesApi.approve(id) : await leavesApi.decline(id);
+    } catch (err) {
+      if (!opts.silent) toast('error', err.message || 'Failed to update leave status.');
+      throw err;
+    }
     setLeaves((list) => list.map((l) => (l.id === id ? updated : l)));
     if (updated.status === 'approved' && updated.empId) {
       const today = todayISO();
@@ -547,7 +604,12 @@ export function HRMSProvider({ children }) {
   const bulkDeclineLeave = (ids) => bulkSetLeaveStatus(ids, 'declined');
 
   const deleteLeave = async (id) => {
-    await leavesApi.remove(id);
+    try {
+      await leavesApi.remove(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to delete leave request.');
+      throw err;
+    }
     setLeaves((list) => list.filter((l) => l.id !== id));
     auditLocal('Leave deleted', id);
     toast('info', 'Leave request deleted');
@@ -618,7 +680,13 @@ export function HRMSProvider({ children }) {
   // computes or transmits one. `targetUserId` lets HR enroll on behalf of
   // another account (Settings > Users); omitted, it enrolls the caller.
   const enrollFace = async (photoBlob, targetUserId) => {
-    const result = await faceApi.enroll(photoBlob, targetUserId);
+    let result;
+    try {
+      result = await faceApi.enroll(photoBlob, targetUserId);
+    } catch (err) {
+      toast('error', err.message || 'Face enrollment failed.');
+      throw err;
+    }
     if (!targetUserId || targetUserId === currentUser.id) setFaceEnrolled(true);
     toast('success', `Face enrolled for <strong>${result.enrolledFor}</strong>`);
     return result;
@@ -633,7 +701,13 @@ export function HRMSProvider({ children }) {
     const patch = type === 'in'
       ? { checkIn: time, status: isLateForShift(time, resolveShiftForToday(empId, settings)) ? 'late' : 'present' }
       : { checkOut: time };
-    const updated = await attendanceApi.update(row.id, patch);
+    let updated;
+    try {
+      updated = await attendanceApi.update(row.id, patch);
+    } catch (err) {
+      toast('error', err.message || 'Failed to reconcile punch.');
+      throw err;
+    }
     setAttendance((list) => list.map((a) => (a.id === row.id ? updated : a)));
     audit('Biometric punch reconciled', updated.name, `${type === 'in' ? 'Check-in' : 'Check-out'} ${time}`);
     return updated;
@@ -646,7 +720,13 @@ export function HRMSProvider({ children }) {
       ...(status === 'absent' || status === 'leave' ? { checkIn: null, checkOut: null } : {}),
       ...((status === 'present' || status === 'late') && !row?.checkIn ? { checkIn: nowTime() } : {}),
     };
-    const updated = await attendanceApi.update(id, patch);
+    let updated;
+    try {
+      updated = await attendanceApi.update(id, patch);
+    } catch (err) {
+      toast('error', err.message || 'Failed to update attendance status.');
+      throw err;
+    }
     setAttendance((list) => list.map((a) => (a.id === id ? updated : a)));
     audit('Attendance override', updated.name, status);
     toast('info', `<strong>${updated.name}</strong> marked ${status}`);
@@ -657,7 +737,12 @@ export function HRMSProvider({ children }) {
   // ════════════════════════════════════════════════════════════
   const processPayroll = async () => {
     const ready = payroll.filter((p) => p.status === 'ready');
-    await Promise.all(ready.map((p) => payrollApi.update(p.id, { status: 'paid' })));
+    try {
+      await Promise.all(ready.map((p) => payrollApi.update(p.id, { status: 'paid' })));
+    } catch (err) {
+      toast('error', err.message || 'Failed to process payroll.');
+      throw err;
+    }
     setPayroll((list) => list.map((p) => (p.status === 'ready' ? { ...p, status: 'paid' } : p)));
     audit('Payroll processed', `${ready.length} employees`, new Date().toISOString().slice(0, 10));
     toast('success', `Payroll processed for <strong>${ready.length}</strong> employees`);
@@ -670,11 +755,17 @@ export function HRMSProvider({ children }) {
     const ded = deductions.reduce((sum, c) => sum + Number(c.amount || 0), 0);
     const lopAmount = Math.round((gross / 30) * Number(lopDays || 0));
     const net = gross - ded - lopAmount;
-    const updated = await payrollApi.update(id, {
-      gross, deductions: ded, net,
-      lopDays: Number(lopDays || 0), lopAmount,
-      components: { earnings, deductions },
-    });
+    let updated;
+    try {
+      updated = await payrollApi.update(id, {
+        gross, deductions: ded, net,
+        lopDays: Number(lopDays || 0), lopAmount,
+        components: { earnings, deductions },
+      });
+    } catch (err) {
+      toast('error', err.message || 'Failed to update salary structure.');
+      throw err;
+    }
     setPayroll((list) => list.map((p) => (p.id === id ? updated : p)));
     auditLocal('Salary structure updated', updated.name, updated.cycle);
     toast('success', `Salary structure updated for <strong>${updated.name}</strong>`);
@@ -682,7 +773,13 @@ export function HRMSProvider({ children }) {
   };
 
   const markPaid = async (id) => {
-    const updated = await payrollApi.update(id, { status: 'paid' });
+    let updated;
+    try {
+      updated = await payrollApi.update(id, { status: 'paid' });
+    } catch (err) {
+      toast('error', err.message || 'Failed to mark slip paid.');
+      throw err;
+    }
     setPayroll((list) => list.map((p) => (p.id === id ? updated : p)));
     auditLocal('Payslip marked paid', updated.name, updated.cycle);
     toast('success', `Slip paid for <strong>${updated.name}</strong>`);
@@ -692,10 +789,16 @@ export function HRMSProvider({ children }) {
   //  CELEBRATIONS — send wish
   // ════════════════════════════════════════════════════════════
   const sendWish = async (id, message) => {
-    const updated = await celebrationsApi.update(id, { wished: true });
+    let updated; let s;
+    try {
+      updated = await celebrationsApi.update(id, { wished: true });
+      const count = (settings.wishesSent || 0) + 1;
+      s = await settingsApi.update({ wishesSent: count });
+    } catch (err) {
+      toast('error', err.message || 'Failed to send wish.');
+      throw err;
+    }
     setCelebrations((list) => list.map((c) => (c.id === id ? updated : c)));
-    const count = (settings.wishesSent || 0) + 1;
-    const s = await settingsApi.update({ wishesSent: count });
     setSettings(s);
     toast('success', `Wish sent to <strong>${updated.name}</strong>${message ? ' 🎉' : ''}`);
   };
@@ -718,7 +821,13 @@ export function HRMSProvider({ children }) {
     if (stage === 'Hired' && !candidate?.onboarding) {
       patch.onboarding = ONBOARDING_TEMPLATE.map((label, i) => ({ id: `ob_${i}`, label, done: false }));
     }
-    const updated = await recruitmentApi.update(id, patch);
+    let updated;
+    try {
+      updated = await recruitmentApi.update(id, patch);
+    } catch (err) {
+      toast('error', err.message || 'Failed to move candidate.');
+      throw err;
+    }
     setRecruitment((list) => list.map((c) => (c.id === id ? updated : c)));
     audit('Candidate moved', updated.candidate, stage);
     toast('info', `<strong>${updated.candidate}</strong> → ${stage}`);
@@ -730,12 +839,24 @@ export function HRMSProvider({ children }) {
     const onboarding = candidate.onboarding.map((item) => (
       item.id === itemId ? { ...item, done: !item.done } : item
     ));
-    const updated = await recruitmentApi.update(id, { onboarding });
+    let updated;
+    try {
+      updated = await recruitmentApi.update(id, { onboarding });
+    } catch (err) {
+      toast('error', err.message || 'Failed to update onboarding checklist.');
+      throw err;
+    }
     setRecruitment((list) => list.map((c) => (c.id === id ? updated : c)));
   };
 
   const addCandidate = async (data) => {
-    const created = await recruitmentApi.create({ stage: 'Applied', meta: 'just now', ...data });
+    let created;
+    try {
+      created = await recruitmentApi.create({ stage: 'Applied', meta: 'just now', ...data });
+    } catch (err) {
+      toast('error', err.message || 'Failed to add candidate.');
+      throw err;
+    }
     setRecruitment((list) => [created, ...list]);
     audit('Candidate added', created.candidate, created.title);
     toast('success', `<strong>${created.candidate}</strong> added to pipeline`);
@@ -743,7 +864,12 @@ export function HRMSProvider({ children }) {
 
   const deleteCandidate = async (id) => {
     const candidate = recruitment.find((c) => c.id === id);
-    await recruitmentApi.remove(id);
+    try {
+      await recruitmentApi.remove(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to remove candidate.');
+      throw err;
+    }
     setRecruitment((list) => list.filter((c) => c.id !== id));
     audit('Candidate removed', candidate?.candidate || id, candidate?.title || '');
     toast('info', 'Candidate removed');
@@ -753,7 +879,13 @@ export function HRMSProvider({ children }) {
   //  HOLIDAYS — CRUD
   // ════════════════════════════════════════════════════════════
   const addHoliday = async (data) => {
-    const created = await holidaysApi.create(data);
+    let created;
+    try {
+      created = await holidaysApi.create(data);
+    } catch (err) {
+      toast('error', err.message || 'Failed to add holiday.');
+      throw err;
+    }
     setHolidays((list) => [...list, created]);
     audit('Holiday added', created.name, created.date);
     toast('success', `<strong>${created.name}</strong> added to calendar`);
@@ -762,7 +894,12 @@ export function HRMSProvider({ children }) {
 
   const deleteHoliday = async (id) => {
     const holiday = holidays.find((h) => h.id === id);
-    await holidaysApi.remove(id);
+    try {
+      await holidaysApi.remove(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to remove holiday.');
+      throw err;
+    }
     setHolidays((list) => list.filter((h) => h.id !== id));
     audit('Holiday removed', holiday?.name || id);
     toast('info', 'Holiday removed');
@@ -774,18 +911,24 @@ export function HRMSProvider({ children }) {
   const startReviewCycle = async (cycleName) => {
     const existing = new Set(reviews.filter((r) => r.cycleName === cycleName).map((r) => r.empId));
     const toCreate = employees.filter((e) => !existing.has(e.id));
-    const created = await Promise.all(toCreate.map((e) => reviewsApi.create({
-      cycleName,
-      empId: e.id,
-      name: e.name,
-      dept: e.dept,
-      status: 'pending',
-      selfRating: null,
-      selfComments: '',
-      managerRating: null,
-      managerComments: '',
-      goals: [],
-    })));
+    let created;
+    try {
+      created = await Promise.all(toCreate.map((e) => reviewsApi.create({
+        cycleName,
+        empId: e.id,
+        name: e.name,
+        dept: e.dept,
+        status: 'pending',
+        selfRating: null,
+        selfComments: '',
+        managerRating: null,
+        managerComments: '',
+        goals: [],
+      })));
+    } catch (err) {
+      toast('error', err.message || 'Failed to start review cycle.');
+      throw err;
+    }
     setReviews((list) => [...created, ...list]);
     audit('Review cycle started', cycleName, `${created.length} employees`);
     toast('success', `Review cycle <strong>${cycleName}</strong> started for ${created.length} employees`);
@@ -793,7 +936,13 @@ export function HRMSProvider({ children }) {
   };
 
   const submitSelfReview = async (id, { selfRating, selfComments }) => {
-    const updated = await reviewsApi.update(id, { selfRating, selfComments, status: 'self-submitted' });
+    let updated;
+    try {
+      updated = await reviewsApi.update(id, { selfRating, selfComments, status: 'self-submitted' });
+    } catch (err) {
+      toast('error', err.message || 'Failed to submit self review.');
+      throw err;
+    }
     setReviews((list) => list.map((r) => (r.id === id ? updated : r)));
     audit('Self review submitted', updated.name, updated.cycleName);
     toast('success', 'Self review submitted');
@@ -801,11 +950,17 @@ export function HRMSProvider({ children }) {
   };
 
   const submitManagerReview = async (id, { managerRating, managerComments }) => {
-    const updated = await reviewsApi.update(id, { managerRating, managerComments, status: 'completed' });
-    setReviews((list) => list.map((r) => (r.id === id ? updated : r)));
-    if (updated.empId && managerRating != null) {
-      await updateEmployee(updated.empId, { rating: Number(managerRating) });
+    let updated;
+    try {
+      updated = await reviewsApi.update(id, { managerRating, managerComments, status: 'completed' });
+      if (updated.empId && managerRating != null) {
+        await updateEmployee(updated.empId, { rating: Number(managerRating) });
+      }
+    } catch (err) {
+      toast('error', err.message || 'Failed to submit manager review.');
+      throw err;
     }
+    setReviews((list) => list.map((r) => (r.id === id ? updated : r)));
     audit('Manager review submitted', updated.name, updated.cycleName);
     toast('success', `Review completed for <strong>${updated.name}</strong>`);
     return updated;
@@ -814,7 +969,13 @@ export function HRMSProvider({ children }) {
   const addGoal = async (id, text) => {
     const review = reviews.find((r) => r.id === id);
     const goals = [...(review?.goals || []), { id: uid('goal'), text, done: false }];
-    const updated = await reviewsApi.update(id, { goals });
+    let updated;
+    try {
+      updated = await reviewsApi.update(id, { goals });
+    } catch (err) {
+      toast('error', err.message || 'Failed to add goal.');
+      throw err;
+    }
     setReviews((list) => list.map((r) => (r.id === id ? updated : r)));
   };
 
@@ -822,7 +983,13 @@ export function HRMSProvider({ children }) {
     const review = reviews.find((r) => r.id === id);
     if (!review) return;
     const goals = review.goals.map((g) => (g.id === goalId ? { ...g, done: !g.done } : g));
-    const updated = await reviewsApi.update(id, { goals });
+    let updated;
+    try {
+      updated = await reviewsApi.update(id, { goals });
+    } catch (err) {
+      toast('error', err.message || 'Failed to update goal.');
+      throw err;
+    }
     setReviews((list) => list.map((r) => (r.id === id ? updated : r)));
   };
 
@@ -830,7 +997,13 @@ export function HRMSProvider({ children }) {
   //  EXPENSES, ASSETS, AND JOBS ACTIONS
   // ════════════════════════════════════════════════════════════
   const addExpense = async (data) => {
-    const created = await expensesApi.create({ status: 'pending', reason: '', ...data });
+    let created;
+    try {
+      created = await expensesApi.create({ status: 'pending', reason: '', ...data });
+    } catch (err) {
+      toast('error', err.message || 'Failed to submit expense claim.');
+      throw err;
+    }
     setExpenses((list) => [created, ...list]);
     auditLocal('Expense claim filed', created.name, `${created.category} - ₹${created.amount}`);
     toast('success', `Expense claim of <strong>₹${created.amount}</strong> submitted.`);
@@ -841,7 +1014,13 @@ export function HRMSProvider({ children }) {
   // goes through routes/expenses.js's dedicated endpoints instead of a plain
   // status PATCH, so the server can enforce Settings > Workflows.
   const updateExpenseStatus = async (id, status, reason = '', opts = {}) => {
-    const updated = status === 'approved' ? await expensesApi.approve(id) : await expensesApi.decline(id, reason);
+    let updated;
+    try {
+      updated = status === 'approved' ? await expensesApi.approve(id) : await expensesApi.decline(id, reason);
+    } catch (err) {
+      if (!opts.silent) toast('error', err.message || 'Failed to update expense claim.');
+      throw err;
+    }
     setExpenses((list) => list.map((e) => (e.id === id ? updated : e)));
     if (status === 'declined') {
       auditLocal('Expense claim declined', updated.name, `₹${updated.amount}`);
@@ -877,7 +1056,13 @@ export function HRMSProvider({ children }) {
   const bulkDeclineExpenses = (ids) => bulkSetExpenseStatus(ids, 'declined');
 
   const addAsset = async (data) => {
-    const created = await assetsApi.create({ status: 'available', assignedToEmpId: null, assignedToEmpName: '', assignedDate: '', ...data });
+    let created;
+    try {
+      created = await assetsApi.create({ status: 'available', assignedToEmpId: null, assignedToEmpName: '', assignedDate: '', ...data });
+    } catch (err) {
+      toast('error', err.message || 'Failed to add asset.');
+      throw err;
+    }
     setAssets((list) => [created, ...list]);
     auditLocal('Asset added to inventory', created.name, created.serialNumber);
     toast('success', `Asset <strong>${created.name}</strong> added successfully.`);
@@ -885,7 +1070,13 @@ export function HRMSProvider({ children }) {
   };
 
   const assignAsset = async (id, empId, empName, date) => {
-    const updated = await assetsApi.update(id, { status: 'assigned', assignedToEmpId: empId, assignedToEmpName: empName, assignedDate: date });
+    let updated;
+    try {
+      updated = await assetsApi.update(id, { status: 'assigned', assignedToEmpId: empId, assignedToEmpName: empName, assignedDate: date });
+    } catch (err) {
+      toast('error', err.message || 'Failed to assign asset.');
+      throw err;
+    }
     setAssets((list) => list.map((a) => (a.id === id ? updated : a)));
     auditLocal('Asset assigned', updated.name, `To ${empName}`);
     toast('success', `Asset <strong>${updated.name}</strong> assigned to ${empName}.`);
@@ -893,7 +1084,13 @@ export function HRMSProvider({ children }) {
   };
 
   const returnAsset = async (id) => {
-    const updated = await assetsApi.update(id, { status: 'available', assignedToEmpId: null, assignedToEmpName: '', assignedDate: '' });
+    let updated;
+    try {
+      updated = await assetsApi.update(id, { status: 'available', assignedToEmpId: null, assignedToEmpName: '', assignedDate: '' });
+    } catch (err) {
+      toast('error', err.message || 'Failed to return asset.');
+      throw err;
+    }
     setAssets((list) => list.map((a) => (a.id === id ? updated : a)));
     auditLocal('Asset returned', updated.name, 'Returned to inventory');
     toast('info', `Asset <strong>${updated.name}</strong> returned to inventory.`);
@@ -901,7 +1098,13 @@ export function HRMSProvider({ children }) {
   };
 
   const addJob = async (data) => {
-    const created = await jobsApi.create({ status: 'Open', ...data });
+    let created;
+    try {
+      created = await jobsApi.create({ status: 'Open', ...data });
+    } catch (err) {
+      toast('error', err.message || 'Failed to create job posting.');
+      throw err;
+    }
     setJobs((list) => [created, ...list]);
     auditLocal('Job posting created', created.title, created.department);
     toast('success', `Job posting <strong>${created.title}</strong> created.`);
@@ -909,7 +1112,13 @@ export function HRMSProvider({ children }) {
   };
 
   const updateJobStatus = async (id, status) => {
-    const updated = await jobsApi.update(id, { status });
+    let updated;
+    try {
+      updated = await jobsApi.update(id, { status });
+    } catch (err) {
+      toast('error', err.message || 'Failed to update job status.');
+      throw err;
+    }
     setJobs((list) => list.map((j) => (j.id === id ? updated : j)));
     auditLocal('Job status updated', updated.title, status);
     toast('info', `Job <strong>${updated.title}</strong> marked as ${status}.`);
@@ -918,7 +1127,13 @@ export function HRMSProvider({ children }) {
 
   // ── Documents ──────────────────────────────────────────────
   const addDocument = async (formData) => {
-    const created = await documentsApi.create(formData);
+    let created;
+    try {
+      created = await documentsApi.create(formData);
+    } catch (err) {
+      toast('error', err.message || 'Failed to upload document.');
+      throw err;
+    }
     setDocuments((list) => [created, ...list]);
     auditLocal('Document uploaded', created.title, created.owner);
     toast('success', `Document <strong>${created.title}</strong> uploaded successfully.`);
@@ -926,7 +1141,13 @@ export function HRMSProvider({ children }) {
   };
 
   const updateDocument = async (id, formData) => {
-    const updated = await documentsApi.update(id, formData);
+    let updated;
+    try {
+      updated = await documentsApi.update(id, formData);
+    } catch (err) {
+      toast('error', err.message || 'Failed to update document.');
+      throw err;
+    }
     setDocuments((list) => list.map((d) => (d.id === id ? updated : d)));
     auditLocal('Document updated', updated.title, updated.owner);
     toast('success', `Document <strong>${updated.title}</strong> updated.`);
@@ -934,7 +1155,12 @@ export function HRMSProvider({ children }) {
   };
 
   const deleteDocument = async (id) => {
-    await documentsApi.remove(id);
+    try {
+      await documentsApi.remove(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to delete document.');
+      throw err;
+    }
     setDocuments((list) => list.filter((d) => d.id !== id));
     auditLocal('Document deleted', id);
     toast('info', 'Document deleted.');
@@ -946,7 +1172,13 @@ export function HRMSProvider({ children }) {
 
   // ── Resignations & clearances ──────────────────────────────
   const addResignation = async (data) => {
-    const created = await resignationsApi.create(data);
+    let created;
+    try {
+      created = await resignationsApi.create(data);
+    } catch (err) {
+      toast('error', err.message || 'Failed to file resignation.');
+      throw err;
+    }
     setResignations((list) => [created, ...list]);
     auditLocal('Resignation filed', created.employeeName, created.resignationDate);
     toast('success', `Resignation filed successfully.`);
@@ -954,7 +1186,13 @@ export function HRMSProvider({ children }) {
   };
 
   const signOffClearance = async (id, clearance) => {
-    const updated = await resignationsApi.signOffClearance(id, clearance);
+    let updated;
+    try {
+      updated = await resignationsApi.signOffClearance(id, clearance);
+    } catch (err) {
+      toast('error', err.message || 'Failed to record clearance sign-off.');
+      throw err;
+    }
     setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
     auditLocal(`Clearance sign-off (${clearance.dept})`, updated.employeeName, clearance.status);
     toast('success', `${clearance.dept} clearance status updated to ${clearance.status}.`);
@@ -962,7 +1200,13 @@ export function HRMSProvider({ children }) {
   };
 
   const processFnF = async (id, fnf) => {
-    const updated = await resignationsApi.processFnF(id, fnf);
+    let updated;
+    try {
+      updated = await resignationsApi.processFnF(id, fnf);
+    } catch (err) {
+      toast('error', err.message || 'Failed to process FnF settlement.');
+      throw err;
+    }
     setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
     auditLocal('FnF Settlement processed', updated.employeeName, `Payout: ₹${updated.fnfSettlement.netPayout}`);
     toast('success', `FnF Settlement calculations processed.`);
@@ -970,10 +1214,15 @@ export function HRMSProvider({ children }) {
   };
 
   const payFnF = async (id) => {
-    const updated = await resignationsApi.payFnF(id);
+    let updated; let empList;
+    try {
+      updated = await resignationsApi.payFnF(id);
+      empList = await employeesApi.list();
+    } catch (err) {
+      toast('error', err.message || 'Failed to process FnF payout.');
+      throw err;
+    }
     setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
-    
-    const empList = await employeesApi.list();
     setEmployees(empList);
 
     auditLocal('FnF Paid & Employee Terminated', updated.employeeName, 'Payout finalized');
@@ -982,7 +1231,13 @@ export function HRMSProvider({ children }) {
   };
 
   const updateResignationStatus = async (id, patch) => {
-    const updated = await resignationsApi.update(id, patch);
+    let updated;
+    try {
+      updated = await resignationsApi.update(id, patch);
+    } catch (err) {
+      toast('error', err.message || 'Failed to update resignation status.');
+      throw err;
+    }
     setResignations((list) => list.map((r) => (r.id === id ? updated : r)));
     auditLocal('Resignation status updated', updated.employeeName, updated.status);
     toast('info', `Resignation status updated to ${updated.status}.`);
@@ -991,7 +1246,13 @@ export function HRMSProvider({ children }) {
 
   // ── Attendance Corrections ─────────────────────────────────
   const requestCorrection = async (data) => {
-    const created = await attendanceCorrectionsApi.create(data);
+    let created;
+    try {
+      created = await attendanceCorrectionsApi.create(data);
+    } catch (err) {
+      toast('error', err.message || 'Failed to request correction.');
+      throw err;
+    }
     setAttendanceCorrections((list) => [created, ...list]);
     auditLocal('Attendance correction requested', created.employeeName, created.date);
     toast('success', `Attendance correction requested successfully.`);
@@ -999,10 +1260,15 @@ export function HRMSProvider({ children }) {
   };
 
   const approveCorrection = async (id) => {
-    const updated = await attendanceCorrectionsApi.approve(id);
+    let updated; let attList;
+    try {
+      updated = await attendanceCorrectionsApi.approve(id);
+      attList = await attendanceApi.list();
+    } catch (err) {
+      toast('error', err.message || 'Failed to approve correction.');
+      throw err;
+    }
     setAttendanceCorrections((list) => list.map((c) => (c.id === id ? updated : c)));
-    
-    const attList = await attendanceApi.list();
     setAttendance(attList);
 
     auditLocal('Attendance correction approved', updated.employeeName, updated.date);
@@ -1011,7 +1277,13 @@ export function HRMSProvider({ children }) {
   };
 
   const rejectCorrection = async (id) => {
-    const updated = await attendanceCorrectionsApi.reject(id);
+    let updated;
+    try {
+      updated = await attendanceCorrectionsApi.reject(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to reject correction.');
+      throw err;
+    }
     setAttendanceCorrections((list) => list.map((c) => (c.id === id ? updated : c)));
     auditLocal('Attendance correction rejected', updated.employeeName, updated.date);
     toast('info', `Correction request rejected.`);
@@ -1025,7 +1297,13 @@ export function HRMSProvider({ children }) {
   // client write for values attendance verification or approval routing
   // depend on) — everything else in "settings" stays local, same as before.
   const updateSettings = async (patch, notify = true) => {
-    const merged = await settingsApi.update(patch);
+    let merged;
+    try {
+      merged = await settingsApi.update(patch);
+    } catch (err) {
+      toast('error', err.message || 'Failed to save settings.');
+      throw err;
+    }
     setSettings(merged);
     if (notify) toast('success', 'Settings <strong>saved</strong>');
     return merged;
@@ -1035,11 +1313,17 @@ export function HRMSProvider({ children }) {
 
   const resetDatabase = async () => {
     setLoading(true);
-    const all = await resetDB();
-    setAuditLog([]);
-    hydrate(all);
-    setLoading(false);
-    toast('info', 'Database settings reset to defaults.');
+    try {
+      const all = await resetDB();
+      setAuditLog([]);
+      hydrate(all);
+      toast('info', 'Database settings reset to defaults.');
+    } catch (err) {
+      toast('error', err.message || 'Failed to reset database.');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
   };
 
   const contextCanAccess = useCallback((path) => {
@@ -1066,7 +1350,13 @@ export function HRMSProvider({ children }) {
   }, [currentUser.role, roles]);
 
   const addRole = async (data) => {
-    const created = await rolesApi.create(data);
+    let created;
+    try {
+      created = await rolesApi.create(data);
+    } catch (err) {
+      toast('error', err.message || 'Failed to create role.');
+      throw err;
+    }
     setRoles((list) => [...list, created]);
     audit('Role created', created.name, created.description);
     toast('success', `Role <strong>${created.name}</strong> created.`);
@@ -1074,7 +1364,13 @@ export function HRMSProvider({ children }) {
   };
 
   const updateRole = async (id, patch) => {
-    const updated = await rolesApi.update(id, patch);
+    let updated;
+    try {
+      updated = await rolesApi.update(id, patch);
+    } catch (err) {
+      toast('error', err.message || 'Failed to update role.');
+      throw err;
+    }
     setRoles((list) => list.map((r) => (r.id === id ? updated : r)));
     audit('Role updated', updated.name, updated.description);
     toast('success', `Role <strong>${updated.name}</strong> updated.`);
@@ -1083,14 +1379,25 @@ export function HRMSProvider({ children }) {
 
   const deleteRole = async (id) => {
     const roleDef = roles.find((r) => r.id === id);
-    await rolesApi.remove(id);
+    try {
+      await rolesApi.remove(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to delete role.');
+      throw err;
+    }
     setRoles((list) => list.filter((r) => r.id !== id));
     audit('Role deleted', roleDef ? roleDef.name : id);
     toast('info', `Role deleted.`);
   };
 
   const addMasterValue = async (categoryId, value) => {
-    const created = await masterValuesApi.create({ categoryId, value });
+    let created;
+    try {
+      created = await masterValuesApi.create({ categoryId, value });
+    } catch (err) {
+      toast('error', err.message || 'Failed to add value.');
+      throw err;
+    }
     setMasterValues((list) => [...list, created]);
     audit('Master value added', created.value);
     toast('success', `<strong>${created.value}</strong> added.`);
@@ -1098,14 +1405,25 @@ export function HRMSProvider({ children }) {
   };
 
   const updateMasterValue = async (id, patch) => {
-    const updated = await masterValuesApi.update(id, patch);
+    let updated;
+    try {
+      updated = await masterValuesApi.update(id, patch);
+    } catch (err) {
+      toast('error', err.message || 'Failed to update value.');
+      throw err;
+    }
     setMasterValues((list) => list.map((v) => (v.id === id ? updated : v)));
     return updated;
   };
 
   const deleteMasterValue = async (id) => {
     const row = masterValues.find((v) => v.id === id);
-    await masterValuesApi.remove(id);
+    try {
+      await masterValuesApi.remove(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to remove value.');
+      throw err;
+    }
     setMasterValues((list) => list.filter((v) => v.id !== id));
     audit('Master value removed', row ? row.value : id);
     toast('info', 'Removed.');
