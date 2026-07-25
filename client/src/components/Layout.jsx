@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import ToastHost from './ToastHost';
-import EmployeeForm from './EmployeeForm';
 import LoginScreen from './LoginScreen';
 import { useHRMS } from '../context/HRMSContext';
+
+// Mounted globally (the Topbar "+ Add Employee" quick-action works from any
+// page) but only actually needed once someone opens it — lazy-loading keeps
+// its weight out of every page's initial bundle.
+const EmployeeForm = lazy(() => import('./EmployeeForm'));
 
 export default function Layout() {
   const { addEmployee, loading, isAuthenticated, booting } = useHRMS();
@@ -46,12 +50,16 @@ export default function Layout() {
 
       <ToastHost />
 
-      <EmployeeForm
-        open={addOpen}
-        employee={null}
-        onClose={() => setAddOpen(false)}
-        onSave={async (data) => { await addEmployee(data); setAddOpen(false); }}
-      />
+      {addOpen && (
+        <Suspense fallback={null}>
+          <EmployeeForm
+            open={addOpen}
+            employee={null}
+            onClose={() => setAddOpen(false)}
+            onSave={async (data) => { await addEmployee(data); setAddOpen(false); }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
