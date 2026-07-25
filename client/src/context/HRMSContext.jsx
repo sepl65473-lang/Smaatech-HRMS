@@ -17,7 +17,10 @@ import {
 } from '../lib/permissions';
 
 
-const HRMSContext = createContext(null);
+// Exported so tests can render a component tree under a lightweight mock
+// value (<HRMSContext.Provider value={...}>) without needing the real
+// HRMSProvider's network/auth bootstrap.
+export const HRMSContext = createContext(null);
 
 export const useHRMS = () => {
   const ctx = useContext(HRMSContext);
