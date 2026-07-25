@@ -46,6 +46,19 @@ async function seedCompany(company) {
   return login.body.accessToken;
 }
 
+// HR Director needs no Role document — requireRole() bypasses the DB lookup
+// for that role name unconditionally.
+async function seedHrDirector(company) {
+  if (!(await Settings.findOne({ _id: company }))) {
+    await Settings.create({ _id: company, twoFactor: false });
+  }
+  const passwordHash = await bcrypt.hash(PASSWORD, 10);
+  const email = `director-${company.toLowerCase()}@example.com`;
+  await User.create({ name: `Director ${company}`, email, passwordHash, role: 'HR Director', company, active: true });
+  const login = await request(app).post('/api/v1/auth/login').send({ email, password: PASSWORD });
+  return login.body.accessToken;
+}
+
 beforeAll(async () => {
   await startTestDB();
 }, 60000);
@@ -160,5 +173,38 @@ describe('cross-tenant isolation on POST/PATCH /users employeeId link', () => {
         name: 'New Login', email: 'new-login@example.com', password: PASSWORD, role: 'Employee', employeeId: String(empA._id),
       });
     expect(ownCreate.status).toBe(201);
+  });
+});
+
+// companyFilter() used to return {} (no scope at all) for any HR Director
+// account, regardless of company — a per-company role, not a cross-tenant
+// platform admin. With more than one company this let one company's
+// Director read/edit/delete every other company's records.
+describe('companyFilter scopes HR Director to their own company', () => {
+  it("a company-B HR Director cannot see or edit company-A's employees", async () => {
+    const directorA = await seedHrDirector('DirCoA');
+    const directorB = await seedHrDirector('DirCoB');
+    const emp = await Employee.create({
+      name: 'Scoped Employee', role: 'Engineer', dept: 'Engineering', loc: 'Remote', company: 'DirCoA',
+    });
+
+    const crossList = await request(app).get('/api/v1/employees').set('Authorization', `Bearer ${directorB}`);
+    expect(crossList.body.some((e) => e.id === String(emp._id))).toBe(false);
+
+    const crossRead = await request(app).get(`/api/v1/employees/${emp._id}`).set('Authorization', `Bearer ${directorB}`);
+    expect(crossRead.body).toBeNull();
+
+    const crossPatch = await request(app)
+      .patch(`/api/v1/employees/${emp._id}`)
+      .set('Authorization', `Bearer ${directorB}`)
+      .send({ name: 'Hijacked' });
+    expect(crossPatch.status).toBe(404);
+
+    const stillReal = await Employee.findById(emp._id);
+    expect(stillReal.name).toBe('Scoped Employee');
+
+    // Positive control — the owning company's own Director sees it fine.
+    const ownRead = await request(app).get(`/api/v1/employees/${emp._id}`).set('Authorization', `Bearer ${directorA}`);
+    expect(ownRead.body.name).toBe('Scoped Employee');
   });
 });

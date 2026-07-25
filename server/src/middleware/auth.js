@@ -74,12 +74,16 @@ export function requireRole(...rolesOrActions) {
   };
 }
 
-// Returns a Mongo filter object that scopes queries to the user's company.
-// HR Director can optionally pass ?company=X to filter, but is never forced.
+// Returns a Mongo filter object that scopes queries to the caller's own
+// company. Always scoped — including for HR Director. That role is a
+// per-company superuser (requireRole() above lets it bypass permission
+// checks within its own tenant), not a cross-tenant platform admin; the
+// old code granted `{}` (no scope at all) for any HR Director account,
+// which would let one company's HR Director read/edit/delete every other
+// company's records once more than one company exists. If a genuine
+// cross-company platform-admin capability is ever needed, it should be a
+// separate, explicit flag — not implied by this tenant-scoped role name.
 export function companyFilter(req) {
-  if (req.auth.role === 'HR Director') {
-    return req.query.company ? { company: req.query.company } : {};
-  }
   return { company: req.auth.company };
 }
 
