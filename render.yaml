@@ -16,9 +16,11 @@ services:
         sync: false
       - key: JWT_REFRESH_SECRET
         sync: false
-      - key: SMTP_USER
+      # Real OTP emails go through Brevo's HTTP API, not SMTP — Render's free
+      # tier blocks all outbound SMTP ports. See server/.env.example.
+      - key: BREVO_API_KEY
         sync: false
-      - key: SMTP_PASS
+      - key: SMTP_USER
         sync: false
       # Set this to the deployed Vercel URL (e.g. https://smaatech-hrms.vercel.app)
       # once the client is deployed — see README.md for the full order of steps.

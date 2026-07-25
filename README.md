@@ -70,7 +70,7 @@ The server needs a persistent Node process (it loads face-api.js/TensorFlow mode
 
 ### 1. Deploy the server to Render
 1. In the Render dashboard: **New → Blueprint**, connect the `sepl65473-lang/Smaatech-HRMS` GitHub repo. Render reads `render.yaml` at the repo root and proposes a `smaatech-hrms-api` web service.
-2. Fill in the prompted environment variables (values from your local `server/.env`): `MONGODB_URI`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `SMTP_USER`, `SMTP_PASS`. Leave `CLIENT_ORIGIN` for step 3.
+2. Fill in the prompted environment variables (values from your local `server/.env`): `MONGODB_URI`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `BREVO_API_KEY`, `SMTP_USER`. Leave `CLIENT_ORIGIN` for step 3.
 3. Deploy. Note the resulting URL, e.g. `https://smaatech-hrms-api.onrender.com`.
 4. **MongoDB Atlas → Network Access → Add IP Address → Allow Access from Anywhere (`0.0.0.0/0`)** — Render's free tier has no static IP, so Atlas needs to accept connections from any IP.
 
@@ -104,10 +104,11 @@ The server needs a persistent Node process (it loads face-api.js/TensorFlow mode
 | **Exit & Clearance** | **Resignation filings**, multi-department clearances (IT, Finance, HR, Admin), and Full & Final settlement calculations with automated employee exit deactivation |
 | **Settings** | Org config, users & role access, geofence/shift config, notification templates (stored on server MongoDB) |
 | **Dashboard** | Live stats from real data, attendance chart, quick actions |
+| **Auth & security** | Real email-OTP login 2FA (per-company toggle), self-service password change, active-session management, account lockout after repeated failed attempts, rate-limited password reset |
 
 ---
 
 ## 🛠️ Tech stack
 
 - **Client**: React 18, Vite 5, react-router-dom v6, Context API
-- **Server**: Express 4, Mongoose 8 (MongoDB Atlas), JWT auth (jsonwebtoken + bcryptjs), face-api.js + TensorFlow.js (WASM) for server-side face verification, Nodemailer (OTP emails)
+- **Server**: Express 4, Mongoose 8 (MongoDB Atlas), JWT auth (jsonwebtoken + bcryptjs), face-api.js + TensorFlow.js (WASM) for server-side face verification, Brevo HTTP API (OTP emails — not SMTP, which Render's free tier blocks outbound)
