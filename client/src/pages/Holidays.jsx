@@ -19,6 +19,8 @@ export default function Holidays() {
   const [confirm, setConfirm] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
   const [form, setForm] = useState({ name: '', day: '', month: today.getMonth(), type: 'National' });
+  const [submitError, setSubmitError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const handleExportCsv = () => {
     const keys = ['name', 'date', 'type'];
@@ -54,18 +56,28 @@ export default function Holidays() {
 
   const openAdd = () => {
     setForm({ name: '', day: '', month, type: 'National' });
+    setSubmitError('');
+    setSaving(false);
     setFormOpen(true);
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!form.name.trim() || !form.day) return;
     const weekday = new Date(year, form.month, Number(form.day)).toLocaleDateString('en-IN', { weekday: 'short' });
-    addHoliday({
-      name: form.name.trim(),
-      date: `${form.day} ${MONTH_NAMES[form.month]}, ${weekday}`,
-      type: form.type,
-    });
-    setFormOpen(false);
+    setSubmitError('');
+    setSaving(true);
+    try {
+      await addHoliday({
+        name: form.name.trim(),
+        date: `${form.day} ${MONTH_NAMES[form.month]}, ${weekday}`,
+        type: form.type,
+      });
+      setFormOpen(false);
+    } catch (err) {
+      setSubmitError(err.message || 'Could not add this holiday. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -149,11 +161,12 @@ export default function Holidays() {
         width={420}
         footer={(
           <>
-            <button className="btn btn-ghost" onClick={() => setFormOpen(false)}>Cancel</button>
-            <button className="btn" onClick={submit}>Add holiday</button>
+            <button className="btn btn-ghost" onClick={() => setFormOpen(false)} disabled={saving}>Cancel</button>
+            <button className="btn" onClick={submit} disabled={saving}>{saving ? 'Adding…' : 'Add holiday'}</button>
           </>
         )}
       >
+        {submitError && <span className="login-error" style={{ marginBottom: 16 }}>{submitError}</span>}
         <div className="form-grid">
           <label className="field field-full">
             <span className="field-label">Holiday name</span>

@@ -14,19 +14,31 @@ function ReviewModal({ open, review, onClose, onSubmitManager, onAddGoal, onTogg
   const [rating, setRating] = useState(3);
   const [comments, setComments] = useState('');
   const [goalText, setGoalText] = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (review) {
       setRating(review.managerRating ?? review.selfRating ?? 3);
       setComments(review.managerComments || '');
       setGoalText('');
+      setSubmitError('');
+      setSaving(false);
     }
   }, [review?.id]);
 
   if (!review) return null;
 
-  const submit = () => {
-    onSubmitManager(review.id, { managerRating: Number(rating), managerComments: comments });
+  const submit = async () => {
+    setSubmitError('');
+    setSaving(true);
+    try {
+      await onSubmitManager(review.id, { managerRating: Number(rating), managerComments: comments });
+    } catch (err) {
+      setSubmitError(err.message || 'Could not submit this review. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -38,11 +50,12 @@ function ReviewModal({ open, review, onClose, onSubmitManager, onAddGoal, onTogg
       width={480}
       footer={(
         <>
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          <button className="btn" onClick={submit}>Submit manager review</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Close</button>
+          <button className="btn" onClick={submit} disabled={saving}>{saving ? 'Submitting…' : 'Submit manager review'}</button>
         </>
       )}
     >
+      {submitError && <span className="login-error" style={{ marginBottom: 16 }}>{submitError}</span>}
       <div className="form-grid">
         <div className="field field-full">
           <span className="field-label">Self rating</span>
