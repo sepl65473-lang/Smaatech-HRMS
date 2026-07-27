@@ -41,22 +41,86 @@ Requires **Node 18+**. The client dev server proxies `/api/*` to `localhost:4000
 ```
 client/                     # React 18 + Vite — talks to the server over /api/v1
 ├── src/lib/apiClient.js    # fetch wrapper: JWT access token in memory, httpOnly refresh cookie
-├── src/data/store.js       # REST calls for server-backed resources + localStorage for local-only settings
-├── src/context/HRMSContext.jsx
+├── src/data/store.js       # REST calls for server-backed resources
+├── src/context/HRMSContext.jsx   # single app-wide data/actions store (no Redux/Query)
 └── src/pages/, src/components/
 
 server/                     # Express + Mongoose, MongoDB Atlas
-├── src/index.js            # app wiring, mounts all /api/v1/* routers
+├── src/app.js              # pure Express app: middleware + all /api/v1/* route mounts (no side effects — importable by tests)
+├── src/index.js            # thin entrypoint: starts app.js listening, connects the DB, boots background jobs
 ├── src/routes/             # auth, employees, attendance, leave, payroll, recruitment, ...
+├── src/middleware/auth.js  # requireAuth / requireRole / companyFilter — see Multi-tenancy below
 ├── src/models/             # Mongoose schemas
-└── src/lib/faceEngine.js   # loads face-api.js models from public/models at boot
+├── src/lib/faceEngine.js   # loads face-api.js models from public/models at boot
+└── src/lib/mailer.js       # Brevo HTTP API — real OTP email delivery
 
 public/models/               # face-api.js model weights (shared by client UX + server verification)
 ```
 
-Employees, attendance, leave, payroll, recruitment, reviews, expenses, assets, jobs, holidays, celebrations, settings, documents, resignations, and corrections all live in MongoDB via the server's REST API. No application settings persist client-side in `localStorage`.
+Employees, attendance, leave, payroll, recruitment, reviews, expenses, assets, jobs, holidays, celebrations, settings, documents, resignations, and corrections all live in MongoDB via the server's REST API — nothing application-level persists in `localStorage`.
 
-Auth: password (or face) login returns a short-lived JWT access token (kept in memory only) plus an httpOnly refresh cookie; `apiClient.js` retries once via `/auth/refresh` on a 401.
+### System topology
+
+```mermaid
+graph LR
+    Browser["Browser<br/>React 18 SPA"]
+    Vercel["Vercel<br/>static Vite build"]
+    Render["Render<br/>Express API<br/>(persistent Node process)"]
+    Atlas[("MongoDB Atlas")]
+    Brevo["Brevo<br/>HTTP email API"]
+
+    Browser -- "loads app" --> Vercel
+    Browser -- "/api/v1/* (JWT + cookie)" --> Render
+    Render -- "Mongoose" --> Atlas
+    Render -- "OTP emails (HTTPS)" --> Brevo
+
+    style Browser fill:#eef,stroke:#446
+    style Vercel fill:#e6f7ff,stroke:#08c
+    style Render fill:#e6ffed,stroke:#2a8
+    style Atlas fill:#fff3e6,stroke:#d80
+    style Brevo fill:#fdeef0,stroke:#c33
+```
+
+The server needs a persistent process (it loads face-api.js/TensorFlow models at startup and holds refresh-token sessions), so it runs on Render rather than Vercel's serverless functions — see **Deploying** below. Client and server deploy and scale independently; a push to `main` triggers both, but they are not atomic.
+
+### Auth & login 2FA flow
+
+```mermaid
+sequenceDiagram
+    participant U as Browser
+    participant S as Server
+    participant D as MongoDB
+    participant B as Brevo
+
+    U->>S: POST /auth/login (email, password)
+    S->>D: verify password hash, check lockout
+    alt company has 2FA enabled
+        S->>D: store hashed OTP + expiry
+        S->>B: send 6-digit code
+        B-->>U: email with code
+        S-->>U: 200 { requiresTwoFactor: true }
+        U->>S: POST /auth/verify-2fa (email, otp)
+        S->>D: compare OTP hash, check lockout
+    end
+    S-->>U: 200 { accessToken } + Set-Cookie (httpOnly refresh token)
+    Note over U,S: accessToken kept in memory only.<br/>apiClient.js retries once via /auth/refresh on a 401.
+```
+
+**5** wrong password or OTP attempts lock the account for 15 minutes (shared `failedLoginAttempts`/`lockedUntil` fields); `/forgot-password` and `/reset-password` are rate-limited the same way.
+
+### Multi-tenancy
+
+Every tenant-scoped collection carries a `company` field. `server/src/middleware/auth.js`'s `companyFilter(req)` returns `{ company: req.auth.company }` for every request — including `HR Director`, which is a **per-company** admin role (it bypasses permission checks within its own tenant via `requireRole()`, but never sees another company's data). Today's deployment only has one company (`Smaatech`); the scoping exists so onboarding a second one doesn't silently leak data across tenants.
+
+### Security layers
+
+- **AuthN**: JWT access token (short-lived, memory-only) + httpOnly rotating refresh cookie; bcrypt-hashed passwords.
+- **AuthZ**: `requireRole()` checks a DB-backed `Role.allowedActions` list per route, not just the JWT's role string.
+- **2FA**: real email-OTP, per-company toggle (see flow above).
+- **Rate limiting**: a strict limiter on `/login`, `/face-login`, `/verify-2fa`, `/forgot-password`, `/reset-password`; a looser one across all of `/api/*`.
+- **CSP**: enforced on the deployed client (`client/vercel.json`) — `default-src 'self'` plus a narrow allowlist for fonts, the API origin, and face-api.js's WASM.
+- **Input handling**: `express-mongo-sanitize` against NoSQL injection, `helmet` default headers, Joi request validation.
+- **File uploads**: mimetype allowlists, an uploads-root containment check on every save/read/delete, and whitelisted (never client-supplied) fields on the records that reference them.
 
 ---
 
