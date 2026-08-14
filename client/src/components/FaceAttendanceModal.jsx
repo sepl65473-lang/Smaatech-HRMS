@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
 import { loadFaceModels, detectFaceDescriptor } from '../lib/faceAuth';
 
@@ -29,7 +29,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
   const [retryToken, setRetryToken] = useState(0);
   const [hasStream, setHasStream] = useState(false);
 
-  const stopResources = () => {
+  const stopResources = useCallback(() => {
     clearTimeout(timerRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -39,7 +39,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
       videoRef.current.srcObject = null;
     }
     setHasStream(false);
-  };
+  }, []);
 
   const captureFrame = () => new Promise((resolve) => {
     const canvas = document.createElement('canvas');
@@ -110,7 +110,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
       cancelled = true;
       stopResources();
     };
-  }, [open, retryToken]);
+  }, [open, retryToken, onVerified, stopResources]);
 
   const tryAgain = () => setRetryToken((t) => t + 1);
 

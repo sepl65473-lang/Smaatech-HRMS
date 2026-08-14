@@ -5,7 +5,6 @@ export default function QrCheckInModal({ open, onClose, onScanSuccess }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const [status, setStatus] = useState('loading'); // loading | scanning | success | error
-  const [error, setError] = useState('');
   const [scanTimeLeft, setScanTimeLeft] = useState(3);
   const timerRef = useRef(null);
   const [hasStream, setHasStream] = useState(false);
@@ -36,7 +35,6 @@ export default function QrCheckInModal({ open, onClose, onScanSuccess }) {
     }
 
     setStatus('loading');
-    setError('');
     setScanTimeLeft(3);
 
     (async () => {
@@ -61,7 +59,7 @@ export default function QrCheckInModal({ open, onClose, onScanSuccess }) {
           }
         }, 1000);
 
-      } catch (_err) {
+      } catch {
         // Fallback for no camera or blocked permission
         setStatus('scanning'); // Still enter scanning but show simulated bypass trigger
       }

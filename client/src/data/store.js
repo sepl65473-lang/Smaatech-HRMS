@@ -1,4 +1,3 @@
-import { buildSeed } from './seed';
 import { apiFetch, apiFetchBlob, setAccessToken } from '../lib/apiClient';
 
 // ─────────────────────────────────────────────────────────────
@@ -17,51 +16,9 @@ import { apiFetch, apiFetchBlob, setAccessToken } from '../lib/apiClient';
 //  with fetch() calls. Nothing else in the app has to change.
 // ─────────────────────────────────────────────────────────────
 
-const DB_KEY = 'Smaatech_hrms_db_v1';
+export const DB_STORAGE_KEY = 'Smaatech_hrms_db_v1';
 
-// Simulate a little network latency so loading states are real.
-const LATENCY = 90;
-const wait = (value) => new Promise((res) => setTimeout(() => res(value), LATENCY));
-const clone = (v) => JSON.parse(JSON.stringify(v));
-
-function readLocalRaw() {
-  try {
-    const raw = localStorage.getItem(DB_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch (err) {
-    console.warn('Could not parse stored local DB, reseeding.', err);
-    return null;
-  }
-}
-
-function saveDB(localDb) {
-  localStorage.setItem(DB_KEY, JSON.stringify(localDb));
-}
-
-// In-memory mirror of the locally-persisted (non-backend) collections.
-// Lazily built on first access because seeding it for the first time needs
-// the employee roster from the server (see ensureDB below).
-let db = null;
-let dbReady = null;
-
-async function ensureDB(employeesHint) {
-  if (db) return db;
-  if (!dbReady) {
-    dbReady = (async () => {
-      const existing = readLocalRaw();
-      if (existing) {
-        db = existing;
-      } else {
-        const employees = employeesHint || await employeesApi.list();
-        db = buildSeed(employees);
-        saveDB(db);
-      }
-      return db;
-    })();
-  }
-  return dbReady;
-}
-
+// Current implementation: company settings are persisted through the API.
 // Local-only settings (org config, login profiles/face descriptors,
 // notification templates, gateway credentials, etc). The geofence/shift
 // subset that attendance verification depends on lives server-side instead —
@@ -292,8 +249,6 @@ export async function loadAll() {
 export async function reloadFromDisk() {
   return loadAll();
 }
-
-export const DB_STORAGE_KEY = DB_KEY;
 
 // Reset company settings back to default values.
 export async function resetDB() {

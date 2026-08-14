@@ -5,7 +5,7 @@ import {
 
   employeesApi, leavesApi, attendanceApi, payrollApi,
   celebrationsApi, recruitmentApi, settingsApi, holidaysApi, reviewsApi,
-  expensesApi, assetsApi, jobsApi, authApi, geofenceApi, faceApi, usersApi, rolesApi, masterCategoriesApi, masterValuesApi, auditLogsApi, notificationsApi, documentsApi, resignationsApi, attendanceCorrectionsApi,
+  expensesApi, assetsApi, jobsApi, authApi, faceApi, usersApi, rolesApi, masterValuesApi, auditLogsApi, notificationsApi, documentsApi, resignationsApi, attendanceCorrectionsApi,
 } from '../data/store';
 import { setAccessToken } from '../lib/apiClient';
 import { getDeviceId } from '../lib/deviceId';
@@ -234,7 +234,7 @@ export function HRMSProvider({ children }) {
     try {
       const updated = await notificationsApi.markRead(id);
       setNotifications((prev) => prev.map((n) => (n.id === id ? updated : n)));
-    } catch (err) {
+    } catch {
       toast('error', 'Failed to mark notification as read');
     }
   }, [toast]);
@@ -244,7 +244,7 @@ export function HRMSProvider({ children }) {
       await notificationsApi.readAll();
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       toast('success', 'All notifications marked as read');
-    } catch (err) {
+    } catch {
       toast('error', 'Failed to mark all as read');
     }
   }, [toast]);
@@ -411,7 +411,6 @@ export function HRMSProvider({ children }) {
   const importEmployees = async (rows) => {
     let count = 0;
     for (const row of rows) {
-      // eslint-disable-next-line no-await-in-loop
       await addEmployee(row, { silent: true });
       count += 1;
     }
@@ -423,7 +422,6 @@ export function HRMSProvider({ children }) {
   const importAssets = async (rows) => {
     let count = 0;
     for (const row of rows) {
-      // eslint-disable-next-line no-await-in-loop
       await addAsset(row);
       count += 1;
     }
@@ -435,7 +433,6 @@ export function HRMSProvider({ children }) {
   const importHolidays = async (rows) => {
     let count = 0;
     for (const row of rows) {
-      // eslint-disable-next-line no-await-in-loop
       await addHoliday(row);
       count += 1;
     }
@@ -447,7 +444,6 @@ export function HRMSProvider({ children }) {
   const importJobs = async (rows) => {
     let count = 0;
     for (const row of rows) {
-      // eslint-disable-next-line no-await-in-loop
       await addJob(row);
       count += 1;
     }

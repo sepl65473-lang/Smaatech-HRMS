@@ -48,13 +48,12 @@ export default function Analytics() {
   const departments = getMasterValues('departments');
   const [dept, setDept] = useState('All');
 
-  const DATA_SOURCE = { employees, attendance, leave: leaves, payroll };
   const [reportKey, setReportKey] = useState('employees');
   const [reportCols, setReportCols] = useState(() => new Set(REPORT_DATASETS.employees.columns.map((c) => c.key)));
 
   const reportDef = REPORT_DATASETS[reportKey];
   const reportRows = useMemo(() => {
-    const rows = DATA_SOURCE[reportKey] || [];
+    const rows = { employees, attendance, leave: leaves, payroll }[reportKey] || [];
     return dept === 'All' ? rows : rows.filter((r) => r.dept === dept);
   }, [reportKey, dept, employees, attendance, leaves, payroll]);
 

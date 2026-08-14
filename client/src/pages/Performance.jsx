@@ -25,7 +25,7 @@ function ReviewModal({ open, review, onClose, onSubmitManager, onAddGoal, onTogg
       setSubmitError('');
       setSaving(false);
     }
-  }, [review?.id]);
+  }, [review]);
 
   if (!review) return null;
 

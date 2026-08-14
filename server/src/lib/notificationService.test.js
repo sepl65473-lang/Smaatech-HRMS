@@ -10,7 +10,7 @@ vi.mock('./mailer.js', () => ({
   sendEmail: vi.fn(async () => {}),
 }));
 
-const { startTestDB, stopTestDB, clearTestDB } = await import('../test-utils/testDb.js');
+const { startTestDB, stopTestDB, clearTestDB, TEST_DB_HOOK_TIMEOUT } = await import('../test-utils/testDb.js');
 const User = (await import('../models/User.js')).default;
 const Notification = (await import('../models/Notification.js')).default;
 const { sendEmail } = await import('./mailer.js');
@@ -18,7 +18,7 @@ const { resolveChannels, fillTemplate, sendNotification } = await import('./noti
 
 beforeAll(async () => {
   await startTestDB();
-}, 60000);
+}, TEST_DB_HOOK_TIMEOUT);
 
 afterAll(async () => {
   await stopTestDB();

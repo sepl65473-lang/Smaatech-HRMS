@@ -3,6 +3,7 @@ import { useHRMS } from '../context/HRMSContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserForm from '../components/UserForm';
 import FaceEnrollModal from '../components/FaceEnrollModal';
+import AuditLogsTab from '../components/AuditLogsTab';
 import { IconPlus, IconX, IconEdit, IconTrash } from '../components/Icons';
 import { ROLE_SCOPE } from '../lib/permissions';
 
@@ -185,7 +186,6 @@ export default function Settings() {
   const [twilioSid, setTwilioSid] = useState('');
   const [twilioToken, setTwilioToken] = useState('');
   const [twilioFrom, setTwilioFrom] = useState('');
-  const [sendgridKey, setSendgridKey] = useState('');
   const [smtpHost, setSmtpHost] = useState('');
   const [smtpUser, setSmtpUser] = useState('');
   const [smtpPass, setSmtpPass] = useState('');
@@ -219,7 +219,6 @@ export default function Settings() {
     setTwilioSid(settings.gatewayTwilioSid || '');
     setTwilioToken(settings.gatewayTwilioToken || '');
     setTwilioFrom(settings.gatewayTwilioFrom || '');
-    setSendgridKey(settings.gatewaySendgridKey || '');
     setSmtpHost(settings.gatewaySmtpHost || '');
     setSmtpUser(settings.gatewaySmtpUser || '');
     setSmtpPass(settings.gatewaySmtpPass || '');
@@ -227,7 +226,7 @@ export default function Settings() {
     settings.orgName, settings.workWeek, settings.totalLeaveDays,
     settings.gpsCheckInEnabled, settings.geofenceLat, settings.geofenceLng, settings.geofenceRadius,
     settings.gatewayTwilioSid, settings.gatewayTwilioToken, settings.gatewayTwilioFrom,
-    settings.gatewaySendgridKey, settings.gatewaySmtpHost, settings.gatewaySmtpUser, settings.gatewaySmtpPass
+    settings.gatewaySmtpHost, settings.gatewaySmtpUser, settings.gatewaySmtpPass
   ]);
 
   return (
@@ -629,35 +628,8 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <div>
-            <div className="card-title">Activity history</div>
-            <div className="card-sub">{auditTotal} event{auditTotal === 1 ? '' : 's'} recorded</div>
-          </div>
-        </div>
-        <div className="settings-rows">
-          {auditRows.length === 0 && <div className="empty">No activity recorded yet.</div>}
-          {auditRows.map((item) => (
-            <div className="settings-row" key={item.id}>
-              <div>
-                <div className="settings-row-label">{item.action} - {item.subject}</div>
-                <div className="settings-row-sub">
-                  {new Date(item.at).toLocaleString('en-IN')} by {item.actor}
-                  {item.details ? ` - ${item.details}` : ''}
-                </div>
-              </div>
-              {item.role && <span className="state-badge approved">{item.role}</span>}
-            </div>
-          ))}
-        </div>
-        {auditTotal > AUDIT_PAGE_SIZE && (
-          <div className="pager">
-            <button className="mini-btn" disabled={auditPage === 1} onClick={() => setAuditPage((p) => p - 1)}>Previous</button>
-            <span className="pager-meta">Page {auditPage} of {Math.ceil(auditTotal / AUDIT_PAGE_SIZE)}</span>
-            <button className="mini-btn approve" disabled={auditPage >= Math.ceil(auditTotal / AUDIT_PAGE_SIZE)} onClick={() => setAuditPage((p) => p + 1)}>Next</button>
-          </div>
-        )}
+      <div style={{ marginTop: 24 }}>
+        <AuditLogsTab />
       </div>
 
       <ConfirmDialog
