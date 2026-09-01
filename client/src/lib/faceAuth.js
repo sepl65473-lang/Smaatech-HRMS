@@ -76,17 +76,37 @@ export function eyeAspectRatio(landmarks) {
 const CLOSE_RATIO = 0.75;
 const REOPEN_RATIO = 0.85;
 
+// Real open-eye EAR for a human face is roughly 0.2-0.35; a reading outside
+// this band is landmark-detection noise (common on the first frame or two,
+// before the camera/face settles), not a real eye state. Letting a noise
+// spike set the baseline is exactly the bug this guards against below.
+const EAR_MIN_PLAUSIBLE = 0.05;
+const EAR_MAX_PLAUSIBLE = 0.45;
+
+// How many of the most recent "eyes open" samples the baseline is drawn
+// from. A single noisy frame can only ever be one of several samples in
+// this window, so it ages out instead of permanently poisoning maxEar.
+const BASELINE_WINDOW = 5;
+
 // Tracks a full closed -> reopened cycle across successive EAR samples (a
 // real blink), not just "EAR dipped somewhere" — a momentarily bad landmark
-// read on an open eye shouldn't count. Self-calibrates to this session's own
-// observed peak EAR (the most "open" the eyes have been seen so far) instead
-// of a fixed universal number.
+// read on an open eye shouldn't count. Self-calibrates to a rolling window
+// of this session's own recent "open" EAR readings (not a fixed universal
+// number, and not a single all-time max that one bad frame could poison
+// forever — an inflated one-off reading would push the reopen threshold
+// out of reach of any real blink, getting stuck for the rest of the scan).
 export function createBlinkTracker() {
+  let openSamples = [];
   let maxEar = 0;
   let sawClosed = false;
   return {
     update(ear) {
-      if (!sawClosed && ear > maxEar) maxEar = ear;
+      if (ear < EAR_MIN_PLAUSIBLE || ear > EAR_MAX_PLAUSIBLE) return false; // discard implausible landmark noise
+      if (!sawClosed) {
+        openSamples.push(ear);
+        if (openSamples.length > BASELINE_WINDOW) openSamples.shift();
+        maxEar = Math.max(...openSamples);
+      }
       if (maxEar === 0) return false; // no open-eye baseline observed yet
       if (ear < maxEar * CLOSE_RATIO) {
         sawClosed = true;
@@ -94,6 +114,8 @@ export function createBlinkTracker() {
       }
       if (sawClosed && ear > maxEar * REOPEN_RATIO) {
         sawClosed = false;
+        openSamples = [ear];
+        maxEar = ear;
         return true;
       }
       return false;
