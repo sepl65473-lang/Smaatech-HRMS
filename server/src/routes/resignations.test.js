@@ -13,7 +13,7 @@ vi.mock('../lib/mailer.js', () => ({
   sendOtpEmail: vi.fn(async () => {}),
 }));
 
-const { startTestDB, stopTestDB, clearTestDB } = await import('../test-utils/testDb.js');
+const { startTestDB, stopTestDB, clearTestDB, TEST_DB_HOOK_TIMEOUT } = await import('../test-utils/testDb.js');
 const app = (await import('../app.js')).default;
 const User = (await import('../models/User.js')).default;
 const Employee = (await import('../models/Employee.js')).default;
@@ -42,7 +42,7 @@ async function seedScenario() {
 
 beforeAll(async () => {
   await startTestDB();
-}, 60000);
+}, TEST_DB_HOOK_TIMEOUT);
 
 afterAll(async () => {
   await stopTestDB();

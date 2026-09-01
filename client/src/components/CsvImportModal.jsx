@@ -80,7 +80,9 @@ export default function CsvImportModal({
 
   const confirmImport = async () => {
     setImporting(true);
-    const finalData = validRows.map(({ _errors, ...r }) => {
+    const finalData = validRows.map((row) => {
+      const r = { ...row };
+      delete r._errors;
       if (mapRow) return mapRow(r);
       
       // Default employee mapper for backward compatibility

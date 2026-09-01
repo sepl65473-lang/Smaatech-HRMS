@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { IconEdit, IconTrash } from '../components/Icons';
-import { formatDate, formatINR, todayISO } from '../lib/helpers';
+import { formatDate, formatINR } from '../lib/helpers';
 
 const FOLDERS = [
   { id: 'policies', name: 'Policies', type: 'Company' },
@@ -153,7 +153,7 @@ export default function Documents() {
     return [...normalizedDbDocs, ...policyDocs, ...payslips, ...leaveDocs, ...peopleDocs];
   }, [employees, leaves, payroll, settings, dbDocs]);
 
-  const validateFile = (file, type) => {
+  const validateFile = (file) => {
     if (!file) return '';
     const MAX_FILE_SIZE = 2 * 1024 * 1024;
     if (file.size > MAX_FILE_SIZE) return 'File must be 2 MB or smaller.';
@@ -175,7 +175,7 @@ export default function Documents() {
       setError('Document owner is required.');
       return;
     }
-    const fileError = validateFile(upload.file, upload.type);
+    const fileError = validateFile(upload.file);
     if (fileError) {
       setError(fileError);
       return;
@@ -251,7 +251,7 @@ export default function Documents() {
       await deleteDocument(confirm.id);
       setConfirm(null);
       if (editing?.id === confirm.id) resetForm();
-    } catch (err) {
+    } catch {
       toast('error', 'Failed to delete document.');
     }
   };

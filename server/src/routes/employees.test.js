@@ -8,7 +8,7 @@ import request from 'supertest';
 process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'test-access-secret';
 process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'test-refresh-secret';
 
-const { startTestDB, stopTestDB, clearTestDB } = await import('../test-utils/testDb.js');
+const { startTestDB, stopTestDB, clearTestDB, TEST_DB_HOOK_TIMEOUT } = await import('../test-utils/testDb.js');
 const app = (await import('../app.js')).default;
 const User = (await import('../models/User.js')).default;
 const Employee = (await import('../models/Employee.js')).default;
@@ -43,7 +43,7 @@ async function seedCompany(company) {
 
 beforeAll(async () => {
   await startTestDB();
-}, 60000);
+}, TEST_DB_HOOK_TIMEOUT);
 
 afterAll(async () => {
   await stopTestDB();

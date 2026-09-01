@@ -3,16 +3,25 @@
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 
+export const TEST_DB_HOOK_TIMEOUT = 600000;
+
 let mongod;
 
 export async function startTestDB() {
-  mongod = await MongoMemoryServer.create();
+  if (mongod) return mongod;
+  mongod = await MongoMemoryServer.create({
+    binary: { version: '8.2.6' },
+  });
   await mongoose.connect(mongod.getUri());
+  return mongod;
 }
 
 export async function stopTestDB() {
   await mongoose.disconnect();
-  if (mongod) await mongod.stop();
+  if (mongod) {
+    await mongod.stop();
+    mongod = null;
+  }
 }
 
 export async function clearTestDB() {

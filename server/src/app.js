@@ -45,15 +45,42 @@ app.use(helmet({ contentSecurityPolicy: false })); // Disable CSP for API flexib
 app.use(mongoSanitize());
 app.use(compression());
 
-// Rate Limiter: max 300 requests per 15 minutes per IP
+// Rate Limiters
+const isTestEnv = process.env.NODE_ENV === 'test';
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => isTestEnv,
   message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many requests, please try again later.' } }
 });
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => isTestEnv,
+  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many authentication attempts. Please try again in 15 minutes.' } }
+});
+
+const financialLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => isTestEnv,
+  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many transaction requests. Please try again later.' } }
+});
+
 app.use('/api/', apiLimiter);
+app.use('/api/v1/auth/login', authLimiter);
+app.use('/api/v1/auth/verify-2fa', authLimiter);
+app.use('/api/v1/auth/forgot-password', authLimiter);
+app.use('/api/v1/auth/reset-password', authLimiter);
+app.use('/api/v1/resignations/:id/fnf/pay', financialLimiter);
 
 const allowedOrigins = [
   'http://localhost:5173',

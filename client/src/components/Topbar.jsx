@@ -32,7 +32,7 @@ const TITLES = {
 export default function Topbar({ onMenu, onAddEmployee }) {
   const {
     currentUser, search, setSearch, toast, settings, logout,
-    employees, pendingLeaves, payroll, celebrations, recruitment,
+    employees, pendingLeaves, payroll, recruitment,
     notifications, markNotificationRead, markAllNotificationsRead,
   } = useHRMS();
   const { pathname } = useLocation();
