@@ -5,7 +5,7 @@ import {
 } from '../lib/faceAuth';
 
 const SCAN_INTERVAL_MS = 300; // faster than a plain "is a face visible" cadence — blinks are brief
-const MAX_SCAN_MS = 15000;
+const MAX_SCAN_MS = 20000; // blink-liveness needs a real blink to occur, not just a face to appear — a bit more room than a plain detection wait
 
 const ERROR_MESSAGES = {
   NotAllowedError: 'Camera access was denied. Allow camera permission for this site and try again.',
@@ -38,6 +38,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
   const [retryToken, setRetryToken] = useState(0);
   const [hasStream, setHasStream] = useState(false);
   const [awaitingBlink, setAwaitingBlink] = useState(false);
+  const [sawFace, setSawFace] = useState(false);
 
   const stopResources = useCallback(() => {
     clearTimeout(timerRef.current);
@@ -80,6 +81,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
         const landmarks = await detectFaceLandmarks(videoRef.current);
         if (cancelled) return;
         if (landmarks) {
+          setSawFace(true);
           setAwaitingBlink(true);
           const blinked = blinkTrackerRef.current.update(eyeAspectRatio(landmarks));
           if (blinked) {
@@ -119,6 +121,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
         setStatus('scanning');
         setAwaitingBlink(false);
         blinkTrackerRef.current = createBlinkTracker();
+        setSawFace(false);
         scanStartRef.current = Date.now();
         scan();
       } catch (err) {
@@ -179,7 +182,11 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
           )}
           {(status === 'captured' || status === 'verifying') && <div style={{ color: '#10b981', fontWeight: 600 }}>Photo captured — verifying with the server…</div>}
           {status === 'no-face-timeout' && (
-            <div className="muted-text">We couldn't clearly detect a face. Make sure you're well-lit, centered, and looking at the camera.</div>
+            <div className="muted-text">
+              {sawFace
+                ? "We saw your face but couldn't confirm a natural blink. Make sure you're well-lit and blink normally while looking at the camera."
+                : "We couldn't clearly detect a face. Make sure you're well-lit, centered, and looking at the camera."}
+            </div>
           )}
           {status === 'error' && error && (
             <div style={{

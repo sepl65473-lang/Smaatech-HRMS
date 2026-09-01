@@ -68,21 +68,31 @@ export function eyeAspectRatio(landmarks) {
   return (earFor(left) + earFor(right)) / 2;
 }
 
-const EAR_BLINK_THRESHOLD = 0.22;
-const EAR_OPEN_THRESHOLD = 0.27;
+// Fraction of the user's own observed "eyes open" baseline that counts as
+// closed/reopened. Relative, not a fixed absolute EAR value — a universal
+// number doesn't generalize across different face shapes, camera angles, or
+// lighting (someone whose natural open-eye EAR sits lower than a fixed
+// threshold would never be able to "reopen" past it, getting stuck forever).
+const CLOSE_RATIO = 0.75;
+const REOPEN_RATIO = 0.85;
 
-// Tracks a full closed -> reopened cycle across successive EAR samples
-// (a real blink), not just "EAR dipped somewhere" — a momentarily bad
-// landmark read on an open eye shouldn't count.
+// Tracks a full closed -> reopened cycle across successive EAR samples (a
+// real blink), not just "EAR dipped somewhere" — a momentarily bad landmark
+// read on an open eye shouldn't count. Self-calibrates to this session's own
+// observed peak EAR (the most "open" the eyes have been seen so far) instead
+// of a fixed universal number.
 export function createBlinkTracker() {
+  let maxEar = 0;
   let sawClosed = false;
   return {
     update(ear) {
-      if (ear < EAR_BLINK_THRESHOLD) {
+      if (!sawClosed && ear > maxEar) maxEar = ear;
+      if (maxEar === 0) return false; // no open-eye baseline observed yet
+      if (ear < maxEar * CLOSE_RATIO) {
         sawClosed = true;
         return false;
       }
-      if (sawClosed && ear > EAR_OPEN_THRESHOLD) {
+      if (sawClosed && ear > maxEar * REOPEN_RATIO) {
         sawClosed = false;
         return true;
       }
