@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
-import { loadFaceModels, detectFaceDescriptor, matchFace } from '../lib/faceAuth';
+import {
+  loadFaceModels, detectFaceDescriptor, detectFaceLandmarks, eyeAspectRatio, createBlinkTracker, matchFace,
+} from '../lib/faceAuth';
 
-const SCAN_INTERVAL_MS = 700;
+const SCAN_INTERVAL_MS = 300; // faster than a plain "is a face visible" cadence — blinks are brief
 
+// Requires a real blink (closed->reopened eye-aspect-ratio cycle) before
+// even attempting a match — a static printed photo has no eye motion to
+// produce. Same basic liveness signal as FaceAttendanceModal.jsx; not a
+// dedicated anti-spoofing model (face-api.js ships none).
 export default function FaceLogin({ open, profiles, onClose, onMatch }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
+  const blinkTrackerRef = useRef(null);
   const [status, setStatus] = useState('loading'); // loading | scanning | matched | error
   const [error, setError] = useState('');
   const [hasStream, setHasStream] = useState(false);
+  const [awaitingBlink, setAwaitingBlink] = useState(false);
 
   const enrolledProfiles = profiles.filter((p) => p.faceDescriptor?.length);
   const enrolledRef = useRef(enrolledProfiles);
@@ -18,6 +26,16 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
   useEffect(() => {
     enrolledRef.current = enrolledProfiles;
     onMatchRef.current = onMatch;
+  });
+
+  // Captures the frame the client-side match was found on, so the server
+  // can independently re-verify it (mirrors FaceAttendanceModal.jsx).
+  const captureFrame = () => new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.92);
   });
 
   // Cleanup function for stream and timers
@@ -62,18 +80,31 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
         if (cancelled) return;
         setHasStream(true);
         setStatus('scanning');
+        setAwaitingBlink(false);
+        blinkTrackerRef.current = createBlinkTracker();
 
         const scan = async () => {
           if (cancelled || !videoRef.current) return;
           try {
-            const descriptor = await detectFaceDescriptor(videoRef.current);
-            if (descriptor && !cancelled) {
-              const match = await matchFace(descriptor, enrolledRef.current);
-              if (match && !cancelled) {
-                setStatus('matched');
-                onMatchRef.current(match);
-                return;
+            const landmarks = await detectFaceLandmarks(videoRef.current);
+            if (landmarks && !cancelled) {
+              setAwaitingBlink(true);
+              const blinked = blinkTrackerRef.current.update(eyeAspectRatio(landmarks));
+              if (blinked) {
+                const descriptor = await detectFaceDescriptor(videoRef.current);
+                if (descriptor && !cancelled) {
+                  const match = await matchFace(descriptor, enrolledRef.current);
+                  if (match && !cancelled) {
+                    const photo = await captureFrame();
+                    if (cancelled) return;
+                    setStatus('matched');
+                    onMatchRef.current(match, photo);
+                    return;
+                  }
+                }
               }
+            } else if (!cancelled) {
+              setAwaitingBlink(false);
             }
           } catch (e) {
             console.error('Scan error:', e);
@@ -193,7 +224,11 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
         {/* Text information */}
         <div style={{ textAlign: 'center', width: '100%' }}>
           {status === 'loading' && <div className="muted-text">Loading camera & face model…</div>}
-          {status === 'scanning' && <div style={{ color: '#3b7ddd', fontWeight: 500 }}>Scanning for matches…</div>}
+          {status === 'scanning' && (
+            <div style={{ color: '#3b7ddd', fontWeight: 500 }}>
+              {awaitingBlink ? 'Please blink naturally…' : 'Scanning for matches…'}
+            </div>
+          )}
           {status === 'matched' && <div style={{ color: '#10b981', fontWeight: 600 }}>Face verified successfully ✓</div>}
 
           {error && (

@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import Modal from '../components/Modal';
@@ -9,14 +10,7 @@ import {
 import { todayISO } from '../lib/helpers';
 import { resolveShiftForToday } from '../lib/shifts';
 import { downloadCSV } from '../lib/exportCsv';
-
-const STATUS = {
-  present: { label: 'Present', cls: 'status-active' },
-  late:    { label: 'Late',    cls: 'status-late' },
-  absent:  { label: 'Absent',  cls: 'status-absent' },
-  leave:   { label: 'On leave', cls: 'status-leave' },
-  'early-exit': { label: 'Early exit', cls: 'status-late' },
-};
+import { ATTENDANCE_STATUS as STATUS } from '../lib/attendanceStatus';
 
 const EXPORT_COLUMNS = [
   { key: 'name', label: 'Employee' },
@@ -36,7 +30,7 @@ function LiveIndicator({ lastSyncedAt }) {
   const secondsAgo = Math.max(0, Math.round((now - lastSyncedAt) / 1000));
   const label = secondsAgo < 2 ? 'just now' : secondsAgo < 60 ? `${secondsAgo}s ago` : `${Math.round(secondsAgo / 60)}m ago`;
   return (
-    <span className="muted-text" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }} title="Refreshes from the server on load and across tabs of this browser.">
+    <span className="muted-text" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }} title="Refreshes from the server automatically every 15 seconds.">
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--sage)', display: 'inline-block', animation: 'pulse 1.6s ease-in-out infinite' }} />
       Live · updated {label}
     </span>
@@ -45,10 +39,22 @@ function LiveIndicator({ lastSyncedAt }) {
 
 export default function Attendance() {
   const {
-    attendance, settings, checkIn, checkOut, setAttendanceStatus, lastSyncedAt,
+    attendance, settings, checkIn, checkOut, setAttendanceStatus, refreshAttendance,
     attendanceCorrections, requestCorrection, approveCorrection, rejectCorrection, currentUser, employees, toast,
-    getMasterValues,
+    getMasterValues, getQrToken,
   } = useHRMS();
+
+  // Real "who's in office now" freshness — polls the attendance list on an
+  // interval instead of only refreshing on full-app reload / same-browser
+  // tab events (no WebSocket/SSE layer exists in this app; a short poll is
+  // the pragmatic way to get this without adding a whole new transport).
+  const [lastPolledAt, setLastPolledAt] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => {
+      refreshAttendance().then(() => setLastPolledAt(Date.now()));
+    }, 15000);
+    return () => clearInterval(id);
+  }, [refreshAttendance]);
 
   const departments = getMasterValues('departments');
   const [dept, setDept] = useState('All');
@@ -56,10 +62,11 @@ export default function Attendance() {
   const [tab, setTab] = useState('roster');
   const [detailsRow, setDetailsRow] = useState(null);
 
-  // Dynamic QR Code Display State
+  // Office QR display state — qrData is a real, server-issued/validated
+  // token (see GET /attendance/qr-token), not a client-only decorative one.
   const [qrModalOpen, setQrModalOpen] = useState(false);
-  const [qrToken, setQrToken] = useState(() => Math.random().toString(36).substring(2, 10).toUpperCase());
-  const [timeLeft, setTimeLeft] = useState(10);
+  const [qrData, setQrData] = useState(null); // { token, expiresAt } | null
+  const [qrSecondsLeft, setQrSecondsLeft] = useState(0);
 
   // Correction Modal States
   const [corrModalOpen, setCorrModalOpen] = useState(false);
@@ -67,20 +74,27 @@ export default function Attendance() {
 
   const isHR = ['HR Director', 'HR Manager'].includes(currentUser.role);
 
+  // Fetches a fresh, real, short-TTL token from the server every 10s while
+  // the display is open (the previous token is left to expire server-side —
+  // it's single-use anyway, so there's nothing to explicitly revoke).
   useEffect(() => {
-    if (!qrModalOpen) return undefined;
-    setTimeLeft(10);
-    const interval = setInterval(() => {
-      setTimeLeft((t) => {
-        if (t <= 1) {
-          setQrToken(Math.random().toString(36).substring(2, 10).toUpperCase());
-          return 10;
-        }
-        return t - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [qrModalOpen]);
+    if (!qrModalOpen) { setQrData(null); return undefined; }
+    let cancelled = false;
+    const fetchToken = () => {
+      getQrToken().then((data) => { if (!cancelled) setQrData(data); }).catch(() => {});
+    };
+    fetchToken();
+    const interval = setInterval(fetchToken, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [qrModalOpen, getQrToken]);
+
+  useEffect(() => {
+    if (!qrData) return undefined;
+    const tick = () => setQrSecondsLeft(Math.max(0, Math.round((qrData.expiresAt - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [qrData]);
 
   const filtered = useMemo(() => attendance.filter((a) => {
     const deptMatch = dept === 'All' || a.dept === dept;
@@ -162,7 +176,7 @@ export default function Attendance() {
             Corrections ({myCorrections.filter(c => c.status === 'Pending').length} pending)
           </button>
         </div>
-        <LiveIndicator lastSyncedAt={lastSyncedAt} />
+        <LiveIndicator lastSyncedAt={lastPolledAt} />
       </div>
 
       {tab === 'planning' && isHR && (
@@ -227,6 +241,8 @@ export default function Attendance() {
                   <option value="late">Late</option>
                   <option value="absent">Absent</option>
                   <option value="leave">On leave</option>
+                  <option value="half-day">Half day</option>
+                  <option value="holiday">Holiday</option>
                 </select>
               </label>
             </div>
@@ -283,6 +299,7 @@ export default function Attendance() {
                                 <option value="late">Late</option>
                                 <option value="absent">Absent</option>
                                 <option value="leave">On leave</option>
+                                <option value="half-day">Half day</option>
                               </select>
                             </label>
                           ) : (
@@ -392,53 +409,22 @@ export default function Attendance() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            position: 'relative'
+            position: 'relative',
+            width: 220,
+            height: 220,
           }}>
-            <svg width="220" height="220" viewBox="0 0 220 220" style={{ background: '#fff' }}>
-              <rect x="10" y="10" width="50" height="50" fill="#0f172a" rx="4" />
-              <rect x="20" y="20" width="30" height="30" fill="#fff" rx="2" />
-              <rect x="27" y="27" width="16" height="16" fill="#4a6fa5" rx="1" />
-              <rect x="160" y="10" width="50" height="50" fill="#0f172a" rx="4" />
-              <rect x="170" y="20" width="30" height="30" fill="#fff" rx="2" />
-              <rect x="177" y="27" width="16" height="16" fill="#4a6fa5" rx="1" />
-              <rect x="10" y="160" width="50" height="50" fill="#0f172a" rx="4" />
-              <rect x="20" y="170" width="30" height="30" fill="#fff" rx="2" />
-              <rect x="27" y="177" width="16" height="16" fill="#4a6fa5" rx="1" />
-              <rect x="165" y="165" width="20" height="20" fill="#0f172a" rx="2" />
-              <rect x="170" y="170" width="10" height="10" fill="#fff" rx="1" />
-              <rect x="174" y="174" width="2" height="2" fill="#0f172a" />
-              <path d="M 80,20 h 10 v 10 h -10 z M 100,20 h 20 v 10 h -20 z M 130,20 h 10 v 30 h -10 z M 80,40 h 30 v 10 h -30 z M 120,40 h 10 v 10 h -10 z M 80,60 h 10 v 20 h -10 z M 100,60 h 40 v 10 h -40 z M 150,60 h 10 v 10 h -10 z" fill="#0f172a" />
-              <path d="M 20,80 h 30 v 10 h -30 z M 60,80 h 10 v 20 h -10 z M 80,80 h 20 v 10 h -20 z M 120,80 h 10 v 10 h -10 z M 140,80 h 30 v 10 h -30 z M 180,80 h 20 v 30 h -20 z M 20,100 h 10 v 10 h -10 z M 40,100 h 10 v 30 h -10 z M 90,100 h 20 v 10 h -20 z M 120,100 h 20 v 10 h -20 z" fill="#0f172a" />
-              <path d="M 80,120 h 10 v 10 h -10 z M 100,120 h 30 v 10 h -30 z M 140,120 h 10 v 20 h -10 z M 160,120 h 20 v 10 h -20 z M 190,120 h 10 v 20 h -10 z M 80,140 h 20 v 10 h -20 z M 110,140 h 10 v 30 h -10 z M 130,140 h 10 v 10 h -10 z M 150,140 h 30 v 10 h -30 z" fill="#0f172a" />
-              <path d="M 80,160 h 10 v 20 h -10 z M 100,160 h 20 v 10 h -20 z M 130,160 h 20 v 10 h -20 z M 80,190 h 30 v 10 h -30 z M 120,190 h 20 v 10 h -20 z M 150,190 h 10 v 10 h -10 z" fill="#0f172a" />
-              {qrToken.split('').map((char, index) => {
-                const charCode = char.charCodeAt(0);
-                const x = 70 + (charCode % 11) * 10;
-                const y = 70 + ((charCode * (index + 1)) % 11) * 10;
-                return (
-                  <rect
-                    key={`${qrToken}-${index}`}
-                    x={x}
-                    y={y}
-                    width={index % 2 === 0 ? 10 : 20}
-                    height={index % 3 === 0 ? 20 : 10}
-                    fill={index % 2 === 0 ? "#4a6fa5" : "#0f172a"}
-                  />
-                );
-              })}
-            </svg>
+            {qrData
+              ? <QRCodeSVG value={`SEPL-ATT:${qrData.token}`} size={220} level="M" />
+              : <span className="muted-text">Loading…</span>}
           </div>
           <div style={{ width: '100%', maxWidth: '250px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#666', marginBottom: 6 }}>
-              <span>Rotating secure token...</span>
-              <span className="mono" style={{ fontWeight: 600 }}>{timeLeft}s</span>
+              <span>Rotating secure token — server-issued</span>
+              <span className="mono" style={{ fontWeight: 600 }}>{qrSecondsLeft}s</span>
             </div>
             <div style={{ width: '100%', height: '5px', background: '#eee', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{ width: `${(timeLeft / 10) * 100}%`, height: '100%', background: 'var(--accent)', transition: 'width 1s linear' }} />
+              <div style={{ width: `${Math.min(100, (qrSecondsLeft / 12) * 100)}%`, height: '100%', background: 'var(--accent)', transition: 'width 1s linear' }} />
             </div>
-          </div>
-          <div style={{ fontSize: '12px', color: '#666', background: 'var(--bg-2)', padding: '6px 12px', borderRadius: '6px', fontFamily: 'monospace', border: '1px dashed #ccc' }}>
-            SEPL-ATT-{qrToken}
           </div>
         </div>
       </Modal>

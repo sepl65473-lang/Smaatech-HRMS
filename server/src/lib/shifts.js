@@ -48,6 +48,19 @@ export function isEarlyExit(checkOutTime, shift) {
   return unwrap(toMinutes(checkOutTime), isOvernight) < unwrap(endMinutes, isOvernight);
 }
 
+// True if the employee worked less than half of their shift's scheduled
+// duration between check-in and check-out (overnight-aware, same unwrap
+// trick as isLate/isEarlyExit above).
+export function isHalfDay(checkInTime, checkOutTime, shift) {
+  if (!checkInTime || !checkOutTime) return false;
+  const startMinutes = toMinutes(shift.start);
+  const endMinutes = toMinutes(shift.end);
+  const isOvernight = endMinutes <= startMinutes;
+  const shiftDuration = unwrap(endMinutes, isOvernight) - startMinutes;
+  const workedMinutes = unwrap(toMinutes(checkOutTime), isOvernight) - unwrap(toMinutes(checkInTime), isOvernight);
+  return workedMinutes > 0 && workedMinutes < shiftDuration / 2;
+}
+
 // Matches the frontend's nowTime() (src/context/HRMSContext.jsx), pinned to
 // IST explicitly since the server may not run in the same timezone as the office.
 export function nowTimeIST() {

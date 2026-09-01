@@ -3,6 +3,7 @@ import logger from './lib/logger.js';
 import { connectDB } from './db.js';
 import { initFaceEngine } from './lib/faceEngine.js';
 import { startDocumentExpiryScheduler } from './lib/documentExpiryJob.js';
+import { startAttendanceDailyScheduler } from './lib/attendanceDailyJob.js';
 import app from './app.js';
 
 process.on('unhandledRejection', (err) => {
@@ -28,6 +29,12 @@ app.listen(PORT, '0.0.0.0', () => {
 
   try {
     startDocumentExpiryScheduler();
+  } catch (err) {
+    logger.warn('[scheduler] deferred: %s', err.message);
+  }
+
+  try {
+    startAttendanceDailyScheduler();
   } catch (err) {
     logger.warn('[scheduler] deferred: %s', err.message);
   }

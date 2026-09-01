@@ -1691,6 +1691,8 @@
   .status-late{background:var(--gold)}
   .status-absent{background:var(--red)}
   .status-paid{background:var(--sage)}
+  .status-half-day{background:var(--purple)}
+  .status-holiday{background:var(--accent)}
 
   /* ---- Employee card foot + actions ---- */
   .emp-card-foot{

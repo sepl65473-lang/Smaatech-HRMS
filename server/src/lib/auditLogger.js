@@ -1,6 +1,6 @@
 import AuditLog from '../models/AuditLog.js';
 
-export async function logAudit(req, { action, subject, before, after, details = '' }) {
+export async function logAudit(req, { action, subject, before, after, details = '', actor = null, company = null }) {
   try {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
     const userAgent = req.headers['user-agent'] || '';
@@ -35,11 +35,11 @@ export async function logAudit(req, { action, subject, before, after, details = 
     }
 
     await AuditLog.create({
-      actor: req.auth ? {
+      actor: actor || (req.auth ? {
         id: req.auth.id,
         name: req.auth.name,
         role: req.auth.role,
-      } : { name: 'System', role: 'System' },
+      } : { name: 'System', role: 'System' }),
       action,
       subject: subject || '',
       details: computedDetails || '',
@@ -48,7 +48,7 @@ export async function logAudit(req, { action, subject, before, after, details = 
       diff,
       ip,
       userAgent,
-      company: req.auth?.company || 'Smaatech',
+      company: company || req.auth?.company || 'Smaatech',
     });
   } catch (err) {
     console.error('[Audit Log Error]', err);

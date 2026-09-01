@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import Payroll from '../models/Payroll.js';
+import Attendance from '../models/Attendance.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 
 import { logAudit } from '../lib/auditLogger.js';
@@ -9,6 +10,21 @@ import { getSettingsDoc } from './settings.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Derives Loss-of-Pay days from actual attendance for the cycle (a full
+// 'absent' day counts as 1, a 'half-day' as 0.5) — same 30-day-basis formula
+// SalaryStructureModal.jsx already uses client-side for manual entry, so
+// auto-computed and hand-entered LOP amounts stay consistent.
+async function computeLopFromAttendance(empId, cycle, company, gross) {
+  const rows = await Attendance.find({ empId, company, date: { $regex: `^${cycle}` } });
+  let lopDays = 0;
+  for (const row of rows) {
+    if (row.status === 'absent') lopDays += 1;
+    else if (row.status === 'half-day') lopDays += 0.5;
+  }
+  const lopAmount = Math.round((Number(gross) || 0) / 30 * lopDays);
+  return { lopDays, lopAmount };
+}
 
 router.get('/', async (req, res) => {
   const canSeeAll = ['HR Director', 'HR Manager', 'Finance Lead'].includes(req.auth.role);
@@ -29,6 +45,15 @@ router.get('/:id', async (req, res) => {
 // for denormalization sync, alongside Finance Lead's own process/pay actions.
 router.post('/', requireRole('HR Manager', 'Finance Lead'), async (req, res) => {
   const body = { ...(req.body || {}), company: req.auth.company };
+
+  // Only auto-compute when the caller didn't explicitly send a value —
+  // manual entry (SalaryStructureModal) always wins.
+  if (body.lopDays === undefined && body.empId && body.cycle) {
+    const { lopDays, lopAmount } = await computeLopFromAttendance(body.empId, body.cycle, req.auth.company, body.gross);
+    body.lopDays = lopDays;
+    body.lopAmount = lopAmount;
+  }
+
   const created = await Payroll.create(body);
   await logAudit(req, { action: 'Payroll processed', subject: created.name, after: created });
 

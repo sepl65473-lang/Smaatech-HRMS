@@ -6,6 +6,7 @@ import Modal from '../components/Modal';
 import {
   formatINR, formatDate, daysBetween, leaveTagClass, leaveTagLabel, todayISO,
 } from '../lib/helpers';
+import { ATTENDANCE_STATUS } from '../lib/attendanceStatus';
 
 const STATUS_LABEL = { active: 'Active', remote: 'Remote', 'on-leave': 'On leave' };
 const LEAVE_BADGE = { pending: 'pending', approved: 'approved', declined: 'declined' };
@@ -366,6 +367,45 @@ export default function EmployeeProfile() {
                           <td><span className={`state-badge ${LEAVE_BADGE[l.status] || 'pending'}`}>{l.status}</span></td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Attendance history */}
+            <div className="card">
+              <div className="card-head">
+                <div>
+                  <div className="card-title">Attendance history</div>
+                  <div className="card-sub">{myAttendance.length} day{myAttendance.length === 1 ? '' : 's'} recorded</div>
+                </div>
+              </div>
+              {myAttendance.length === 0 ? (
+                <div className="empty">No attendance records yet.</div>
+              ) : (
+                <div className="table-scroll">
+                  <table className="table">
+                    <thead>
+                      <tr><th>Date</th><th>Status</th><th>Check-in</th><th>Check-out</th></tr>
+                    </thead>
+                    <tbody>
+                      {myAttendance.map((a) => {
+                        const s = ATTENDANCE_STATUS[a.status] || ATTENDANCE_STATUS.absent;
+                        return (
+                          <tr key={a.id}>
+                            <td>{formatDate(a.date)}</td>
+                            <td>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <span className={`status-dot ${s.cls}`} />
+                                {s.label}
+                              </span>
+                            </td>
+                            <td>{a.checkIn || '—'}</td>
+                            <td>{a.checkOut || '—'}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

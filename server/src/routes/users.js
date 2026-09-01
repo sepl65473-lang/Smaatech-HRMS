@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
+import RefreshToken from '../models/RefreshToken.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from '../lib/passwordPolicy.js';
@@ -18,7 +19,54 @@ const VALID_ROLES = ['HR Director', 'HR Manager', 'Finance Lead', 'Employee'];
 // superuser bypass through — login/user management is Director-only.
 router.get('/', requireRole(), async (req, res) => {
   const rows = await User.find(companyFilter(req)).sort({ createdAt: 1 });
-  res.json(rows);
+  // This route is already HR-Director-only, so it's safe to surface these
+  // fields here even though User's shared toJSON transform strips them
+  // everywhere else (e.g. /auth/me) for privacy.
+  res.json(rows.map((u) => ({
+    ...u.toJSON(),
+    lastLoginAt: u.lastLoginAt,
+    lockedUntil: u.lockedUntil,
+    failedLoginAttempts: u.failedLoginAttempts,
+  })));
+});
+
+// Lets an HR Director see every device/browser currently holding a live
+// refresh token for SOMEONE ELSE's account — the admin counterpart to the
+// self-service GET /auth/sessions (which only ever returns the caller's own).
+router.get('/:id/sessions', requireRole(), async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+  }
+  const target = await User.findOne({ _id: req.params.id, ...companyFilter(req) });
+  if (!target) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+
+  const sessions = await RefreshToken.find({
+    userId: target._id,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  }).sort({ createdAt: -1 });
+  res.json(sessions.map((s) => ({
+    id: String(s._id),
+    userAgent: s.userAgent || '',
+    ip: s.ip || '',
+    createdAt: s.createdAt,
+  })));
+});
+
+router.delete('/:id/sessions/:sessionId', requireRole(), async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id) || !mongoose.Types.ObjectId.isValid(req.params.sessionId)) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+  }
+  const target = await User.findOne({ _id: req.params.id, ...companyFilter(req) });
+  if (!target) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+
+  const session = await RefreshToken.findOne({ _id: req.params.sessionId, userId: target._id });
+  if (!session) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Session not found.' } });
+
+  session.revokedAt = new Date();
+  await session.save();
+  await logAudit(req, { action: 'Session revoked (by admin)', subject: target.name, details: session.userAgent || '' });
+  res.json({ ok: true });
 });
 
 router.post('/', requireRole(), async (req, res) => {

@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
+import Modal from '../components/Modal';
 import {
   IconCheck, IconWorkforce, IconPresent, IconOnLeave, IconOpenPositions,
   IconEmployees, IconLeave, IconCalendar, IconPayroll, IconRecruit, IconPerformance,
@@ -129,10 +130,13 @@ export default function Dashboard() {
   const {
     employees, attendance, pendingLeaves, celebrations, jobs,
     leaves, holidays, recruitment, auditLog, payroll,
-    approveLeave, declineLeave, sendWish, toast, audit,
+    approveLeave, declineLeave, sendWish, toast, audit, getAttendanceSummary,
   } = useHRMS();
   const navigate = useNavigate();
   const [chartRange, setChartRange] = useState('Month');
+  const [customRange, setCustomRange] = useState(null); // { from, to } | null — overrides chartRange when set
+  const [rangePickerOpen, setRangePickerOpen] = useState(false);
+  const [rangeDraft, setRangeDraft] = useState({ from: '', to: '' });
   const [hoverDept, setHoverDept] = useState(null);
   const [hoverEmpType, setHoverEmpType] = useState(null);
 
@@ -224,13 +228,7 @@ export default function Dashboard() {
       }
     : null;
 
-  const dateRangeLabel = useMemo(() => {
-    const fmt = (d) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-    const end = new Date();
-    const start = new Date();
-    start.setFullYear(start.getFullYear() - 2);
-    return `${fmt(start)} – ${fmt(end)}`;
-  }, []);
+  const dateRangeLabel = customRange ? `${customRange.from} – ${customRange.to}` : 'Custom range';
 
   const handleExport = () => {
     downloadCSV('employees-directory', employees, [
@@ -243,7 +241,22 @@ export default function Dashboard() {
     audit('Employees exported', `${employees.length} rows`, 'Dashboard export');
     toast('success', `Exported ${employees.length} employees to CSV`);
   };
-  const handleDateRange = () => toast('info', 'Custom date range filtering is coming soon');
+  const handleDateRange = () => {
+    setRangeDraft(customRange || { from: '', to: '' });
+    setRangePickerOpen(true);
+  };
+  const applyDateRange = () => {
+    if (!rangeDraft.from || !rangeDraft.to) {
+      toast('error', 'Pick both a start and end date.');
+      return;
+    }
+    setCustomRange(rangeDraft);
+    setRangePickerOpen(false);
+  };
+  const clearDateRange = () => {
+    setCustomRange(null);
+    setRangePickerOpen(false);
+  };
 
   return (
     <div className="page-wrap active">
@@ -311,7 +324,7 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-          <AttendanceChart attendance={attendance} range={chartRange} />
+          <AttendanceChart getAttendanceSummary={getAttendanceSummary} range={chartRange} customRange={customRange} />
           <div className="legend">
             <div><span className="legend-dot" style={{ background: '#16A34A' }} />Present</div>
             <div><span className="legend-dot" style={{ background: '#D97706' }} />Late arrival</div>
@@ -594,37 +607,56 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      <Modal
+        open={rangePickerOpen}
+        title="Custom date range"
+        subtitle="Overrides the Week/Month/Quarter tabs for the attendance chart"
+        onClose={() => setRangePickerOpen(false)}
+        footer={(
+          <div style={{ display: 'flex', width: '100%', gap: 10, justifyContent: 'space-between' }}>
+            <button className="btn btn-ghost" onClick={clearDateRange}>Clear</button>
+            <button className="btn" onClick={applyDateRange}>Apply</button>
+          </div>
+        )}
+      >
+        <div className="form-grid">
+          <label className="field">
+            From
+            <input
+              type="date"
+              className="input"
+              value={rangeDraft.from}
+              onChange={(e) => setRangeDraft((d) => ({ ...d, from: e.target.value }))}
+            />
+          </label>
+          <label className="field">
+            To
+            <input
+              type="date"
+              className="input"
+              value={rangeDraft.to}
+              onChange={(e) => setRangeDraft((d) => ({ ...d, to: e.target.value }))}
+            />
+          </label>
+        </div>
+      </Modal>
     </div>
   );
 }
 
-const RANGE_FACTOR = { Week: 5, Month: 22, Quarter: 66 };
+function AttendanceChart({ getAttendanceSummary, range, customRange }) {
+  const [rows, setRows] = useState([]);
 
-// Deterministic (not Math.random()) so the chart doesn't flicker on re-render,
-// but genuinely different per department+range+status — unlike a uniform
-// factor, this survives the chart's own auto-scaling below.
-function rangeVariance(seed) {
-  let h = 0;
-  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return 0.7 + (h % 100) / 100 * 0.6; // 0.7 – 1.3
-}
+  useEffect(() => {
+    let cancelled = false;
+    const params = customRange ? { from: customRange.from, to: customRange.to } : { range };
+    getAttendanceSummary(params)
+      .then((data) => { if (!cancelled) setRows(data.rows || []); })
+      .catch(() => { if (!cancelled) setRows([]); });
+    return () => { cancelled = true; };
+  }, [getAttendanceSummary, range, customRange]);
 
-function AttendanceChart({ attendance, range }) {
-  const rows = Object.values(attendance.reduce((acc, item) => {
-    if (!acc[item.dept]) acc[item.dept] = { dept: item.dept, present: 0, late: 0, absent: 0 };
-    if (item.status === 'present') acc[item.dept].present += 1;
-    else if (item.status === 'late') acc[item.dept].late += 1;
-    else acc[item.dept].absent += 1;
-    return acc;
-  }, {})).map((row) => {
-    const factor = RANGE_FACTOR[range] || 1;
-    return {
-      ...row,
-      present: Math.round(row.present * factor * rangeVariance(`${row.dept}-${range}-present`)),
-      late: Math.round(row.late * factor * rangeVariance(`${row.dept}-${range}-late`)),
-      absent: Math.round(row.absent * factor * rangeVariance(`${row.dept}-${range}-absent`)),
-    };
-  });
   const maxTotal = Math.max(1, ...rows.map((r) => r.present + r.late + r.absent));
   const base = 190;
   const scale = 135 / maxTotal;

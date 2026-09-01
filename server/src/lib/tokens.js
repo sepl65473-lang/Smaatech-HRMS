@@ -7,7 +7,14 @@ export const REFRESH_COOKIE_NAME = 'sepl_refresh';
 
 export function signAccessToken(user) {
   return jwt.sign(
-    { sub: String(user._id), role: user.role, employeeId: user.employeeId ? String(user.employeeId) : null, company: user.company || 'Smaatech' },
+    {
+      sub: String(user._id),
+      role: user.role,
+      name: user.name,
+      email: user.email,
+      employeeId: user.employeeId ? String(user.employeeId) : null,
+      company: user.company || 'Smaatech',
+    },
     process.env.JWT_ACCESS_SECRET,
     { expiresIn: ACCESS_TOKEN_TTL },
   );

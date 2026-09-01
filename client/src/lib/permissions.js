@@ -5,7 +5,7 @@ const ROLE_ACCESS = {
     '/recruitment', '/performance', '/analytics', '/integrations', '/expenses', '/assets', '/workflows', '/resignations'
   ],
   'Finance Lead': ['/', '/payroll', '/documents', '/analytics', '/integrations', '/expenses', '/assets', '/resignations'],
-  'Employee': ['/', '/ess', '/holidays', '/org-chart', '/documents', '/expenses', '/resignations'],
+  'Employee': ['/', '/ess', '/attendance', '/holidays', '/org-chart', '/documents', '/expenses', '/resignations'],
 };
 
 export const ROLES = Object.keys(ROLE_ACCESS);

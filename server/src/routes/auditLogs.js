@@ -13,7 +13,6 @@ router.use(requireAuth);
 // the server already wrote.
 const CLIENT_ONLY_ACTIONS = new Set([
   'Employees imported', 'Assets imported', 'Holidays imported', 'Jobs imported',
-  'Attendance check-in', 'Attendance check-out', 'Biometric punch reconciled', 'Attendance override',
   'Payroll processed',
   'Candidate moved', 'Candidate added', 'Candidate removed',
   'Holiday added', 'Holiday removed',

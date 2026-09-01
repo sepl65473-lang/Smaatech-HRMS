@@ -22,6 +22,12 @@ const settingsSchema = new mongoose.Schema({
   departments: { type: [String], default: [] },
   designations: { type: [String], default: [] },
   
+  // Shared secret a real biometric-terminal bridge (e.g. node-zklib) would
+  // send as the X-Device-Key header when calling POST /attendance/device-punch
+  // — a physical device can't hold a user JWT, so this is its own,
+  // deliberately simple auth mechanism.
+  biometricDeviceApiKey: { type: String, default: '' },
+
   gatewayTwilioSid: { type: String, default: '' },
   gatewayTwilioToken: { type: String, default: '' },
   gatewayTwilioFrom: { type: String, default: '' },
@@ -53,7 +59,8 @@ const settingsSchema = new mongoose.Schema({
     default: () => ({
       leave: ['In-app'],
       payroll: ['In-app'],
-      birthday: ['In-app']
+      birthday: ['In-app'],
+      attendance: ['In-app']
     })
   },
   

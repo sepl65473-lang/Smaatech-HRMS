@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
 
 process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'test-access-secret';
@@ -17,6 +18,7 @@ const { startTestDB, stopTestDB, clearTestDB } = await import('../test-utils/tes
 const app = (await import('../app.js')).default;
 const User = (await import('../models/User.js')).default;
 const Settings = (await import('../models/Settings.js')).default;
+const AuditLog = (await import('../models/AuditLog.js')).default;
 const { sendOtpEmail } = await import('../lib/mailer.js');
 
 const COMPANY = 'TestCo';
@@ -71,6 +73,29 @@ describe('POST /auth/login', () => {
     expect(res.body.accessToken).toBeTruthy();
     expect(res.body.user.email).toBe(EMAIL);
     expect(res.headers['set-cookie']?.[0]).toMatch(/sepl_refresh=/);
+
+    // The JWT itself carries name/email now — every route that logs an
+    // AuditLog entry off req.auth (see lib/auditLogger.js) gets a real
+    // actor name instead of the pre-fix "System" fallback.
+    const decoded = jwt.decode(res.body.accessToken);
+    expect(decoded.name).toBe('Auth Test User');
+    expect(decoded.email).toBe(EMAIL);
+
+    const updatedUser = await User.findOne({ email: EMAIL });
+    expect(updatedUser.lastLoginAt).toBeTruthy();
+    expect(updatedUser.lastLoginIp).toBeTruthy();
+
+    const signedInLog = await AuditLog.findOne({ action: 'User signed in', 'actor.id': String(updatedUser._id) });
+    expect(signedInLog).toBeTruthy();
+    expect(signedInLog.actor.name).toBe('Auth Test User');
+  });
+
+  it('records a Failed sign-in attempt audit log entry on a wrong password', async () => {
+    await seedUser();
+    await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: 'WrongPassword1' });
+
+    const failedLog = await AuditLog.findOne({ action: 'Failed sign-in attempt', subject: EMAIL });
+    expect(failedLog).toBeTruthy();
   });
 
   it('locks the account after 5 wrong passwords and rejects the correct one too', async () => {

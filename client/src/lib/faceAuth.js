@@ -36,6 +36,61 @@ export async function detectFaceDescriptor(mediaEl) {
   return result ? Array.from(result.descriptor) : null;
 }
 
+// Landmarks-only detection (cheaper than the full descriptor pass above) —
+// used to sample eye-aspect-ratio every tick while watching for a blink,
+// before the heavier descriptor extraction runs on the final captured frame.
+export async function detectFaceLandmarks(mediaEl) {
+  const faceapi = await getFaceApi();
+  const result = await faceapi
+    .detectSingleFace(mediaEl, new faceapi.TinyFaceDetectorOptions())
+    .withFaceLandmarks();
+  return result ? result.landmarks : null;
+}
+
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function earFor(eyePoints) {
+  const vertical1 = dist(eyePoints[1], eyePoints[5]);
+  const vertical2 = dist(eyePoints[2], eyePoints[4]);
+  const horizontal = dist(eyePoints[0], eyePoints[3]);
+  return horizontal ? (vertical1 + vertical2) / (2 * horizontal) : 0;
+}
+
+// Eye-aspect-ratio (Soukupová & Čech) — drops sharply during a blink, using
+// only the 68-point landmark model this app already loads for check-in; no
+// new model download needed. This is NOT a dedicated anti-spoofing model
+// (face-api.js ships none) — it's a lighter, real signal that a static
+// printed photo or a screen replay can't easily reproduce on demand, not a
+// bulletproof liveness guarantee.
+export function eyeAspectRatio(landmarks) {
+  const left = landmarks.getLeftEye();
+  const right = landmarks.getRightEye();
+  return (earFor(left) + earFor(right)) / 2;
+}
+
+const EAR_BLINK_THRESHOLD = 0.22;
+const EAR_OPEN_THRESHOLD = 0.27;
+
+// Tracks a full closed -> reopened cycle across successive EAR samples
+// (a real blink), not just "EAR dipped somewhere" — a momentarily bad
+// landmark read on an open eye shouldn't count.
+export function createBlinkTracker() {
+  let sawClosed = false;
+  return {
+    update(ear) {
+      if (ear < EAR_BLINK_THRESHOLD) {
+        sawClosed = true;
+        return false;
+      }
+      if (sawClosed && ear > EAR_OPEN_THRESHOLD) {
+        sawClosed = false;
+        return true;
+      }
+      return false;
+    },
+  };
+}
+
 // Finds the closest enrolled profile to a live descriptor, if within threshold.
 export async function matchFace(liveDescriptor, profiles) {
   const faceapi = await getFaceApi();

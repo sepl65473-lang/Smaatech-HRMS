@@ -95,3 +95,17 @@ export function matchDescriptor(liveDescriptor, enrolledDescriptor) {
   const distance = euclideanDistance(liveDescriptor, enrolledDescriptor);
   return { matched: distance <= MATCH_THRESHOLD, distance, confidence: confidenceFromDistance(distance) };
 }
+
+// Shared human-readable mapping for the face-verification error codes above
+// — used by every route that server-verifies a face (attendance check-in/
+// out, face-login).
+export function faceFailureMessage(code) {
+  switch (code) {
+    case 'NOT_ENROLLED': return 'Face not enrolled yet — enroll your face before checking in.';
+    case 'NO_FACE': return 'No face detected in the photo — try again with better lighting, facing the camera directly.';
+    case 'MULTIPLE_FACES': return 'More than one face detected — make sure only you are in frame.';
+    case 'FACE_NOT_MATCHED': return "That doesn't match your enrolled face.";
+    case 'NO_PHOTO': return 'A photo is required to check in.';
+    default: return 'Face verification failed.';
+  }
+}

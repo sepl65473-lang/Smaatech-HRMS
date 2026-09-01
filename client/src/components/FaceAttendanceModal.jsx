@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from './Modal';
-import { loadFaceModels, detectFaceDescriptor } from '../lib/faceAuth';
+import {
+  loadFaceModels, detectFaceDescriptor, detectFaceLandmarks, eyeAspectRatio, createBlinkTracker,
+} from '../lib/faceAuth';
 
-const SCAN_INTERVAL_MS = 700;
+const SCAN_INTERVAL_MS = 300; // faster than a plain "is a face visible" cadence — blinks are brief
 const MAX_SCAN_MS = 15000;
 
 const ERROR_MESSAGES = {
@@ -19,15 +21,23 @@ const ERROR_MESSAGES = {
 // uploads it to the server; the server independently re-detects and matches
 // it against the enrolled descriptor, and that response is what actually
 // records (or rejects) the check-in/out.
+//
+// A basic liveness check runs first: the user must blink (a real
+// closed->reopened eye-aspect-ratio cycle) before a photo is captured at
+// all — a static printed photo or a paused video frame has no eye motion to
+// produce, so it never triggers a capture. Not a dedicated anti-spoofing
+// model (face-api.js ships none), just a real signal beyond a single frame.
 export default function FaceAttendanceModal({ open, action, onClose, onVerified }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
   const scanStartRef = useRef(0);
+  const blinkTrackerRef = useRef(null);
   const [status, setStatus] = useState('loading'); // loading | scanning | captured | no-face-timeout | error | verifying
   const [error, setError] = useState('');
   const [retryToken, setRetryToken] = useState(0);
   const [hasStream, setHasStream] = useState(false);
+  const [awaitingBlink, setAwaitingBlink] = useState(false);
 
   const stopResources = () => {
     clearTimeout(timerRef.current);
@@ -67,16 +77,26 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
         return;
       }
       try {
-        const descriptor = await detectFaceDescriptor(videoRef.current);
+        const landmarks = await detectFaceLandmarks(videoRef.current);
         if (cancelled) return;
-        if (descriptor) {
-          setStatus('captured');
-          const photo = await captureFrame();
-          if (cancelled) return;
-          stopResources();
-          setStatus('verifying');
-          onVerified(photo);
-          return;
+        if (landmarks) {
+          setAwaitingBlink(true);
+          const blinked = blinkTrackerRef.current.update(eyeAspectRatio(landmarks));
+          if (blinked) {
+            const descriptor = await detectFaceDescriptor(videoRef.current);
+            if (cancelled) return;
+            if (descriptor) {
+              setStatus('captured');
+              const photo = await captureFrame();
+              if (cancelled) return;
+              stopResources();
+              setStatus('verifying');
+              onVerified(photo);
+              return;
+            }
+          }
+        } else {
+          setAwaitingBlink(false);
         }
       } catch {
         // transient detection error — keep looping
@@ -97,6 +117,8 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
         if (cancelled) return;
         setHasStream(true);
         setStatus('scanning');
+        setAwaitingBlink(false);
+        blinkTrackerRef.current = createBlinkTracker();
         scanStartRef.current = Date.now();
         scan();
       } catch (err) {
@@ -150,7 +172,11 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
 
         <div style={{ textAlign: 'center', width: '100%' }}>
           {status === 'loading' && <div className="muted-text">Loading camera &amp; face verification model…</div>}
-          {status === 'scanning' && <div style={{ color: '#3b7ddd', fontWeight: 500 }}>Looking for your face…</div>}
+          {status === 'scanning' && (
+            <div style={{ color: '#3b7ddd', fontWeight: 500 }}>
+              {awaitingBlink ? 'Please blink naturally…' : 'Looking for your face…'}
+            </div>
+          )}
           {(status === 'captured' || status === 'verifying') && <div style={{ color: '#10b981', fontWeight: 600 }}>Photo captured — verifying with the server…</div>}
           {status === 'no-face-timeout' && (
             <div className="muted-text">We couldn't clearly detect a face. Make sure you're well-lit, centered, and looking at the camera.</div>

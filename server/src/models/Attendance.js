@@ -7,7 +7,7 @@ const attendanceSchema = new mongoose.Schema({
   date: { type: String, required: true }, // YYYY-MM-DD
   checkIn: { type: String, default: null },
   checkOut: { type: String, default: null },
-  status: { type: String, default: 'absent' }, // present | late | absent | leave
+  status: { type: String, default: 'absent' }, // present | late | absent | leave | early-exit | half-day | holiday
 
   checkInLoc: { type: String, default: null },
   checkOutLoc: { type: String, default: null },
@@ -37,6 +37,10 @@ const attendanceSchema = new mongoose.Schema({
   anomalyFlags: { type: [String], default: [] },
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
+
+// One row per employee per calendar day — lets the daily row-creation job
+// (lib/attendanceDailyJob.js) safely re-run without ever double-inserting.
+attendanceSchema.index({ empId: 1, date: 1 }, { unique: true });
 
 attendanceSchema.set('toJSON', {
   virtuals: true,

@@ -22,8 +22,11 @@ auditLogSchema.set('toJSON', {
   transform: (_doc, ret) => {
     ret.id = String(ret._id);
     ret.at = ret.createdAt;
-    ret.actor = ret.actor?.name || 'System';
+    // Read .role off the actor sub-object before collapsing ret.actor down
+    // to a plain name string below — doing it in the other order always
+    // read .role off a string, so the role badge was blank for every entry.
     ret.role = ret.actor?.role || '';
+    ret.actor = ret.actor?.name || 'System';
     delete ret._id;
     delete ret.__v;
   },

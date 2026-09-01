@@ -73,6 +73,11 @@ export const settingsApi = {
   update(patch) {
     return apiFetch('/settings', { method: 'PATCH', body: patch });
   },
+  // Server-generated only — the plain key is only ever returned by this one
+  // call, right after generation, never re-shown by settingsApi.get().
+  regenerateDeviceKey() {
+    return apiFetch('/settings/device-key/regenerate', { method: 'POST' });
+  },
 };
 
 // ── Real backend resources ──────────────────────────────────────────────
@@ -104,7 +109,13 @@ export const employeesApi = {
 // deliberately not part of loadAll()/hydrate, since GET /users would 403 for
 // every other role; fetched lazily from the Settings page instead. No single-
 // user GET route exists server-side, so `get` is intentionally omitted here.
-export const usersApi = restResource('users', ['list', 'create', 'update', 'remove']);
+export const usersApi = {
+  ...restResource('users', ['list', 'create', 'update', 'remove']),
+  // Admin counterpart to authApi.sessions() below — HR Director viewing/
+  // revoking someone ELSE's active sessions (server/src/routes/users.js).
+  sessions: (userId) => apiFetch(`/users/${userId}/sessions`),
+  revokeSession: (userId, sessionId) => apiFetch(`/users/${userId}/sessions/${sessionId}`, { method: 'DELETE' }),
+};
 
 export const leavesApi = {
   ...restResource('leaves'),
@@ -179,7 +190,23 @@ export const attendanceApi = {
   // geofence distance and lateness rather than trusting anything in `payload`.
   checkIn: (id, payload) => apiFetch(`/attendance/${id}/check-in`, { method: 'POST', body: payload }),
   checkOut: (id, payload) => apiFetch(`/attendance/${id}/check-out`, { method: 'POST', body: payload }),
+  // Real per-department present/late/absent totals over a date range (server
+  // aggregates from actual daily history) — feeds Dashboard's AttendanceChart.
+  summary: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+    ).toString();
+    return apiFetch(`/attendance/summary${qs ? `?${qs}` : ''}`);
+  },
+  // Real QR check-in — a server-issued/validated token, not a client-only
+  // decorative one. qrToken() is HR-only (the office display); qrCheckIn()
+  // is called by the scanning employee's own authenticated session.
+  qrToken: () => apiFetch('/attendance/qr-token'),
+  qrCheckIn: (payload) => apiFetch('/attendance/qr-checkin', { method: 'POST', body: payload }),
 };
+
+// Persisted biometric-device-user -> employee links (Integrations.jsx).
+export const deviceMappingsApi = restResource('device-mappings', ['list', 'create', 'remove']);
 
 // Server-side face enrollment — uploads the captured photo; the server
 // computes and stores the descriptor itself (never a client-computed value).
@@ -210,7 +237,15 @@ export const authApi = {
   // waiting on verifyTwoFactor before any session exists) — the server
   // decides which, based on that company's Settings > Two-factor toggle.
   login: (email, password) => apiFetch('/auth/login', { method: 'POST', body: { email, password }, skipAuth: true }),
-  faceLogin: (email) => apiFetch('/auth/face-login', { method: 'POST', body: { email }, skipAuth: true }),
+  // Sends the captured photo alongside the matched email so the server can
+  // re-verify the face itself (see server/src/routes/auth.js) — the client's
+  // own match (src/lib/faceAuth.js) only decides which account to attempt.
+  faceLogin: (email, photoBlob) => {
+    const form = new FormData();
+    form.append('email', email);
+    form.append('photo', photoBlob, 'face-login.jpg');
+    return apiFetch('/auth/face-login', { method: 'POST', body: form, skipAuth: true });
+  },
   verifyTwoFactor: (email, otp) => apiFetch('/auth/verify-2fa', { method: 'POST', body: { email, otp }, skipAuth: true }),
   async me() {
     try {

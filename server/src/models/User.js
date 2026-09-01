@@ -21,6 +21,10 @@ const userSchema = new mongoose.Schema({
   // Per-account brute-force lockout — reset to 0/null on any successful login.
   failedLoginAttempts: { type: Number, default: 0 },
   lockedUntil: { type: Date, default: null },
+  // Set only on a genuine human-completed login (password or face, after any
+  // 2FA step) — never on a silent /auth/refresh token renewal.
+  lastLoginAt: { type: Date, default: null },
+  lastLoginIp: { type: String, default: null },
 }, { timestamps: true });
 
 userSchema.set('toJSON', {

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import multer from 'multer';
 
 const UPLOADS_ROOT = path.resolve(import.meta.dirname, '../../uploads');
 
@@ -60,4 +61,20 @@ export function wrapUpload(multerMiddleware) {
       next();
     });
   };
+}
+
+const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+// Shared multer config for every route that accepts a single face/selfie
+// photo upload (attendance check-in/out, face enrollment, face-login) — same
+// in-memory storage, 5MB limit, and JPEG/PNG/WebP-only filter everywhere.
+export function imageUploadMiddleware(fieldName = 'photo', errorMessage = 'Photo must be a JPEG, PNG, or WebP image.') {
+  return wrapUpload(multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      if (!ALLOWED_IMAGE_MIMES.has(file.mimetype)) return cb(new Error(errorMessage));
+      cb(null, true);
+    },
+  }).single(fieldName));
 }

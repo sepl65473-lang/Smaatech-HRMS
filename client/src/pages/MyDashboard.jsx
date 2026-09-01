@@ -5,18 +5,21 @@ import Avatar from '../components/Avatar';
 import LeaveForm from '../components/LeaveForm';
 import FaceAttendanceModal from '../components/FaceAttendanceModal';
 import FaceEnrollModal from '../components/FaceEnrollModal';
+import QrCheckInModal from '../components/QrCheckInModal';
 import {
   IconPlus, IconCheck, IconX, IconFaceScan, IconDashboard, IconChevronRight,
 } from '../components/Icons';
-import { formatDate, daysBetween, formatINR, leaveTagClass, leaveTagLabel } from '../lib/helpers';
+import { formatDate, daysBetween, formatINR, leaveTagClass, leaveTagLabel, todayISO } from '../lib/helpers';
+import { ATTENDANCE_STATUS } from '../lib/attendanceStatus';
 import { downloadPayslip } from '../lib/payslip';
 
 export default function MyDashboard() {
   const {
     currentUser, employees, leaves, attendance, payroll, settings, reviews,
     addLeave, checkIn, checkOut, audit, submitSelfReview, toast,
-    enrollFace, faceEnrolled,
+    enrollFace, faceEnrolled, qrCheckIn,
   } = useHRMS();
+  const [qrModalOpen, setQrModalOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [selfRating, setSelfRating] = useState(3);
   const [selfComments, setSelfComments] = useState('');
@@ -139,6 +142,22 @@ export default function MyDashboard() {
     }
   };
 
+  // GPS is attached best-effort here (if geofencing is on and the browser
+  // grants location) — the server is the one that actually enforces it and
+  // will reject with a clear reason if location was required but missing.
+  const handleQrScanSuccess = async ({ token }) => {
+    setQrModalOpen(false);
+    let loc = null;
+    if (settings.gpsCheckInEnabled) {
+      try { loc = await resolveLocation(); } catch { /* let the server report it if location turns out to be required */ }
+    }
+    try {
+      await qrCheckIn(token, loc || {});
+    } catch {
+      // qrCheckIn() already toasted the failure reason (expired token, outside geofence, etc.)
+    }
+  };
+
   const handleFaceModalClose = () => {
     setFaceModalOpen(false);
     setPendingRowId(null);
@@ -170,10 +189,15 @@ export default function MyDashboard() {
   }, [myLeaves, settings.totalLeaveDays]);
 
   const myAttendance = useMemo(
-    () => attendance.filter((a) => a.empId === currentUser.empId),
+    () => attendance
+      .filter((a) => a.empId === currentUser.empId)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date))),
     [attendance, currentUser.empId],
   );
-  const todayRow = myAttendance[0];
+  // GET /attendance sorts by createdAt ascending, so [0] used to be the
+  // OLDEST row, not today's — find it explicitly instead.
+  const todayRow = myAttendance.find((a) => a.date === todayISO());
+  const recentAttendance = myAttendance.slice(0, 7);
 
   const myPayroll = useMemo(
     () => payroll.filter((p) => p.empId === currentUser.empId),
@@ -331,24 +355,34 @@ export default function MyDashboard() {
 
                 {/* Check In Action Button */}
                 {!todayRow.checkIn && (
-                  faceEnrolled ? (
-                    <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckIn(todayRow.id)}>
-                      {gpsLoading ? 'Checking location…' : 'Check In (Face + GPS)'}
+                  <>
+                    {faceEnrolled ? (
+                      <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckIn(todayRow.id)}>
+                        {gpsLoading ? 'Checking location…' : 'Check In (Face + GPS)'}
+                      </button>
+                    ) : (
+                      <span className="muted-text">Enroll your face above for Face + GPS check-in</span>
+                    )}
+                    <button type="button" className="mini-btn" onClick={() => setQrModalOpen(true)}>
+                      Scan office QR
                     </button>
-                  ) : (
-                    <span className="muted-text">Enroll your face above for Face + GPS check-in</span>
-                  )
+                  </>
                 )}
 
                 {/* Check Out Action Button */}
                 {todayRow.checkIn && !todayRow.checkOut && (
-                  faceEnrolled ? (
-                    <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckOut(todayRow.id)}>
-                      {gpsLoading ? 'Checking location…' : 'Check Out (Face + GPS)'}
+                  <>
+                    {faceEnrolled ? (
+                      <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckOut(todayRow.id)}>
+                        {gpsLoading ? 'Checking location…' : 'Check Out (Face + GPS)'}
+                      </button>
+                    ) : (
+                      <span className="muted-text">Enroll your face above for Face + GPS check-out</span>
+                    )}
+                    <button type="button" className="mini-btn" onClick={() => setQrModalOpen(true)}>
+                      Scan office QR
                     </button>
-                  ) : (
-                    <span className="muted-text">Enroll your face above for Face + GPS check-out</span>
-                  )
+                  </>
                 )}
 
                 {todayRow.checkIn && todayRow.checkOut && (
@@ -359,6 +393,23 @@ export default function MyDashboard() {
               </div>
             </div>
           ) : <div className="empty">No attendance record yet.</div>}
+
+          {recentAttendance.length > 0 && (
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+              <div className="card-sub" style={{ marginBottom: 8 }}>Last {recentAttendance.length} day{recentAttendance.length === 1 ? '' : 's'}</div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {recentAttendance.map((a) => {
+                  const s = ATTENDANCE_STATUS[a.status] || ATTENDANCE_STATUS.absent;
+                  return (
+                    <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }} title={s.label}>
+                      <span className={`status-dot ${s.cls}`} />
+                      {formatDate(a.date)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="card">
@@ -530,6 +581,11 @@ export default function MyDashboard() {
         user={me}
         onClose={() => setFaceEnrollOpen(false)}
         onSave={handleSaveMyFace}
+      />
+      <QrCheckInModal
+        open={qrModalOpen}
+        onClose={() => setQrModalOpen(false)}
+        onScanSuccess={handleQrScanSuccess}
       />
     </div>
   );

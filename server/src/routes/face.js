@@ -1,21 +1,12 @@
 import { Router } from 'express';
-import multer from 'multer';
 import User from '../models/User.js';
 import FaceDescriptor from '../models/FaceDescriptor.js';
 import { requireAuth, companyFilter } from '../middleware/auth.js';
 import { extractDescriptor } from '../lib/faceEngine.js';
-import { savePhoto, wrapUpload } from '../lib/photoStorage.js';
+import { savePhoto, imageUploadMiddleware } from '../lib/photoStorage.js';
 
 const router = Router();
-const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const upload = wrapUpload(multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (!ALLOWED_IMAGE_MIMES.has(file.mimetype)) return cb(new Error('Enrollment photo must be a JPEG, PNG, or WebP image.'));
-    cb(null, true);
-  },
-}).single('photo'));
+const upload = imageUploadMiddleware('photo', 'Enrollment photo must be a JPEG, PNG, or WebP image.');
 
 router.use(requireAuth);
 

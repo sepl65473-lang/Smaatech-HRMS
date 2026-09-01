@@ -335,11 +335,11 @@ export default function LoginScreen() {
         open={faceOpen}
         profiles={profiles}
         onClose={() => setFaceOpen(false)}
-        onMatch={async (profile) => {
+        onMatch={async (profile, photoBlob) => {
           setFaceOpen(false);
           try {
             setAuthMethod('face');
-            await proceedAfterAuth(await loginWithFace(profile.email));
+            await proceedAfterAuth(await loginWithFace(profile.email, photoBlob));
           } catch (err) {
             toast('error', err.message || 'Face sign-in failed.');
           }

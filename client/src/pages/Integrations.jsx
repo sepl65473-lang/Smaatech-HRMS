@@ -16,10 +16,28 @@ function randomTime() {
 }
 
 export default function Integrations() {
-  const { employees, payroll, recordPunch, audit, toast } = useHRMS();
+  const {
+    employees, payroll, recordPunch, audit, toast,
+    linkDeviceUser, regenerateDeviceKey,
+  } = useHRMS();
   const [devices, setDevices] = useState(DEVICES);
   const [staging, setStaging] = useState([]);
   const [cycle, setCycle] = useState('');
+  const [deviceKey, setDeviceKey] = useState(null);
+  const [keyLoading, setKeyLoading] = useState(false);
+
+  const handleRegenerateKey = async () => {
+    setKeyLoading(true);
+    try {
+      const key = await regenerateDeviceKey();
+      setDeviceKey(key);
+      toast('success', 'New biometric device key generated — copy it into the device bridge config now, it won\'t be shown again.');
+    } catch (err) {
+      toast('error', err.message || 'Failed to generate a device key.');
+    } finally {
+      setKeyLoading(false);
+    }
+  };
 
   const cycles = useMemo(() => [...new Set(payroll.map((p) => p.cycle || 'Current'))], [payroll]);
   const activeCycle = cycle || cycles[0] || '';
@@ -187,6 +205,30 @@ export default function Integrations() {
       <div className="card" style={{ marginTop: 18 }}>
         <div className="card-head">
           <div>
+            <div className="card-title">Biometric device API key</div>
+            <div className="card-sub">Real, server-generated — a physical device bridge sends this as the X-Device-Key header to POST /api/v1/device-punch</div>
+          </div>
+          <button type="button" className="mini-btn approve" disabled={keyLoading} onClick={handleRegenerateKey}>
+            {keyLoading ? 'Generating…' : deviceKey ? 'Regenerate' : 'Generate key'}
+          </button>
+        </div>
+        {deviceKey ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="mono" style={{ fontSize: 12.5, background: 'var(--bg-2)', padding: '8px 12px', borderRadius: 6, border: '1px dashed #ccc', wordBreak: 'break-all' }}>
+              {deviceKey}
+            </div>
+            <div className="muted-text" style={{ fontSize: 11.5 }}>
+              Copy this now — it won't be shown again. Paste it into the device bridge's config alongside its deviceId/deviceUserId mappings above.
+            </div>
+          </div>
+        ) : (
+          <div className="empty" style={{ textAlign: 'left' }}>No key generated yet — this is a real credential, not simulated. Generate one before pointing a real device bridge at this server.</div>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="card-head">
+          <div>
             <div className="card-title">Staging — unmatched punches</div>
             <div className="card-sub">{staging.length} pulled, awaiting reconciliation against today ({todayISO()})</div>
           </div>
@@ -214,12 +256,16 @@ export default function Integrations() {
                           <select 
                             className="input compact" 
                             style={{ maxWidth: 150, padding: '2px 6px', fontSize: '12px', height: 'auto' }}
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const empId = e.target.value;
                               const emp = employees.find(x => x.id === empId);
-                              if (emp) {
-                                setStaging(list => list.map(item => item.id === p.id ? { ...item, empId: emp.id, guessName: emp.name } : item));
-                                toast('success', `Linked device user ${p.deviceUserId} to <strong>${emp.name}</strong>`);
+                              if (!emp) return;
+                              setStaging(list => list.map(item => item.id === p.id ? { ...item, empId: emp.id, guessName: emp.name } : item));
+                              try {
+                                await linkDeviceUser(p.deviceName, p.deviceUserId, emp.id);
+                                toast('success', `Linked device user ${p.deviceUserId} to <strong>${emp.name}</strong> (saved)`);
+                              } catch (err) {
+                                toast('error', err.message || 'Linked locally, but failed to save the mapping.');
                               }
                             }}
                           >

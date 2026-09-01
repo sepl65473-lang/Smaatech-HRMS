@@ -3,6 +3,7 @@ import { useHRMS } from '../context/HRMSContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserForm from '../components/UserForm';
 import FaceEnrollModal from '../components/FaceEnrollModal';
+import Modal from '../components/Modal';
 import { IconPlus, IconX, IconEdit, IconTrash } from '../components/Icons';
 import { ROLE_SCOPE } from '../lib/permissions';
 
@@ -91,7 +92,7 @@ export default function Settings() {
     settings, employees, currentUser, updateSettings, toggleSetting, resetDatabase, toast, enrollFace,
     users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount,
     masterCategories, masterValues, addMasterValue, deleteMasterValue,
-    loadSessions, revokeSession, revokeOtherSessions, searchAuditLog,
+    loadSessions, revokeSession, revokeOtherSessions, loadUserSessions, revokeUserSession, searchAuditLog,
   } = useHRMS();
   const [orgName, setOrgName] = useState('');
   const [workWeek, setWorkWeek] = useState('5-day');
@@ -101,6 +102,8 @@ export default function Settings() {
   const [editingUser, setEditingUser] = useState(null);
   const [confirmRemoveUser, setConfirmRemoveUser] = useState(null);
   const [faceEnrollUser, setFaceEnrollUser] = useState(null);
+  const [sessionsUser, setSessionsUser] = useState(null);
+  const [userSessions, setUserSessions] = useState([]);
   const [sessions, setSessions] = useState([]);
   const AUDIT_PAGE_SIZE = 10;
   const [auditPage, setAuditPage] = useState(1);
@@ -136,6 +139,16 @@ export default function Settings() {
   const handleRevokeOthers = async () => {
     await revokeOtherSessions();
     refreshSessions();
+  };
+
+  const openUserSessions = (u) => {
+    setSessionsUser(u);
+    setUserSessions([]);
+    loadUserSessions(u.id).then(setUserSessions).catch(() => {});
+  };
+  const handleRevokeUserSession = async (sessionId) => {
+    await revokeUserSession(sessionsUser.id, sessionId);
+    setUserSessions((list) => list.filter((s) => s.id !== sessionId));
   };
 
   const designations = settings.designations || [];
@@ -325,6 +338,7 @@ export default function Settings() {
           <ChannelRow label="Leave alerts" sub="New requests & approvals" selected={notifyChannels.leave || []} onToggle={(ch) => toggleChannel('leave', ch)} />
           <ChannelRow label="Payroll alerts" sub="Cycle reminders & ready slips" selected={notifyChannels.payroll || []} onToggle={(ch) => toggleChannel('payroll', ch)} />
           <ChannelRow label="Birthday & anniversary" sub="Daily celebration digest" selected={notifyChannels.birthday || []} onToggle={(ch) => toggleChannel('birthday', ch)} />
+          <ChannelRow label="Attendance alerts" sub="Late arrivals & absences" selected={notifyChannels.attendance || []} onToggle={(ch) => toggleChannel('attendance', ch)} />
         </div>
       </div>
 
@@ -587,7 +601,7 @@ export default function Settings() {
         <div className="table-scroll">
           <table className="table">
             <thead>
-              <tr><th>Name</th><th>Role</th><th>Email</th><th>Scope</th><th>Face login</th><th style={{ textAlign: 'right' }}>Action</th></tr>
+              <tr><th>Name</th><th>Role</th><th>Email</th><th>Scope</th><th>Last login</th><th>Face login</th><th style={{ textAlign: 'right' }}>Action</th></tr>
             </thead>
             <tbody>
               {users.map((u) => (
@@ -597,10 +611,19 @@ export default function Settings() {
                   <td className="mono">{u.email}</td>
                   <td>{ROLE_SCOPE[u.role] || ''}</td>
                   <td>
+                    {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('en-IN') : <span className="muted-text">Never</span>}
+                    {u.lockedUntil && new Date(u.lockedUntil) > new Date() && (
+                      <span className="state-badge rejected" style={{ marginLeft: 8 }}>Locked</span>
+                    )}
+                  </td>
+                  <td>
                     <span className="muted-text">Managed on server</span>
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div className="row-actions">
+                      <button className="mini-btn" onClick={() => openUserSessions(u)}>
+                        Sessions
+                      </button>
                       <button className="mini-btn" onClick={() => setFaceEnrollUser(u)}>
                         Enroll / re-enroll face
                       </button>
@@ -683,6 +706,29 @@ export default function Settings() {
         onClose={() => setFaceEnrollUser(null)}
         onSave={saveFaceDescriptor}
       />
+
+      <Modal
+        open={Boolean(sessionsUser)}
+        title={sessionsUser ? `Sessions — ${sessionsUser.name}` : 'Sessions'}
+        subtitle="Devices currently signed in to this account"
+        onClose={() => setSessionsUser(null)}
+        footer={<button className="btn btn-ghost" onClick={() => setSessionsUser(null)}>Close</button>}
+      >
+        <div className="settings-rows">
+          {userSessions.length === 0 && <div className="empty">No active sessions.</div>}
+          {userSessions.map((s) => (
+            <div className="settings-row" key={s.id}>
+              <div>
+                <div className="settings-row-label">{s.userAgent || 'Unknown device'}</div>
+                <div className="settings-row-sub">
+                  Signed in {new Date(s.createdAt).toLocaleString('en-IN')}{s.ip ? ` · ${s.ip}` : ''}
+                </div>
+              </div>
+              <button className="mini-btn danger" onClick={() => handleRevokeUserSession(s.id)}>Sign out</button>
+            </div>
+          ))}
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={Boolean(confirmRemoveUser)}

@@ -35,6 +35,8 @@ import notificationsRoutes from './routes/notifications.js';
 import documentsRoutes from './routes/documents.js';
 import resignationsRoutes from './routes/resignations.js';
 import attendanceCorrectionsRoutes from './routes/attendanceCorrections.js';
+import deviceIngestRoutes from './routes/deviceIngest.js';
+import deviceMappingsRoutes from './routes/deviceMappings.js';
 
 const app = express();
 
@@ -99,6 +101,10 @@ app.use('/api/v1/notifications', notificationsRoutes);
 app.use('/api/v1/documents', documentsRoutes);
 app.use('/api/v1/resignations', resignationsRoutes);
 app.use('/api/v1/attendance-corrections', attendanceCorrectionsRoutes);
+// Not nested under /attendance — a physical device has no user JWT, so this
+// must sit outside that router's router.use(requireAuth).
+app.use('/api/v1/device-punch', deviceIngestRoutes);
+app.use('/api/v1/device-mappings', deviceMappingsRoutes);
 
 // Error Handling Middleware
 app.use((err, _req, res, _next) => {

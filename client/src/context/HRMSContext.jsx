@@ -5,7 +5,7 @@ import {
 
   employeesApi, leavesApi, attendanceApi, payrollApi,
   celebrationsApi, recruitmentApi, settingsApi, holidaysApi, reviewsApi,
-  expensesApi, assetsApi, jobsApi, authApi, geofenceApi, faceApi, usersApi, rolesApi, masterCategoriesApi, masterValuesApi, auditLogsApi, notificationsApi, documentsApi, resignationsApi, attendanceCorrectionsApi,
+  expensesApi, assetsApi, jobsApi, authApi, geofenceApi, faceApi, usersApi, rolesApi, masterCategoriesApi, masterValuesApi, auditLogsApi, notificationsApi, documentsApi, resignationsApi, attendanceCorrectionsApi, deviceMappingsApi,
 } from '../data/store';
 import { setAccessToken } from '../lib/apiClient';
 import { getDeviceId } from '../lib/deviceId';
@@ -170,7 +170,7 @@ export function HRMSProvider({ children }) {
   // (a real OTP was just emailed, no session exists yet).
   const login = useCallback((email, password) => authApi.login(email, password), []);
 
-  const loginWithFace = useCallback((email) => authApi.faceLogin(email), []);
+  const loginWithFace = useCallback((email, photoBlob) => authApi.faceLogin(email, photoBlob), []);
 
   const verifyTwoFactor = useCallback((email, otp) => authApi.verifyTwoFactor(email, otp), []);
 
@@ -207,6 +207,7 @@ export function HRMSProvider({ children }) {
 
   const searchAuditLog = useCallback((params) => auditLogsApi.search(params), []);
   const searchEmployees = useCallback((params) => employeesApi.search(params), []);
+  const getAttendanceSummary = useCallback((params) => attendanceApi.summary(params), []);
 
   const loadSessions = useCallback(() => authApi.sessions(), []);
   const revokeSession = useCallback(async (id) => {
@@ -228,6 +229,19 @@ export function HRMSProvider({ children }) {
     }
     toast('success', `Signed out of ${revoked} other session${revoked === 1 ? '' : 's'}.`);
     return revoked;
+  }, [toast]);
+
+  // Admin counterpart to loadSessions/revokeSession above — HR Director
+  // viewing/revoking someone ELSE's active sessions (Settings > Users).
+  const loadUserSessions = useCallback((userId) => usersApi.sessions(userId), []);
+  const revokeUserSession = useCallback(async (userId, sessionId) => {
+    try {
+      await usersApi.revokeSession(userId, sessionId);
+    } catch (err) {
+      toast('error', err.message || 'Failed to sign out that session.');
+      throw err;
+    }
+    toast('info', 'Session signed out.');
   }, [toast]);
 
   const markNotificationRead = useCallback(async (id) => {
@@ -656,7 +670,7 @@ export function HRMSProvider({ children }) {
       throw err;
     }
     setAttendance((list) => list.map((a) => (a.id === id ? updated : a)));
-    audit('Attendance check-in', updated.name, `${updated.checkIn}${updated.checkInDetails ? ` (${updated.checkInDetails}${updated.checkInLoc ? `: ${updated.checkInLoc}` : ''})` : ''}`);
+    auditLocal('Attendance check-in', updated.name, `${updated.checkIn}${updated.checkInDetails ? ` (${updated.checkInDetails}${updated.checkInLoc ? `: ${updated.checkInLoc}` : ''})` : ''}`);
     toast('success', `<strong>${updated.name}</strong> checked in · ${updated.checkIn}`);
     return updated;
   };
@@ -670,9 +684,52 @@ export function HRMSProvider({ children }) {
       throw err;
     }
     setAttendance((list) => list.map((a) => (a.id === id ? updated : a)));
-    audit('Attendance check-out', updated.name, `${updated.checkOut}${updated.checkOutDetails ? ` (${updated.checkOutDetails}${updated.checkOutLoc ? `: ${updated.checkOutLoc}` : ''})` : ''}`);
+    auditLocal('Attendance check-out', updated.name, `${updated.checkOut}${updated.checkOutDetails ? ` (${updated.checkOutDetails}${updated.checkOutLoc ? `: ${updated.checkOutLoc}` : ''})` : ''}`);
     toast('info', `<strong>${updated.name}</strong> checked out · ${updated.checkOut}`);
     return updated;
+  };
+
+  // Office-display token for the QR check-in flow (HR-only) — a real,
+  // server-issued short-TTL token, not a client-only decorative one.
+  const getQrToken = useCallback(() => attendanceApi.qrToken(), []);
+
+  // Called by the scanning employee's own session after decoding the office
+  // display's QR — the server figures out check-in vs check-out itself.
+  const qrCheckIn = async (token, locationData = null) => {
+    const payload = {
+      token,
+      lat: locationData?.lat, lng: locationData?.lng,
+      accuracy: locationData?.accuracy, timestamp: locationData?.timestamp,
+    };
+    let updated;
+    try {
+      updated = await attendanceApi.qrCheckIn(payload);
+    } catch (err) {
+      toast('error', err.message || 'QR check-in failed.');
+      throw err;
+    }
+    setAttendance((list) => list.map((a) => (a.id === updated.id ? updated : a)));
+    const isCheckIn = Boolean(updated.checkIn) && !updated.checkOut;
+    auditLocal(isCheckIn ? 'Attendance check-in' : 'Attendance check-out', updated.name, isCheckIn ? updated.checkIn : updated.checkOut);
+    toast('success', `<strong>${updated.name}</strong> ${isCheckIn ? 'checked in' : 'checked out'} via QR`);
+    return updated;
+  };
+
+  // Persisted biometric-device-user -> employee links (Integrations.jsx) —
+  // this used to only live in local React state.
+  const loadDeviceMappings = useCallback(() => deviceMappingsApi.list(), []);
+  const linkDeviceUser = async (deviceId, deviceUserId, empId) => {
+    const created = await deviceMappingsApi.create({ deviceId, deviceUserId, empId });
+    auditLocal('Device user mapped', deviceUserId, empId);
+    return created;
+  };
+
+  // Server-generated shared secret a real biometric-device bridge would send
+  // as X-Device-Key — regenerating invalidates whatever the old one was.
+  const regenerateDeviceKey = async () => {
+    const { biometricDeviceApiKey } = await settingsApi.regenerateDeviceKey();
+    auditLocal('Biometric device key regenerated', 'System Settings');
+    return biometricDeviceApiKey;
   };
 
   // Uploads a captured selfie for server-side enrollment — the server
@@ -709,7 +766,7 @@ export function HRMSProvider({ children }) {
       throw err;
     }
     setAttendance((list) => list.map((a) => (a.id === row.id ? updated : a)));
-    audit('Biometric punch reconciled', updated.name, `${type === 'in' ? 'Check-in' : 'Check-out'} ${time}`);
+    auditLocal('Biometric punch reconciled', updated.name, `${type === 'in' ? 'Check-in' : 'Check-out'} ${time}`);
     return updated;
   };
 
@@ -728,7 +785,7 @@ export function HRMSProvider({ children }) {
       throw err;
     }
     setAttendance((list) => list.map((a) => (a.id === id ? updated : a)));
-    audit('Attendance override', updated.name, status);
+    auditLocal('Attendance override', updated.name, status);
     toast('info', `<strong>${updated.name}</strong> marked ${status}`);
   };
 
@@ -1259,6 +1316,17 @@ export function HRMSProvider({ children }) {
     return created;
   };
 
+  // Lightweight periodic refresh for the roster's "Live" indicator (see
+  // Attendance.jsx) — just the attendance list, not a full loadAll() reload.
+  const refreshAttendance = useCallback(async () => {
+    try {
+      const attList = await attendanceApi.list();
+      setAttendance(attList);
+    } catch {
+      // Silent — a transient failure just means the next poll tick retries.
+    }
+  }, []);
+
   const approveCorrection = async (id) => {
     let updated; let attList;
     try {
@@ -1455,7 +1523,8 @@ export function HRMSProvider({ children }) {
 
   const value = {
     isAuthenticated: Boolean(authUser), login, loginWithFace, verifyTwoFactor, finishLogin, logout, forgotPassword, resetPassword, changePassword,
-    loadSessions, revokeSession, revokeOtherSessions, searchAuditLog, searchEmployees,
+    loadSessions, revokeSession, revokeOtherSessions, loadUserSessions, revokeUserSession, searchAuditLog, searchEmployees,
+    getAttendanceSummary, refreshAttendance,
     booting, loading, lastSyncedAt,
     employees, leaves, attendance, payroll,
     celebrations, holidays, recruitment, reviews, settings, currentUser, auditLog, audit,
@@ -1479,7 +1548,8 @@ export function HRMSProvider({ children }) {
     // leave
     addLeave, approveLeave, declineLeave, deleteLeave, bulkApproveLeave, bulkDeclineLeave,
     // attendance
-    checkIn, checkOut, setAttendanceStatus, recordPunch, enrollFace, faceEnrolled,
+    checkIn, checkOut, setAttendanceStatus, recordPunch, enrollFace, faceEnrolled, getQrToken, qrCheckIn,
+    loadDeviceMappings, linkDeviceUser, regenerateDeviceKey,
     // payroll
     processPayroll, markPaid, updatePayrollStructure,
     // celebrations

@@ -1,10 +1,42 @@
 import { Router } from 'express';
 import Leave from '../models/Leave.js';
+import Attendance from '../models/Attendance.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { getSettingsDoc } from './settings.js';
 import { logAudit } from '../lib/auditLogger.js';
 import User from '../models/User.js';
 import { sendNotification, resolveChannels, fillTemplate } from '../lib/notificationService.js';
+import { dateRangeInclusive } from '../lib/dateUtils.js';
+
+// Marks every date in an approved leave as Attendance status 'leave' —
+// upserts the row (mirrors attendanceCorrections.js's approve handler) since
+// there's no guarantee the daily row-creation job has already run for a
+// future-dated leave. Never overwrites a day the employee already genuinely
+// checked into (e.g. leave approved retroactively after they'd come in).
+async function markLeaveOnAttendance(leave) {
+  for (const date of dateRangeInclusive(leave.start, leave.end)) {
+    // eslint-disable-next-line no-await-in-loop
+    const existing = await Attendance.findOne({ empId: leave.empId, date, company: leave.company });
+    if (existing) {
+      if (!existing.checkIn) {
+        existing.status = 'leave';
+        // eslint-disable-next-line no-await-in-loop
+        await existing.save();
+      }
+    } else {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await Attendance.create({
+          empId: leave.empId, name: leave.name, dept: leave.dept, date, status: 'leave', company: leave.company,
+        });
+      } catch (err) {
+        // Unique (empId, date) index — the daily job or another request
+        // created this row in the meantime. Safe to leave as-is.
+        if (err.code !== 11000) throw err;
+      }
+    }
+  }
+}
 
 // Falls back to this sequence when HR hasn't configured Settings > Workflows
 // yet — matches the default the Workflows page itself shows unconfigured.
@@ -110,8 +142,14 @@ router.post('/:id/approve', async (req, res) => {
     after: leave 
   });
 
-  // Notify Employee on final approval
+  // Final approval: mark the leave dates on Attendance and notify the employee.
   if (leave.status === 'approved') {
+    try {
+      await markLeaveOnAttendance(leave);
+    } catch (err) {
+      console.error('Error marking leave on attendance:', err);
+    }
+
     try {
       const recipientUser = await User.findOne({ employeeId: leave.empId });
       if (recipientUser) {
@@ -119,7 +157,7 @@ router.post('/:id/approve', async (req, res) => {
         await sendNotification({
           recipientId: recipientUser._id,
           title: 'Leave Request Approved',
-          message: `Your ${leave.type} leave request from ${leave.start} to ${leave.end} has been approved.`,
+          message: `Your ${leave.type} leave request from ${leave.start} to ${leave.end} has been approved and marked on your attendance.`,
           type: 'leave',
           actionUrl: '/leave',
           channels: resolveChannels(settingsDoc, 'leave'),
