@@ -92,11 +92,17 @@ export default function MyDashboard() {
     setGpsStatus(null);
     try {
       let loc = null;
-      if (settings.gpsCheckInEnabled) {
+      try {
         loc = await resolveLocation();
         setGpsStatus(loc);
-        if (!loc.isInside) {
+        if (settings.gpsCheckInEnabled && !loc.isInside) {
           toast('error', `Location check failed: You're ${loc.distance.toFixed(0)}m from the office — outside the allowed ${settings.geofenceRadius ?? 25}m radius.`);
+          return;
+        }
+      } catch (err) {
+        if (settings.gpsCheckInEnabled) {
+          setGpsStatus({ error: err.message });
+          toast('error', err.message);
           return;
         }
       }
@@ -104,9 +110,6 @@ export default function MyDashboard() {
       setPendingRowId(rowId);
       setFaceAction(action);
       setFaceModalOpen(true);
-    } catch (err) {
-      setGpsStatus({ error: err.message });
-      toast('error', err.message);
     } finally {
       setGpsLoading(false);
     }

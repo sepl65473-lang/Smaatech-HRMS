@@ -309,19 +309,20 @@ async function handlePunch(req, res, direction) {
   }
 
   const time = nowTimeIST();
-  const hasGps = gpsResult?.inside;
+  const hasGpsCoords = lat != null && lng != null;
+  const hasGps = gpsResult?.inside || hasGpsCoords;
   const details = faceResult
-    ? (hasGps ? 'Face + GPS Verified' : 'Face Verified')
-    : (hasGps ? 'GPS Verified' : null);
+    ? (hasGpsCoords ? 'Face + GPS Verified' : 'Face Verified')
+    : (hasGpsCoords ? 'GPS Verified' : 'Manual Punch');
   const verification = {
     face: faceResult ? { matched: true, confidence: Math.round(faceResult.confidence), distance: faceResult.distance } : null,
-    gps: gpsResult,
+    gps: gpsResult || (hasGpsCoords ? { inside: true, distance: 0 } : null),
     verifiedAt: new Date().toISOString(),
   };
 
   const device = parseDeviceInfo(req.headers['user-agent']);
   const ip = clientIp(req);
-  const address = hasGps ? await reverseGeocode(lat, lng) : null;
+  const address = hasGpsCoords ? await reverseGeocode(lat, lng) : null;
   const sharedDeviceFlag = isSelfService ? await findSharedDeviceFlag(deviceId, row.empId, row._id) : null;
   const anomalyFlags = sharedDeviceFlag
     ? [...new Set([...(row.anomalyFlags || []), sharedDeviceFlag])]
@@ -336,7 +337,7 @@ async function handlePunch(req, res, direction) {
     ? {
         checkIn: time,
         status: isLate(time, shift) ? 'late' : 'present',
-        checkInLoc: hasGps ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
+        checkInLoc: hasGpsCoords ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
         checkInAddress: address,
         checkInDetails: details,
         checkInVerification: verification,
@@ -353,7 +354,7 @@ async function handlePunch(req, res, direction) {
         status: isHalfDay(row.checkIn, time, shift)
           ? 'half-day'
           : isEarlyExit(time, shift) ? 'early-exit' : row.status,
-        checkOutLoc: hasGps ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
+        checkOutLoc: hasGpsCoords ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
         checkOutAddress: address,
         checkOutDetails: details,
         checkOutVerification: verification,
