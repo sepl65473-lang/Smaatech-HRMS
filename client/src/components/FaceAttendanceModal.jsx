@@ -4,7 +4,7 @@ import {
   loadFaceModels, detectFaceDescriptor, detectFaceLandmarks, eyeAspectRatio, createBlinkTracker,
 } from '../lib/faceAuth';
 
-const SCAN_INTERVAL_MS = 300; // faster than a plain "is a face visible" cadence — blinks are brief
+const SCAN_INTERVAL_MS = 150; // a real blink is only ~100-300ms — a slower poll can miss the closed-eye moment entirely
 const MAX_SCAN_MS = 20000; // blink-liveness needs a real blink to occur, not just a face to appear — a bit more room than a plain detection wait
 
 const ERROR_MESSAGES = {

@@ -30,4 +30,21 @@ describe('createBlinkTracker', () => {
     const results = [0.30, 0.29, 0.10, 0.29].map((ear) => tracker.update(ear));
     expect(results.some(Boolean)).toBe(true);
   });
+
+  it('registers a real blink even when polling only catches it mid-motion, not fully closed', () => {
+    // A spontaneous blink lasts ~100-300ms, often shorter than one polling
+    // tick — so in practice the sample that lands during the blink is
+    // usually a partial closure (eyelid partway down), and the very next
+    // sample after reopening is rarely an exact match of the prior peak
+    // (ordinary landmark jitter). This is the realistic case the old
+    // stricter ratios (0.75 close / 0.85 reopen) were missing.
+    const tracker = createBlinkTracker();
+    const frames = [
+      0.30, 0.29, 0.31, // stable open baseline
+      0.22, // only a partial dip was sampled (~73% of peak), not a fully-shut frame
+      0.25, // reopening, but landmark noise keeps it a bit below the original peak
+    ];
+    const results = frames.map((ear) => tracker.update(ear));
+    expect(results.some(Boolean)).toBe(true);
+  });
 });

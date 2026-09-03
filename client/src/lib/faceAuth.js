@@ -73,8 +73,19 @@ export function eyeAspectRatio(landmarks) {
 // number doesn't generalize across different face shapes, camera angles, or
 // lighting (someone whose natural open-eye EAR sits lower than a fixed
 // threshold would never be able to "reopen" past it, getting stuck forever).
-const CLOSE_RATIO = 0.75;
-const REOPEN_RATIO = 0.85;
+//
+// A real spontaneous blink is only ~100-300ms — often shorter than one
+// polling tick at this app's scan cadence (see SCAN_INTERVAL_MS in the
+// modal components) — so the sample that lands during a blink is usually
+// mid-motion (eyelid partway down), not a fully-shut frame, and the first
+// sample after reopening rarely lands exactly back at the prior peak
+// (normal landmark jitter). CLOSE_RATIO/REOPEN_RATIO are loosened from a
+// textbook-strict pair (which requires a near-fully-closed dip and a
+// near-exact return to peak) to tolerate that — while keeping REOPEN_RATIO
+// meaningfully above CLOSE_RATIO so a real dip-then-recover is still
+// required, not just sensor noise.
+const CLOSE_RATIO = 0.72;
+const REOPEN_RATIO = 0.78;
 
 // Real open-eye EAR for a human face is roughly 0.2-0.35; a reading outside
 // this band is landmark-detection noise (common on the first frame or two,
