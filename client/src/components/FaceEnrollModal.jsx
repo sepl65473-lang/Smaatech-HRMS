@@ -55,9 +55,11 @@ export default function FaceEnrollModal({ open, user, onClose, onSave }) {
       return;
     }
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    const width = videoRef.current.videoWidth || 320;
+    const height = videoRef.current.videoHeight || 240;
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0, width, height);
     canvas.toBlob((blob) => {
       setError('');
       setPhotoBlob(blob);

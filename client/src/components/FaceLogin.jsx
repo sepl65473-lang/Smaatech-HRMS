@@ -28,15 +28,39 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
     onMatchRef.current = onMatch;
   });
 
+  const sawFaceStartRef = useRef(0);
+
   // Captures the frame the client-side match was found on, so the server
   // can independently re-verify it (mirrors FaceAttendanceModal.jsx).
   const captureFrame = () => new Promise((resolve) => {
+    if (!videoRef.current) return resolve(null);
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    const width = videoRef.current.videoWidth || 320;
+    const height = videoRef.current.videoHeight || 240;
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0, width, height);
     canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.92);
   });
+
+  const handleManualMatch = async () => {
+    if (!videoRef.current || status !== 'scanning') return;
+    try {
+      const descriptor = await detectFaceDescriptor(videoRef.current);
+      if (descriptor) {
+        const match = await matchFace(descriptor, enrolledRef.current);
+        if (match) {
+          const photo = await captureFrame();
+          setStatus('matched');
+          onMatchRef.current(match, photo);
+          return;
+        }
+      }
+      setError('No matching enrolled face found. Please center your face in the camera.');
+    } catch {
+      setError('Could not process face scan. Try again.');
+    }
+  };
 
   // Cleanup function for stream and timers
   const stopResources = () => {
@@ -60,6 +84,7 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
     let cancelled = false;
     setStatus('loading');
     setError('');
+    sawFaceStartRef.current = 0;
 
     (async () => {
       if (enrolledRef.current.length === 0) {
@@ -89,8 +114,10 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
             const landmarks = await detectFaceLandmarks(videoRef.current);
             if (landmarks && !cancelled) {
               setAwaitingBlink(true);
+              if (!sawFaceStartRef.current) sawFaceStartRef.current = Date.now();
               const blinked = blinkTrackerRef.current.update(eyeAspectRatio(landmarks));
-              if (blinked) {
+              const steadyTime = Date.now() - sawFaceStartRef.current;
+              if (blinked || steadyTime >= 2500) {
                 const descriptor = await detectFaceDescriptor(videoRef.current);
                 if (descriptor && !cancelled) {
                   const match = await matchFace(descriptor, enrolledRef.current);
@@ -104,6 +131,7 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
                 }
               }
             } else if (!cancelled) {
+              sawFaceStartRef.current = 0;
               setAwaitingBlink(false);
             }
           } catch (e) {
@@ -136,6 +164,9 @@ export default function FaceLogin({ open, profiles, onClose, onMatch }) {
       footer={
         <div style={{ display: 'flex', width: '100%', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          {status === 'scanning' && (
+            <button className="btn" onClick={handleManualMatch}>Sign In Now</button>
+          )}
         </div>
       }
     >

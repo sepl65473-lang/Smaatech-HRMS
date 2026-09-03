@@ -29,8 +29,9 @@ export async function loadFaceModels() {
 // Runs detection + landmarks + a 128-value face descriptor on a video/image element.
 export async function detectFaceDescriptor(mediaEl) {
   const faceapi = await getFaceApi();
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 });
   const result = await faceapi
-    .detectSingleFace(mediaEl, new faceapi.TinyFaceDetectorOptions())
+    .detectSingleFace(mediaEl, options)
     .withFaceLandmarks()
     .withFaceDescriptor();
   return result ? Array.from(result.descriptor) : null;
@@ -41,8 +42,9 @@ export async function detectFaceDescriptor(mediaEl) {
 // before the heavier descriptor extraction runs on the final captured frame.
 export async function detectFaceLandmarks(mediaEl) {
   const faceapi = await getFaceApi();
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 });
   const result = await faceapi
-    .detectSingleFace(mediaEl, new faceapi.TinyFaceDetectorOptions())
+    .detectSingleFace(mediaEl, options)
     .withFaceLandmarks();
   return result ? result.landmarks : null;
 }

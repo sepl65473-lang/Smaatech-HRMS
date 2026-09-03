@@ -32,6 +32,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
   const streamRef = useRef(null);
   const timerRef = useRef(null);
   const scanStartRef = useRef(0);
+  const sawFaceStartRef = useRef(0);
   const blinkTrackerRef = useRef(null);
   const [status, setStatus] = useState('loading'); // loading | scanning | captured | no-face-timeout | error | verifying
   const [error, setError] = useState('');
@@ -52,13 +53,31 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
     setHasStream(false);
   }, []);
 
-  const captureFrame = () => new Promise((resolve) => {
+  const captureFrame = useCallback(() => new Promise((resolve) => {
+    if (!videoRef.current) return resolve(null);
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    const width = videoRef.current.videoWidth || 320;
+    const height = videoRef.current.videoHeight || 240;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoRef.current, 0, 0, width, height);
     canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.92);
-  });
+  }), []);
+
+  const handleManualCapture = async () => {
+    if (!videoRef.current || status !== 'scanning') return;
+    setStatus('captured');
+    const photo = await captureFrame();
+    stopResources();
+    if (photo) {
+      setStatus('verifying');
+      onVerified(photo);
+    } else {
+      setError('Could not capture frame from camera.');
+      setStatus('error');
+    }
+  };
 
   useEffect(() => {
     if (!open) {
@@ -69,6 +88,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
     let cancelled = false;
     setStatus('loading');
     setError('');
+    sawFaceStartRef.current = 0;
 
     const scan = async () => {
       if (cancelled || !videoRef.current) return;
@@ -83,8 +103,10 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
         if (landmarks) {
           setSawFace(true);
           setAwaitingBlink(true);
+          if (!sawFaceStartRef.current) sawFaceStartRef.current = Date.now();
           const blinked = blinkTrackerRef.current.update(eyeAspectRatio(landmarks));
-          if (blinked) {
+          const steadyTime = Date.now() - sawFaceStartRef.current;
+          if (blinked || steadyTime >= 2500) {
             const descriptor = await detectFaceDescriptor(videoRef.current);
             if (cancelled) return;
             if (descriptor) {
@@ -98,6 +120,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
             }
           }
         } else {
+          sawFaceStartRef.current = 0;
           setAwaitingBlink(false);
         }
       } catch {
@@ -135,7 +158,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
       cancelled = true;
       stopResources();
     };
-  }, [open, retryToken, onVerified, stopResources]);
+  }, [open, retryToken, onVerified, stopResources, captureFrame]);
 
   const tryAgain = () => setRetryToken((t) => t + 1);
 
@@ -151,6 +174,9 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
       footer={
         <div style={{ display: 'flex', width: '100%', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          {status === 'scanning' && (
+            <button className="btn" onClick={handleManualCapture}>Take Photo</button>
+          )}
           {(status === 'no-face-timeout' || status === 'error') && (
             <button className="btn" onClick={tryAgain}>Try Again</button>
           )}
@@ -177,7 +203,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
           {status === 'loading' && <div className="muted-text">Loading camera &amp; face verification model…</div>}
           {status === 'scanning' && (
             <div style={{ color: '#3b7ddd', fontWeight: 500 }}>
-              {awaitingBlink ? 'Please blink naturally…' : 'Looking for your face…'}
+              {awaitingBlink ? 'Hold still or blink naturally…' : 'Looking for your face…'}
             </div>
           )}
           {(status === 'captured' || status === 'verifying') && <div style={{ color: '#10b981', fontWeight: 600 }}>Photo captured — verifying with the server…</div>}
