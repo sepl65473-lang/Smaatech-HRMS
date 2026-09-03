@@ -88,13 +88,20 @@ axiosInstance.interceptors.response.use(
 export async function apiFetch(path, opts = {}) {
   const method = (opts.method || 'GET').toLowerCase();
   const isFormData = opts.body instanceof FormData;
-  
+
   const config = {
     method,
     url: path,
     data: opts.body,
     skipAuth: opts.skipAuth,
-    headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : opts.headers,
+    // For FormData, don't set Content-Type at all — the browser derives it
+    // itself from the body, including the multipart boundary parameter a
+    // manual 'multipart/form-data' string would be missing. Without a real
+    // boundary the server can't parse the body at all (busboy throws
+    // "Multipart: Boundary not found"), silently failing every photo upload
+    // that goes through this path (check-in/out, face enroll, face login,
+    // documents).
+    headers: isFormData ? undefined : opts.headers,
   };
 
   const response = await axiosInstance(config);
