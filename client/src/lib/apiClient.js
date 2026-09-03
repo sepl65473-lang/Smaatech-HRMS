@@ -26,11 +26,15 @@ export const axiosInstance = axios.create({
   },
 });
 
-// Request Interceptor: attach Bearer token
+// Request Interceptor: attach Bearer token and strip default Content-Type for FormData
 axiosInstance.interceptors.request.use(
   (config) => {
     if (accessToken && !config.skipAuth) {
       config.headers.Authorization = `Bearer ${accessToken}`;
+    }
+    if (config.data instanceof FormData && config.headers) {
+      delete config.headers['Content-Type'];
+      delete config.headers['content-type'];
     }
     return config;
   },
