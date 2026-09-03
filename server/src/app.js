@@ -45,6 +45,30 @@ app.use(helmet({ contentSecurityPolicy: false })); // Disable CSP for API flexib
 app.use(mongoSanitize());
 app.use(compression());
 
+// CORS must be registered before the rate limiters below — express-rate-limit
+// ends the response itself once a client is over its limit, so any
+// middleware registered after it (this included) never runs for that
+// response. Without CORS headers on a rate-limited response, the browser
+// can't read it at all and the app sees a bare, misleading "Network Error"
+// instead of the actual "too many requests" message — indistinguishable
+// from the server being unreachable.
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.CLIENT_ORIGIN ? process.env.CLIENT_ORIGIN.replace(/\/$/, '') : null,
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin.replace(/\/$/, '')) || /\.vercel\.app$/.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  credentials: true,
+}));
+
 // Rate Limiters
 const isTestEnv = process.env.NODE_ENV === 'test';
 
@@ -82,22 +106,6 @@ app.use('/api/v1/auth/forgot-password', authLimiter);
 app.use('/api/v1/auth/reset-password', authLimiter);
 app.use('/api/v1/resignations/:id/fnf/pay', financialLimiter);
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  process.env.CLIENT_ORIGIN ? process.env.CLIENT_ORIGIN.replace(/\/$/, '') : null,
-].filter(Boolean);
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin.replace(/\/$/, '')) || /\.vercel\.app$/.test(origin)) {
-      callback(null, true);
-    } else {
-      callback(null, false);
-    }
-  },
-  credentials: true,
-}));
 app.use(express.json());
 app.use(cookieParser());
 
