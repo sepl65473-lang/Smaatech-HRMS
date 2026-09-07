@@ -385,7 +385,7 @@ export default function EmployeeProfile() {
                 <div className="empty">No attendance records yet.</div>
               ) : (
                 <div className="table-scroll">
-                  <table className="table">
+                  <table className="table compact-history">
                     <thead>
                       <tr><th>Date</th><th>Status</th><th>Check-in</th><th>Check-out</th></tr>
                     </thead>

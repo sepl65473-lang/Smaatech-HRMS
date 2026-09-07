@@ -764,6 +764,11 @@
   }
   tbody tr:last-child td{border-bottom:none}
   tbody tr:hover{background:var(--bg-2)}
+  /* Used for tables placed in a narrow card (e.g. EmployeeProfile's
+     Attendance history, sitting in a 1fr grid column) — without this,
+     date/status text wraps onto two lines, doubling row height and
+     stretching the whole card (and its grid row) far taller than needed. */
+  table.compact-history th, table.compact-history td{padding:10px 14px; white-space:nowrap}
   .emp-cell{display:flex; align-items:center; gap:11px}
   .emp-name{font-weight:500}
   .emp-id{font-size:11px; color:var(--muted)}
