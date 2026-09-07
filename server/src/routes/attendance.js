@@ -188,6 +188,7 @@ router.post('/qr-checkin', async (req, res) => {
   await logAudit(req, {
     action: direction === 'in' ? 'Attendance check-in' : 'Attendance check-out',
     subject: updated.name,
+    details: patch.checkInDetails || patch.checkOutDetails,
     before: row,
     after: updated,
   });
@@ -226,6 +227,21 @@ router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
   }
   const before = await Attendance.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attendance row not found.' } });
+
+  const device = parseDeviceInfo(req.headers['user-agent']);
+  const ip = clientIp(req);
+
+  if (patch.checkIn && !before.checkIn) {
+    if (!patch.checkInDetails) patch.checkInDetails = 'HR Manual Override';
+    if (!patch.checkInDevice) patch.checkInDevice = device;
+    if (!patch.checkInIp) patch.checkInIp = ip;
+  }
+  if (patch.checkOut && !before.checkOut) {
+    if (!patch.checkOutDetails) patch.checkOutDetails = 'HR Manual Override';
+    if (!patch.checkOutDevice) patch.checkOutDevice = device;
+    if (!patch.checkOutIp) patch.checkOutIp = ip;
+  }
+
   const updated = await Attendance.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, patch, { new: true });
   await logAudit(req, { action: 'Attendance updated', subject: updated.name, before, after: updated });
   res.json(updated);
@@ -371,6 +387,7 @@ async function handlePunch(req, res, direction) {
   await logAudit(req, {
     action: direction === 'in' ? 'Attendance check-in' : 'Attendance check-out',
     subject: updated.name,
+    details,
     before: row,
     after: updated,
   });

@@ -78,6 +78,7 @@ router.post('/', requireDeviceKey, async (req, res) => {
   await logAudit(req, {
     action: type === 'in' ? 'Attendance check-in' : 'Attendance check-out',
     subject: updated.name,
+    details: patch.checkInDetails || patch.checkOutDetails,
     before: row,
     after: updated,
     actor: { name: `Device: ${deviceId}`, role: 'Device' },

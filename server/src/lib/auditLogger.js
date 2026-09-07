@@ -1,5 +1,11 @@
 import AuditLog from '../models/AuditLog.js';
 
+function summarizeValue(v) {
+  if (v === undefined) return 'undefined';
+  if (v !== null && typeof v === 'object') return Array.isArray(v) ? `[${v.length} item(s)]` : '{…}';
+  return JSON.stringify(v);
+}
+
 export async function logAudit(req, { action, subject, before, after, details = '', actor = null, company = null }) {
   try {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
@@ -23,14 +29,18 @@ export async function logAudit(req, { action, subject, before, after, details = 
 
         if (JSON.stringify(bVal) !== JSON.stringify(aVal)) {
           diff[key] = { from: bVal, to: aVal };
-          const fromStr = bVal !== undefined ? JSON.stringify(bVal) : 'undefined';
-          const toStr = aVal !== undefined ? JSON.stringify(aVal) : 'undefined';
-          changes.push(`${key}: ${fromStr} -> ${toStr}`);
+          // Full before/after values still land in `diff` above for the audit
+          // trail — this is only the short human-readable summary, so object/array
+          // values (e.g. device info, face-match verification) are collapsed rather
+          // than dumped as raw JSON, which used to blow up the activity feed UI.
+          changes.push(`${key}: ${summarizeValue(bVal)} -> ${summarizeValue(aVal)}`);
         }
       }
 
       if (changes.length > 0 && !details) {
-        computedDetails = changes.join(', ');
+        const shown = changes.slice(0, 5).join(', ');
+        const more = changes.length > 5 ? `, +${changes.length - 5} more` : '';
+        computedDetails = `${shown}${more}`.slice(0, 300);
       }
     }
 

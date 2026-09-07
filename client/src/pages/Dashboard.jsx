@@ -374,13 +374,14 @@ export default function Dashboard() {
             <div className="activity-list">
               {recentActivities.map((a) => {
                 const { Icon, tone } = activityMeta(a.action);
+                const metaText = `${a.subject}${a.details ? ` · ${a.details}` : ''}`;
                 return (
                   <div className="activity-item" key={a.id}>
                     <div className={`activity-icon tone-${tone}`}><Icon width="16" height="16" /></div>
                     <div className="activity-body">
                       <div>
                         <div className="activity-title">{a.action}</div>
-                        <div className="activity-meta">{a.subject}{a.details ? ` · ${a.details}` : ''}</div>
+                        <div className="activity-meta" title={metaText}>{metaText}</div>
                       </div>
                       <div className="activity-time">{timeAgo(a.at)}</div>
                     </div>
