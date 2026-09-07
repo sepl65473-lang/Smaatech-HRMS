@@ -407,6 +407,13 @@
     padding:16px 18px;
     box-shadow:var(--shadow);
   }
+  /* Opt-in modifier for a card sharing a grid row with a taller sibling
+     (e.g. EmployeeProfile's Leave history next to Attendance history) —
+     stretches to match the row height and centers its empty state instead
+     of leaving blank page background below a short card. */
+  .card.row-fill{display:flex; flex-direction:column; align-self:stretch}
+  .card.row-fill .empty{flex:1; display:flex; align-items:center; justify-content:center; margin:0}
+  .card.row-fill .table-scroll{flex:1}
   .card-head{
     display:flex;
     align-items:flex-end;

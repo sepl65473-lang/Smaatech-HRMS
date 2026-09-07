@@ -343,7 +343,7 @@ export default function EmployeeProfile() {
 
           <div className="grid" style={{ alignItems: 'start', marginTop: 18 }}>
             {/* Leave history */}
-            <div className="card">
+            <div className="card row-fill">
               <div className="card-head">
                 <div>
                   <div className="card-title">Leave history</div>
@@ -374,7 +374,7 @@ export default function EmployeeProfile() {
             </div>
 
             {/* Attendance history */}
-            <div className="card">
+            <div className="card row-fill">
               <div className="card-head">
                 <div>
                   <div className="card-title">Attendance history</div>
