@@ -49,23 +49,52 @@ export function initFaceEngine() {
 }
 
 function jpegBufferToTensor(buffer, tf) {
-  const { width, height, data } = jpeg.decode(buffer, { useTArray: true });
+  const decoded = jpeg.decode(buffer, { useTArray: true });
+  const { width, height, data } = decoded;
+
+  if (width < 120 || height < 120) {
+    return { error: 'LOW_RESOLUTION' };
+  }
+
+  // Quality & PAD variance heuristic check: compute mean intensity and variance
+  let sum = 0;
+  const totalPixels = width * height;
+  for (let i = 0; i < data.length; i += 4) {
+    // Luminance approximation: 0.299R + 0.587G + 0.114B
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    sum += lum;
+  }
+  const mean = sum / totalPixels;
+  let varianceSum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    varianceSum += (lum - mean) ** 2;
+  }
+  const variance = varianceSum / totalPixels;
+  if (variance < 20) {
+    return { error: 'LOW_QUALITY' };
+  }
+
   const rgb = new Uint8Array(width * height * 3);
   for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
     rgb[j] = data[i];
     rgb[j + 1] = data[i + 1];
     rgb[j + 2] = data[i + 2];
   }
-  return tf.tensor3d(rgb, [height, width, 3]);
+  return { tensor: tf.tensor3d(rgb, [height, width, 3]) };
 }
 
-// Returns { descriptor: number[] } or { error: 'NO_FACE' | 'MULTIPLE_FACES' }.
+// Returns { descriptor: number[] } or { error: 'NO_FACE' | 'MULTIPLE_FACES' | 'LOW_RESOLUTION' | 'LOW_QUALITY' }.
 export async function extractDescriptor(jpegBuffer) {
   const modules = await initFaceEngine();
   if (!modules || !tfModule || !faceapiModule) {
     return { error: 'ENGINE_NOT_READY' };
   }
-  const tensor = jpegBufferToTensor(jpegBuffer, tfModule);
+  const prepared = jpegBufferToTensor(jpegBuffer, tfModule);
+  if (prepared.error) {
+    return { error: prepared.error };
+  }
+  const { tensor } = prepared;
   try {
     const results = await faceapiModule
       .detectAllFaces(tensor, new faceapiModule.TinyFaceDetectorOptions())
@@ -104,6 +133,8 @@ export function faceFailureMessage(code) {
     case 'NOT_ENROLLED': return 'Face not enrolled yet — enroll your face before checking in.';
     case 'NO_FACE': return 'No face detected in the photo — try again with better lighting, facing the camera directly.';
     case 'MULTIPLE_FACES': return 'More than one face detected — make sure only you are in frame.';
+    case 'LOW_RESOLUTION': return 'Photo resolution is too low for secure biometric matching.';
+    case 'LOW_QUALITY': return 'Image quality or lighting is insufficient — please capture a clear, well-lit photo.';
     case 'FACE_NOT_MATCHED': return "That doesn't match your enrolled face.";
     case 'NO_PHOTO': return 'A photo is required to check in.';
     default: return 'Face verification failed.';

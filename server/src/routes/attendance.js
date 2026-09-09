@@ -364,6 +364,11 @@ async function handlePunch(req, res, direction) {
     }
     const match = matchDescriptor(extraction.descriptor, enrolled.descriptor);
     if (!match.matched) {
+      await logAudit(req, {
+        action: 'Failed face verification attempt',
+        subject: row.name || String(req.auth.sub),
+        details: `Face mismatch during ${direction === 'in' ? 'check-in' : 'check-out'} (distance: ${match.distance.toFixed(2)})`,
+      });
       return res.status(400).json({ error: { code: 'FACE_NOT_MATCHED', message: faceFailureMessage('FACE_NOT_MATCHED') } });
     }
     faceResult = match;
