@@ -64,6 +64,25 @@ router.post('/', requireRole('HR Manager'), async (req, res) => {
 
 const RESTRICTED_FIELDS = ['salary', 'role', 'dept', 'loc', 'status', 'managerId', 'joinDate', 'rating', 'employmentType', 'company', 'email'];
 
+router.post('/bulk-update', requireRole('HR Manager'), async (req, res) => {
+  const { ids, patch } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length || !patch) {
+    return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'ids array and patch body required.' } });
+  }
+  const scope = { _id: { $in: ids }, ...companyFilter(req) };
+  const allowedPatch = {};
+  RESTRICTED_FIELDS.forEach((f) => {
+    if (patch[f] !== undefined) allowedPatch[f] = patch[f];
+  });
+  const result = await Employee.updateMany(scope, allowedPatch);
+  await logAudit(req, {
+    action: 'Bulk employees updated',
+    subject: `${result.modifiedCount} employees`,
+    details: Object.entries(allowedPatch).map(([k, v]) => `${k}: ${v}`).join(', '),
+  });
+  res.json({ updatedCount: result.modifiedCount });
+});
+
 router.patch('/:id', async (req, res) => {
   const isSelf = req.auth.employeeId && String(req.auth.employeeId) === String(req.params.id);
   const isHR = ['HR Director', 'HR Manager'].includes(req.auth.role);
@@ -85,7 +104,16 @@ router.patch('/:id', async (req, res) => {
 
   try {
     const updated = await Employee.findByIdAndUpdate(req.params.id, patchBody, { new: true });
-    await logAudit(req, { action: 'Employee updated', subject: updated.name, before, after: updated });
+    
+    // Construct specific audit detail summary for sensitive field changes
+    const changes = [];
+    if (before.salary !== updated.salary) changes.push(`Salary: ₹${before.salary} -> ₹${updated.salary}`);
+    if (before.role !== updated.role) changes.push(`Role: ${before.role} -> ${updated.role}`);
+    if (before.dept !== updated.dept) changes.push(`Dept: ${before.dept} -> ${updated.dept}`);
+    if (before.status !== updated.status) changes.push(`Status: ${before.status} -> ${updated.status}`);
+    const details = changes.length ? changes.join(' | ') : 'Profile details updated';
+
+    await logAudit(req, { action: 'Employee updated', subject: updated.name, details, before, after: updated });
     res.json(updated);
   } catch (err) {
     if (err.code === 11000) {
@@ -98,8 +126,15 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
   const before = await Employee.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (before) {
-    await Employee.findByIdAndDelete(req.params.id);
-    await logAudit(req, { action: 'Employee removed', subject: before.name, before });
+    const soft = req.query.soft === 'true';
+    if (soft) {
+      before.status = 'terminated';
+      await before.save();
+      await logAudit(req, { action: 'Employee soft-deleted (terminated)', subject: before.name, before });
+    } else {
+      await Employee.findByIdAndDelete(req.params.id);
+      await logAudit(req, { action: 'Employee removed', subject: before.name, before });
+    }
   }
   res.json({ id: req.params.id });
 });

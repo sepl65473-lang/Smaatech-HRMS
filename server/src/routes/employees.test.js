@@ -97,4 +97,31 @@ describe('cross-tenant isolation on /employees/:id', () => {
     const listB = await request(app).get('/api/v1/employees').set('Authorization', `Bearer ${tokenB}`);
     expect(listB.body.some((e) => e.id === empId)).toBe(false);
   });
+
+  it('supports bulk update and soft delete (termination)', async () => {
+    const tokenA = await seedCompany('CompanyA');
+
+    const created = await request(app)
+      .post('/api/v1/employees')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: 'Bulk Employee', role: 'Engineer', dept: 'Engineering', loc: 'Remote' });
+    const empId = created.body.id;
+
+    // Test bulk update
+    const bulkRes = await request(app)
+      .post('/api/v1/employees/bulk-update')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ ids: [empId], patch: { status: 'remote', dept: 'Engineering' } });
+    expect(bulkRes.status).toBe(200);
+    expect(bulkRes.body.updatedCount).toBe(1);
+
+    // Test soft delete
+    const softDelRes = await request(app)
+      .delete(`/api/v1/employees/${empId}?soft=true`)
+      .set('Authorization', `Bearer ${tokenA}`);
+    expect(softDelRes.status).toBe(200);
+
+    const softDeletedEmp = await Employee.findById(empId);
+    expect(softDeletedEmp.status).toBe('terminated');
+  });
 });
