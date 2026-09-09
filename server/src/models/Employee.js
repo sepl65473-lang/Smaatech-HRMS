@@ -8,6 +8,11 @@ const employeeSchema = new mongoose.Schema({
   email: String,
   phone: String,
   status: { type: String, default: 'active' }, // active | remote | on-leave
+  onboardingStatus: {
+    type: String,
+    enum: ['Created', 'Account Created', 'Invited', 'Activated', 'First Login', 'Profile Completed', 'HR Verified', 'Active'],
+    default: 'Created',
+  },
   joinDate: String,
   salary: Number,
   rating: Number,

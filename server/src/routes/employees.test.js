@@ -154,4 +154,51 @@ describe('cross-tenant isolation on /employees/:id', () => {
     expect(updatedUser.name).toBe('Updated Employee Name');
     expect(updatedUser.email).toBe('updated.emp@companya.com');
   });
+
+  it('tracks onboardingStatus lifecycle and supports HR verification', async () => {
+    const tokenA = await seedCompany('CompanyA');
+
+    // 1. Employee created defaults to onboardingStatus: Created
+    const created = await request(app)
+      .post('/api/v1/employees')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: 'Onboarding New Hire', role: 'Developer', dept: 'Engineering', loc: 'HQ', email: 'newhire@companya.com' });
+    expect(created.status).toBe(201);
+    expect(created.body.onboardingStatus).toBe('Created');
+    const empId = created.body.id;
+
+    // 2. Self-service profile edit advances status to Profile Completed
+    const selfUser = await User.create({
+      name: 'Onboarding New Hire',
+      email: 'newhire@companya.com',
+      passwordHash: await bcrypt.hash('Pass12345', 10),
+      role: 'Employee',
+      employeeId: empId,
+      company: 'CompanyA',
+      active: true,
+    });
+    const selfLogin = await request(app).post('/api/v1/auth/login').send({ email: 'newhire@companya.com', password: 'Pass12345' });
+    const selfToken = selfLogin.body.accessToken;
+
+    const selfPatch = await request(app)
+      .patch(`/api/v1/employees/${empId}`)
+      .set('Authorization', `Bearer ${selfToken}`)
+      .send({ phone: '+91 9999999999', personalEmail: 'personal@example.com' });
+    expect(selfPatch.status).toBe(200);
+    expect(selfPatch.body.onboardingStatus).toBe('Profile Completed');
+
+    // 3. HR Manager verifies profile -> status becomes HR Verified and active
+    const verifyRes = await request(app)
+      .post(`/api/v1/employees/${empId}/verify-onboarding`)
+      .set('Authorization', `Bearer ${tokenA}`);
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.onboardingStatus).toBe('HR Verified');
+    expect(verifyRes.body.status).toBe('active');
+
+    // 4. Non-HR role cannot invoke verify-onboarding
+    const nonHrVerify = await request(app)
+      .post(`/api/v1/employees/${empId}/verify-onboarding`)
+      .set('Authorization', `Bearer ${selfToken}`);
+    expect(nonHrVerify.status).toBe(403);
+  });
 });

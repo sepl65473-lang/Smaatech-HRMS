@@ -120,6 +120,12 @@ router.post('/', requireRole(), async (req, res) => {
       userId: created._id,
     });
 
+    if (empId) {
+      await Employee.findByIdAndUpdate(empId, {
+        onboardingStatus: emailRes.sent ? 'Invited' : 'Account Created',
+      });
+    }
+
     await logAudit(req, {
       action: 'Login created',
       subject: created.name,
@@ -161,6 +167,12 @@ router.post('/:id/resend-welcome', requireRole(), async (req, res) => {
     userId: target._id,
     idempotencyKey: `${req.auth.company}_welcome_${target.email}_${Date.now()}`,
   });
+
+  if (target.employeeId) {
+    await Employee.findByIdAndUpdate(target.employeeId, {
+      onboardingStatus: emailRes.sent ? 'Invited' : 'Account Created',
+    });
+  }
 
   await logAudit(req, {
     action: 'Welcome email resent',

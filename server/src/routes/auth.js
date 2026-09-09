@@ -76,6 +76,13 @@ async function recordLogin(user, req) {
   user.lastLoginAt = new Date();
   user.lastLoginIp = req.ip;
   await user.save();
+  if (user.employeeId) {
+    const emp = await Employee.findById(user.employeeId);
+    if (emp && ['Created', 'Account Created', 'Invited'].includes(emp.onboardingStatus)) {
+      emp.onboardingStatus = 'Activated';
+      await emp.save();
+    }
+  }
 }
 
 // Returns true if a 2FA challenge was sent and the caller must stop (a
@@ -373,6 +380,14 @@ router.post('/change-password', requireAuth, validate(changePasswordSchema), asy
   user.passwordHash = await bcrypt.hash(newPassword, 10);
   user.mustChangePassword = false;
   await user.save();
+
+  if (user.employeeId) {
+    const emp = await Employee.findById(user.employeeId);
+    if (emp && ['Activated', 'Invited', 'Account Created', 'Created'].includes(emp.onboardingStatus)) {
+      emp.onboardingStatus = 'First Login';
+      await emp.save();
+    }
+  }
 
   // Revoke every other live session — if the old password had leaked, this
   // signs out anything already using it, leaving only this session active.

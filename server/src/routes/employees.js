@@ -63,7 +63,7 @@ router.post('/', requireRole('HR Manager'), async (req, res) => {
   }
 });
 
-const RESTRICTED_FIELDS = ['salary', 'role', 'dept', 'loc', 'status', 'managerId', 'joinDate', 'rating', 'employmentType', 'company', 'email'];
+const RESTRICTED_FIELDS = ['salary', 'role', 'dept', 'loc', 'status', 'managerId', 'joinDate', 'rating', 'employmentType', 'company', 'email', 'onboardingStatus'];
 
 router.post('/bulk-update', requireRole('HR Manager'), async (req, res) => {
   const { ids, patch } = req.body || {};
@@ -101,6 +101,10 @@ router.patch('/:id', async (req, res) => {
     RESTRICTED_FIELDS.forEach((field) => {
       delete patchBody[field];
     });
+    // On self-service profile update after first login/activation, advance to Profile Completed
+    if (['Created', 'Account Created', 'Invited', 'Activated', 'First Login'].includes(before.onboardingStatus)) {
+      patchBody.onboardingStatus = 'Profile Completed';
+    }
   }
 
   try {
@@ -120,6 +124,7 @@ router.patch('/:id', async (req, res) => {
     if (before.role !== updated.role) changes.push(`Role: ${before.role} -> ${updated.role}`);
     if (before.dept !== updated.dept) changes.push(`Dept: ${before.dept} -> ${updated.dept}`);
     if (before.status !== updated.status) changes.push(`Status: ${before.status} -> ${updated.status}`);
+    if (before.onboardingStatus !== updated.onboardingStatus) changes.push(`Onboarding: ${before.onboardingStatus || 'Created'} -> ${updated.onboardingStatus}`);
     const details = changes.length ? changes.join(' | ') : 'Profile details updated';
 
     await logAudit(req, { action: 'Employee updated', subject: updated.name, details, before, after: updated });
@@ -130,6 +135,27 @@ router.patch('/:id', async (req, res) => {
     }
     throw err;
   }
+});
+
+router.post('/:id/verify-onboarding', requireRole('HR Manager'), async (req, res) => {
+  const before = await Employee.findOne({ _id: req.params.id, ...companyFilter(req) });
+  if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Employee not found.' } });
+
+  const updated = await Employee.findByIdAndUpdate(
+    req.params.id,
+    { onboardingStatus: 'HR Verified', status: 'active' },
+    { new: true },
+  );
+
+  await logAudit(req, {
+    action: 'Employee onboarding verified',
+    subject: updated.name,
+    details: `Onboarding Status: HR Verified | Employment Status: Active`,
+    before,
+    after: updated,
+  });
+
+  res.json(updated);
 });
 
 router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
