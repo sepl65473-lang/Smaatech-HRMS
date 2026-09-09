@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import Attendance from '../models/Attendance.js';
+import Employee from '../models/Employee.js';
 import FaceDescriptor from '../models/FaceDescriptor.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { evaluateGeofence } from '../lib/geofence.js';
@@ -41,10 +42,39 @@ async function findSharedDeviceFlag(deviceId, empId, rowId) {
   return other ? 'shared-device' : null;
 }
 
+async function ensureTodaysAttendanceRow(empId, company) {
+  if (!empId) return null;
+  const date = todayISO();
+  let row = await Attendance.findOne({ empId, date });
+  if (!row) {
+    const emp = await Employee.findById(empId);
+    if (emp) {
+      try {
+        row = await Attendance.create({
+          empId: emp._id,
+          name: emp.name,
+          dept: emp.dept,
+          date,
+          status: emp.status === 'on-leave' ? 'leave' : 'absent',
+          company: emp.company || company || 'Smaatech',
+        });
+      } catch (err) {
+        if (err.code === 11000) {
+          row = await Attendance.findOne({ empId, date });
+        }
+      }
+    }
+  }
+  return row;
+}
+
 const router = Router();
 router.use(requireAuth);
 
 router.get('/', async (req, res) => {
+  if (req.auth?.employeeId) {
+    await ensureTodaysAttendanceRow(req.auth.employeeId, req.auth.company);
+  }
   const isManager = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
   const scope = { ...companyFilter(req), ...(isManager ? {} : { empId: req.auth.employeeId }) };
   const { page, limit, date, from, to } = req.query;
@@ -133,7 +163,10 @@ router.post('/qr-checkin', async (req, res) => {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Your login is not linked to an employee profile.' } });
   }
 
-  const row = await Attendance.findOne({ empId: req.auth.employeeId, date: todayISO(), ...companyFilter(req) });
+  let row = await Attendance.findOne({ empId: req.auth.employeeId, date: todayISO(), ...companyFilter(req) });
+  if (!row) {
+    row = await ensureTodaysAttendanceRow(req.auth.employeeId, req.auth.company);
+  }
   if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: "Today's attendance row not found." } });
 
   const direction = !row.checkIn ? 'in' : (!row.checkOut ? 'out' : null);
@@ -235,11 +268,13 @@ router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
     if (!patch.checkInDetails) patch.checkInDetails = 'HR Manual Override';
     if (!patch.checkInDevice) patch.checkInDevice = device;
     if (!patch.checkInIp) patch.checkInIp = ip;
+    if (!patch.checkInDeviceId) patch.checkInDeviceId = 'HR-Console';
   }
   if (patch.checkOut && !before.checkOut) {
     if (!patch.checkOutDetails) patch.checkOutDetails = 'HR Manual Override';
     if (!patch.checkOutDevice) patch.checkOutDevice = device;
     if (!patch.checkOutIp) patch.checkOutIp = ip;
+    if (!patch.checkOutDeviceId) patch.checkOutDeviceId = 'HR-Console';
   }
 
   const updated = await Attendance.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, patch, { new: true });
@@ -274,6 +309,16 @@ function gpsFailureMessage(result) {
 async function handlePunch(req, res, direction) {
   const row = await Attendance.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attendance row not found.' } });
+
+  if (direction === 'in' && row.checkIn) {
+    return res.status(400).json({ error: { code: 'ALREADY_CHECKED_IN', message: 'You have already checked in today.' } });
+  }
+  if (direction === 'out' && !row.checkIn) {
+    return res.status(400).json({ error: { code: 'NOT_CHECKED_IN', message: 'You must check in before checking out.' } });
+  }
+  if (direction === 'out' && row.checkOut) {
+    return res.status(400).json({ error: { code: 'ALREADY_CHECKED_OUT', message: 'You have already checked out today.' } });
+  }
 
   const isAdmin = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
   const isOwnRow = req.auth.employeeId === String(row.empId);
@@ -329,7 +374,7 @@ async function handlePunch(req, res, direction) {
   const hasGps = gpsResult?.inside || hasGpsCoords;
   const details = faceResult
     ? (hasGpsCoords ? 'Face + GPS Verified' : 'Face Verified')
-    : (hasGpsCoords ? 'GPS Verified' : 'Manual Punch');
+    : (hasGpsCoords ? 'GPS Verified' : (isAdmin ? 'HR Manual Punch' : 'Manual Punch'));
   const verification = {
     face: faceResult ? { matched: true, confidence: Math.round(faceResult.confidence), distance: faceResult.distance } : null,
     gps: gpsResult || (hasGpsCoords ? { inside: true, distance: 0 } : null),
@@ -338,8 +383,9 @@ async function handlePunch(req, res, direction) {
 
   const device = parseDeviceInfo(req.headers['user-agent']);
   const ip = clientIp(req);
+  const effectiveDeviceId = deviceId || (isAdmin ? 'HR-Console' : null);
   const address = hasGpsCoords ? await reverseGeocode(lat, lng) : null;
-  const sharedDeviceFlag = isSelfService ? await findSharedDeviceFlag(deviceId, row.empId, row._id) : null;
+  const sharedDeviceFlag = isSelfService ? await findSharedDeviceFlag(effectiveDeviceId, row.empId, row._id) : null;
   const anomalyFlags = sharedDeviceFlag
     ? [...new Set([...(row.anomalyFlags || []), sharedDeviceFlag])]
     : row.anomalyFlags;
@@ -358,7 +404,7 @@ async function handlePunch(req, res, direction) {
         checkInDetails: details,
         checkInVerification: verification,
         checkInAccuracy: accuracy,
-        checkInDeviceId: deviceId,
+        checkInDeviceId: effectiveDeviceId,
         checkInDevice: device,
         checkInIp: ip,
         checkInPhotoRef: photoRef,
@@ -375,7 +421,7 @@ async function handlePunch(req, res, direction) {
         checkOutDetails: details,
         checkOutVerification: verification,
         checkOutAccuracy: accuracy,
-        checkOutDeviceId: deviceId,
+        checkOutDeviceId: effectiveDeviceId,
         checkOutDevice: device,
         checkOutIp: ip,
         checkOutPhotoRef: photoRef,

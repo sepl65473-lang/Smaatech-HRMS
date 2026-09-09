@@ -17,7 +17,7 @@ export default function MyDashboard() {
   const {
     currentUser, employees, leaves, attendance, payroll, settings, reviews,
     addLeave, checkIn, checkOut, audit, submitSelfReview, toast,
-    enrollFace, faceEnrolled, qrCheckIn,
+    enrollFace, faceEnrolled, qrCheckIn, refreshAttendance,
   } = useHRMS();
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -395,7 +395,19 @@ export default function MyDashboard() {
                 )}
               </div>
             </div>
-          ) : <div className="empty">No attendance record yet.</div>}
+          ) : (
+            <div className="empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '16px 0' }}>
+              <div>No attendance record created yet for today.</div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button type="button" className="mini-btn approve" onClick={() => refreshAttendance()}>
+                  Initialize Today's Row
+                </button>
+                <button type="button" className="mini-btn" onClick={() => setQrModalOpen(true)}>
+                  Scan Office QR
+                </button>
+              </div>
+            </div>
+          )}
 
           {recentAttendance.length > 0 && (
             <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line)' }}>

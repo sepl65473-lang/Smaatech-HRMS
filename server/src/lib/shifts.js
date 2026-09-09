@@ -64,7 +64,11 @@ export function isHalfDay(checkInTime, checkOutTime, shift) {
 // Matches the frontend's nowTime() (src/context/HRMSContext.jsx), pinned to
 // IST explicitly since the server may not run in the same timezone as the office.
 export function nowTimeIST() {
-  return new Date().toLocaleTimeString('en-IN', {
-    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
-  });
+  const formatted = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kolkata',
+  }).format(new Date());
+  const parts = formatted.split(':');
+  const h = String(Number(parts[0]) % 24).padStart(2, '0');
+  const m = parts[1] || '00';
+  return `${h}:${m}`;
 }

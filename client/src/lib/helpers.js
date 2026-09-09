@@ -24,7 +24,9 @@ export const formatINR = (n = 0) =>
 export const uid = (prefix = 'id') =>
   `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
-export const todayISO = () => new Date().toISOString().slice(0, 10);
+export const todayISO = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date());
 
 export const formatDate = (iso) => {
   if (!iso) return '—';
