@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import Employee from '../models/Employee.js';
+import User from '../models/User.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { logAudit } from '../lib/auditLogger.js';
 
@@ -105,6 +106,14 @@ router.patch('/:id', async (req, res) => {
   try {
     const updated = await Employee.findByIdAndUpdate(req.params.id, patchBody, { new: true });
     
+    // Auto-sync Employee info (Name, Email) to linked User login account
+    if (before.name !== updated.name || (updated.email && before.email !== updated.email)) {
+      const userPatch = {};
+      if (before.name !== updated.name) userPatch.name = updated.name.trim();
+      if (updated.email && before.email !== updated.email) userPatch.email = String(updated.email).toLowerCase().trim();
+      await User.findOneAndUpdate({ employeeId: updated._id }, userPatch);
+    }
+
     // Construct specific audit detail summary for sensitive field changes
     const changes = [];
     if (before.salary !== updated.salary) changes.push(`Salary: ₹${before.salary} -> ₹${updated.salary}`);

@@ -371,6 +371,7 @@ router.post('/change-password', requireAuth, validate(changePasswordSchema), asy
   }
 
   user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.mustChangePassword = false;
   await user.save();
 
   // Revoke every other live session — if the old password had leaked, this

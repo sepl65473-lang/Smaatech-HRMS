@@ -72,6 +72,7 @@ export const usersApi = {
   // revoking someone ELSE's active sessions (server/src/routes/users.js).
   sessions: (userId) => apiFetch(`/users/${userId}/sessions`),
   revokeSession: (userId, sessionId) => apiFetch(`/users/${userId}/sessions/${sessionId}`, { method: 'DELETE' }),
+  resendWelcome: (userId) => apiFetch(`/users/${userId}/resend-welcome`, { method: 'POST' }),
 };
 
 export const leavesApi = {

@@ -124,4 +124,34 @@ describe('cross-tenant isolation on /employees/:id', () => {
     const softDeletedEmp = await Employee.findById(empId);
     expect(softDeletedEmp.status).toBe('terminated');
   });
+
+  it('automatically syncs Employee name and email updates to linked User account', async () => {
+    const tokenA = await seedCompany('CompanyA');
+
+    const createdEmp = await Employee.create({
+      name: 'Original Employee',
+      email: 'orig.emp@companya.com',
+      company: 'CompanyA',
+    });
+
+    const linkedUser = await User.create({
+      name: 'Original Employee',
+      email: 'orig.emp@companya.com',
+      passwordHash: 'hash',
+      role: 'Employee',
+      employeeId: createdEmp._id,
+      company: 'CompanyA',
+    });
+
+    const patchRes = await request(app)
+      .patch(`/api/v1/employees/${createdEmp._id}`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: 'Updated Employee Name', email: 'updated.emp@companya.com' });
+
+    expect(patchRes.status).toBe(200);
+
+    const updatedUser = await User.findById(linkedUser._id);
+    expect(updatedUser.name).toBe('Updated Employee Name');
+    expect(updatedUser.email).toBe('updated.emp@companya.com');
+  });
 });

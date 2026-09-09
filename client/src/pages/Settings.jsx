@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserForm from '../components/UserForm';
+import UserCreationResultModal from '../components/UserCreationResultModal';
 import FaceEnrollModal from '../components/FaceEnrollModal';
 import Modal from '../components/Modal';
 import AuditLogsTab from '../components/AuditLogsTab';
@@ -91,7 +92,7 @@ function ChipManager({ label, sub, items, onAdd, onRemove, placeholder }) {
 export default function Settings() {
   const {
     settings, employees, currentUser, updateSettings, toggleSetting, resetDatabase, toast, enrollFace,
-    users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount,
+    users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount, resendUserWelcomeEmail,
     masterCategories, masterValues, addMasterValue, deleteMasterValue,
     loadSessions, revokeSession, revokeOtherSessions, loadUserSessions, revokeUserSession,
   } = useHRMS();
@@ -106,6 +107,7 @@ export default function Settings() {
   const [sessionsUser, setSessionsUser] = useState(null);
   const [userSessions, setUserSessions] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [creationResult, setCreationResult] = useState(null);
 
   // Notification Template states
   const [templateChannel, setTemplateChannel] = useState('email');
@@ -163,12 +165,22 @@ export default function Settings() {
   const openEditUser = (u) => { setEditingUser(u); setUserFormOpen(true); };
   const saveUser = async (user) => {
     try {
-      if (editingUser) await updateUserAccount(editingUser.id, user);
-      else await addUserAccount(user);
+      if (editingUser) {
+        await updateUserAccount(editingUser.id, user);
+      } else {
+        const created = await addUserAccount(user);
+        setCreationResult(created);
+      }
       setUserFormOpen(false);
     } catch {
-      // addUserAccount/updateUserAccount already surfaced a toast; keep the
-      // modal open so the HR Director can fix the input (e.g. duplicate email).
+      // addUserAccount/updateUserAccount already surfaced a toast
+    }
+  };
+  const handleResendWelcome = async (u) => {
+    try {
+      await resendUserWelcomeEmail(u.id);
+    } catch {
+      /* toast handled in context */
     }
   };
   const removeUser = async (id) => {
@@ -590,12 +602,17 @@ export default function Settings() {
         <div className="table-scroll">
           <table className="table">
             <thead>
-              <tr><th>Name</th><th>Role</th><th>Email</th><th>Scope</th><th>Last login</th><th>Face login</th><th style={{ textAlign: 'right' }}>Action</th></tr>
+              <tr><th>Name</th><th>Status</th><th>Role</th><th>Email</th><th>Scope</th><th>Last login</th><th style={{ textAlign: 'right' }}>Action</th></tr>
             </thead>
             <tbody>
               {users.map((u) => (
                 <tr key={u.id}>
                   <td>{u.name}{u.id === currentUser.id ? ' (you)' : ''}</td>
+                  <td>
+                    <span className={`state-badge ${u.status === 'Inactive' || u.status === 'Suspended' ? 'rejected' : u.status === 'Pending' ? 'pending' : 'approved'}`}>
+                      {u.status || 'Active'}
+                    </span>
+                  </td>
                   <td><span className="state-badge approved">{u.role}</span></td>
                   <td className="mono">{u.email}</td>
                   <td>{ROLE_SCOPE[u.role] || ''}</td>
@@ -605,16 +622,16 @@ export default function Settings() {
                       <span className="state-badge rejected" style={{ marginLeft: 8 }}>Locked</span>
                     )}
                   </td>
-                  <td>
-                    <span className="muted-text">Managed on server</span>
-                  </td>
                   <td style={{ textAlign: 'right' }}>
                     <div className="row-actions">
+                      <button className="mini-btn" onClick={() => handleResendWelcome(u)}>
+                        Resend email
+                      </button>
                       <button className="mini-btn" onClick={() => openUserSessions(u)}>
                         Sessions
                       </button>
                       <button className="mini-btn" onClick={() => setFaceEnrollUser(u)}>
-                        Enroll / re-enroll face
+                        Face
                       </button>
                       <button className="icon-btn sm" title="Edit" onClick={() => openEditUser(u)}>
                         <IconEdit width="14" height="14" />
@@ -691,6 +708,16 @@ export default function Settings() {
           ))}
         </div>
       </Modal>
+
+      <UserCreationResultModal
+        open={Boolean(creationResult)}
+        result={creationResult}
+        onClose={() => setCreationResult(null)}
+        onRetry={async (userId) => {
+          const res = await resendUserWelcomeEmail(userId);
+          setCreationResult((curr) => curr ? { ...curr, emailStatus: res.emailStatus, emailError: res.emailError } : null);
+        }}
+      />
 
       <ConfirmDialog
         open={Boolean(confirmRemoveUser)}

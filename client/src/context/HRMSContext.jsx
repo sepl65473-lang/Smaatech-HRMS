@@ -517,6 +517,17 @@ export function HRMSProvider({ children }) {
     toast('info', `<strong>${user ? user.name : 'Login'}</strong> removed`);
   };
 
+  const resendUserWelcomeEmail = async (userId) => {
+    try {
+      const res = await usersApi.resendWelcome(userId);
+      toast('success', `Welcome email trigger processed (${res.emailStatus})`);
+      return res;
+    } catch (err) {
+      toast('error', err.message || 'Failed to resend welcome email.');
+      throw err;
+    }
+  };
+
   // ════════════════════════════════════════════════════════════
   //  LEAVE — CRUD + approve / decline
   // ════════════════════════════════════════════════════════════
@@ -1540,7 +1551,7 @@ export function HRMSProvider({ children }) {
     addEmployee, updateEmployee, deleteEmployee, importEmployees,
     importHolidays,
     // users (real login accounts, HR Director only)
-    users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount,
+    users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount, resendUserWelcomeEmail,
     // leave
     addLeave, approveLeave, declineLeave, deleteLeave, bulkApproveLeave, bulkDeclineLeave,
     // attendance

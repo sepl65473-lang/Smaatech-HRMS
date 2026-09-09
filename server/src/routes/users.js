@@ -7,6 +7,7 @@ import RefreshToken from '../models/RefreshToken.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from '../lib/passwordPolicy.js';
+import { sendWelcomeEmail } from '../lib/mailer.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -105,16 +106,74 @@ router.post('/', requireRole(), async (req, res) => {
       role,
       initials: initials || undefined,
       employeeId: empId,
+      status: 'Active',
+      mustChangePassword: true,
       company: req.auth.company,
     });
-    await logAudit(req, { action: 'Login created', subject: created.name, after: created });
-    res.status(201).json(created);
+
+    const emailRes = await sendWelcomeEmail({
+      toEmail: normEmail,
+      userName: created.name,
+      role: created.role,
+      tempPassword: password,
+      company: req.auth.company,
+      userId: created._id,
+    });
+
+    await logAudit(req, {
+      action: 'Login created',
+      subject: created.name,
+      details: `Account Status: Active | Welcome Email: ${emailRes.sent ? 'SENT' : 'FAILED'}`,
+      after: created,
+    });
+
+    res.status(201).json({
+      ...created.toJSON(),
+      emailStatus: emailRes.sent ? 'SENT' : 'FAILED',
+      emailError: emailRes.error || null,
+    });
   } catch (err) {
     if (err.code === 11000) {
       return res.status(409).json({ error: { code: 'EMAIL_IN_USE', message: 'A login already exists for that email.' } });
     }
     throw err;
   }
+});
+
+router.post('/:id/resend-welcome', requireRole(), async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+  }
+  const target = await User.findOne({ _id: req.params.id, ...companyFilter(req) });
+  if (!target) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+
+  const tempPassword = req.body?.tempPassword || `Pass#${Math.floor(100000 + Math.random() * 900000)}`;
+  target.passwordHash = await bcrypt.hash(tempPassword, 10);
+  target.mustChangePassword = true;
+  await target.save();
+
+  const emailRes = await sendWelcomeEmail({
+    toEmail: target.email,
+    userName: target.name,
+    role: target.role,
+    tempPassword,
+    company: req.auth.company,
+    userId: target._id,
+    idempotencyKey: `${req.auth.company}_welcome_${target.email}_${Date.now()}`,
+  });
+
+  await logAudit(req, {
+    action: 'Welcome email resent',
+    subject: target.name,
+    details: `Delivery Status: ${emailRes.sent ? 'SENT' : 'FAILED'}`,
+  });
+
+  res.json({
+    ok: true,
+    emailStatus: emailRes.sent ? 'SENT' : 'FAILED',
+    emailError: emailRes.error || null,
+    tempPassword,
+  });
 });
 
 router.patch('/:id', requireRole(), async (req, res) => {

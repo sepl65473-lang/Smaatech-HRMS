@@ -45,3 +45,50 @@ export async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
     html: `<p>Your verification code for <strong>${purpose}</strong> is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px;">${otp}</p><p>It expires in 10 minutes. If you didn't request this, you can ignore this email.</p>`,
   });
 }
+
+export async function sendWelcomeEmail({ toEmail, userName, role, tempPassword, company = 'Smaatech', userId = null, idempotencyKey = '' }) {
+  const EmailLog = (await import('../models/EmailLog.js')).default;
+  const { generateWelcomeEmail } = await import('./templates/welcomeEmail.js');
+
+  const key = idempotencyKey || `${company}_welcome_${toEmail}`;
+  if (key) {
+    const existing = await EmailLog.findOne({ company, idempotencyKey: key, status: 'SENT' });
+    if (existing) {
+      console.log(`[Mailer] Duplicate welcome email skipped via idempotency key: ${key}`);
+      return { sent: true, idempotent: true, log: existing };
+    }
+  }
+
+  const { subject, text, html } = generateWelcomeEmail({ userName, role, tempPassword, company });
+
+  try {
+    if (process.env.BREVO_API_KEY && process.env.SMTP_USER) {
+      await sendEmail({ to: toEmail, subject, text, html });
+    } else {
+      console.log(`[Mailer Scaffolding] Welcome email scaffolded to ${toEmail} (Brevo API key not set).`);
+    }
+
+    const log = await EmailLog.create({
+      userId,
+      email: toEmail,
+      emailType: 'WELCOME',
+      status: 'SENT',
+      idempotencyKey: key,
+      company,
+    });
+    return { sent: true, log };
+  } catch (err) {
+    console.error(`[Mailer Error] Failed to send welcome email to ${toEmail}:`, err.message);
+    const log = await EmailLog.create({
+      userId,
+      email: toEmail,
+      emailType: 'WELCOME',
+      status: 'FAILED',
+      failureReason: err.message || 'Email delivery failed',
+      idempotencyKey: key,
+      company,
+    });
+    return { sent: false, error: err.message, log };
+  }
+}
+

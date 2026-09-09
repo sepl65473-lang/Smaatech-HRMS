@@ -10,9 +10,10 @@ import { useHRMS } from '../context/HRMSContext';
 // page) but only actually needed once someone opens it — lazy-loading keeps
 // its weight out of every page's initial bundle.
 const EmployeeForm = lazy(() => import('./EmployeeForm'));
+const ChangePasswordModal = lazy(() => import('./ChangePasswordModal'));
 
 export default function Layout() {
-  const { addEmployee, loading, isAuthenticated, booting } = useHRMS();
+  const { addEmployee, loading, isAuthenticated, booting, currentUser } = useHRMS();
   const [addOpen, setAddOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -33,6 +34,8 @@ export default function Layout() {
     );
   }
 
+  const mustChange = Boolean(currentUser?.mustChangePassword);
+
   return (
     <div className={`app ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <Sidebar onNavigate={() => setSidebarOpen(false)} />
@@ -43,10 +46,21 @@ export default function Layout() {
       />
       <main>
         <Topbar onMenu={() => setSidebarOpen(true)} onAddEmployee={() => setAddOpen(true)} />
+        {mustChange && (
+          <div style={{ background: '#fffbe6', borderBottom: '1px solid #ffe58f', padding: '12px 24px', color: '#873800', fontWeight: 600, fontSize: '13px' }}>
+            ⚠️ <strong>Security Requirement:</strong> You logged in using a temporary password. You must change your password below to access HRMS.
+          </div>
+        )}
         {loading
           ? <div className="page-wrap active"><div className="loading"><div className="spinner" /><span>Loading workspace…</span></div></div>
           : <Outlet />}
       </main>
+
+      {mustChange && (
+        <Suspense fallback={null}>
+          <ChangePasswordModal open={true} onClose={() => {}} />
+        </Suspense>
+      )}
 
       <ToastHost />
 

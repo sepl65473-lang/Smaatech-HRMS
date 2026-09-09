@@ -8,6 +8,8 @@ const userSchema = new mongoose.Schema({
   initials: String,
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   active: { type: Boolean, default: true },
+  status: { type: String, enum: ['Pending', 'Active', 'Inactive', 'Suspended'], default: 'Active' },
+  mustChangePassword: { type: Boolean, default: false },
   company: { type: String, default: 'Smaatech', index: true },
   // Hashed (never plaintext) one-time code for password reset, emailed to
   // the real address — replaces the old client-simulated toast.
