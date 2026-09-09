@@ -150,4 +150,53 @@ describe('POST /leave/:id/approve and /decline — stage-based workflow', () => 
     const stored = await Leave.findById(leave.id);
     expect(stored.status).toBe('declined');
   });
+
+  it('rejects an overlapping leave request with 409 OVERLAPPING_LEAVE', async () => {
+    const { employee, tokens } = await seedScenario();
+    await fileLeave(tokens, employee);
+
+    const res = await request(app)
+      .post('/api/v1/leaves')
+      .set('Authorization', `Bearer ${tokens.employee}`)
+      .send({ empId: String(employee._id), name: 'Requesting Employee', dept: 'Engineering', type: 'casual', start: '2026-08-01', end: '2026-08-03' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('OVERLAPPING_LEAVE');
+  });
+
+  it('allows an employee to withdraw their own pending leave request via POST /leaves/:id/withdraw', async () => {
+    const { employee, tokens } = await seedScenario();
+    const leave = await fileLeave(tokens, employee);
+
+    const res = await request(app)
+      .post(`/api/v1/leaves/${leave.id}/withdraw`)
+      .set('Authorization', `Bearer ${tokens.employee}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('withdrawn');
+
+    const stored = await Leave.findById(leave.id);
+    expect(stored.status).toBe('withdrawn');
+  });
+
+  it('supports half-day leave filing with 0.5 working days', async () => {
+    const { employee, tokens } = await seedScenario();
+    const res = await request(app)
+      .post('/api/v1/leaves')
+      .set('Authorization', `Bearer ${tokens.employee}`)
+      .send({
+        empId: String(employee._id),
+        name: 'Requesting Employee',
+        dept: 'Engineering',
+        type: 'casual',
+        start: '2026-08-10',
+        end: '2026-08-10',
+        isHalfDay: true,
+        halfDayTiming: 'first-half',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.isHalfDay).toBe(true);
+    expect(res.body.workingDays).toBe(0.5);
+  });
 });

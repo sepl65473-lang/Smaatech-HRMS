@@ -6,13 +6,13 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { IconPlus, IconTrash } from '../components/Icons';
 import { formatDate, daysBetween, leaveTagClass, leaveTagLabel } from '../lib/helpers';
 
-const FILTERS = ['Pending', 'Approved', 'Declined', 'All'];
+const FILTERS = ['Pending', 'Approved', 'Declined', 'Withdrawn', 'All'];
 const DEFAULT_STAGES = ['HR Manager', 'HR Director']; // mirrors server/src/routes/leave.js's fallback
 
 export default function Leave() {
   const {
     leaves, employees, settings, currentUser, addLeave, approveLeave, declineLeave, deleteLeave,
-    bulkApproveLeave, bulkDeclineLeave,
+    withdrawLeave, bulkApproveLeave, bulkDeclineLeave,
   } = useHRMS();
   const [filter, setFilter] = useState('Pending');
   const [formOpen, setFormOpen] = useState(false);
@@ -67,21 +67,33 @@ export default function Leave() {
     Pending: leaves.filter((l) => l.status === 'pending').length,
     Approved: leaves.filter((l) => l.status === 'approved').length,
     Declined: leaves.filter((l) => l.status === 'declined').length,
+    Withdrawn: leaves.filter((l) => l.status === 'withdrawn').length,
     All: leaves.length,
   }), [leaves]);
 
   const balances = useMemo(() => employees.map((employee) => {
     const approved = leaves.filter((l) => l.empId === employee.id && l.status === 'approved');
     const pending = leaves.filter((l) => l.empId === employee.id && l.status === 'pending');
-    const used = approved.reduce((sum, l) => sum + daysBetween(l.start, l.end), 0);
-    const pendingDays = pending.reduce((sum, l) => sum + daysBetween(l.start, l.end), 0);
+    
+    const used = approved.reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
+    const pendingDays = pending.reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
+
+    const casualUsed = approved.filter((l) => l.type === 'casual').reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
+    const sickUsed = approved.filter((l) => l.type === 'sick').reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
+    const earnedUsed = approved.filter((l) => l.type === 'earned').reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
+
+    const quotaPerType = 12; // 12 days per category
     const total = Number(settings.totalLeaveDays || 24);
+
     return {
       id: employee.id,
       name: employee.name,
       dept: employee.dept,
       used,
       pendingDays,
+      casualRem: Math.max(0, quotaPerType - casualUsed),
+      sickRem: Math.max(0, quotaPerType - sickUsed),
+      earnedRem: Math.max(0, quotaPerType - earnedUsed),
       remaining: Math.max(0, total - used),
       pct: Math.min(100, Math.round((used / total) * 100)),
     };
@@ -97,8 +109,11 @@ export default function Leave() {
             style={{ '--bar-width': `${Math.max(6, b.pct)}%`, '--bar-color': b.remaining < 6 ? 'var(--red)' : 'var(--sage)' }}
           >
             <div className="balance-label">{b.name}</div>
-            <div className="balance-value">{b.remaining}<small> / 24 days</small></div>
-            <div className="balance-meta">{b.used} used - {b.pendingDays} pending - {b.dept}</div>
+            <div className="balance-value">{b.remaining}<small> / 24 days left</small></div>
+            <div className="balance-meta" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+              <span>C: {b.casualRem}d left</span> · <span>S: {b.sickRem}d left</span> · <span>E: {b.earnedRem}d left</span>
+            </div>
+            <div className="balance-meta">{b.used}d used · {b.pendingDays}d pending · {b.dept}</div>
           </div>
         ))}
       </div>
@@ -147,62 +162,79 @@ export default function Leave() {
 
         <div className="leave-list" style={{ marginTop: 16 }}>
           {list.length === 0 && <div className="empty">Nothing here.</div>}
-          {list.map((l) => (
-            <div className="leave-item" key={l.id}>
-              {l.status === 'pending' && canActOn(l) && (
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(l.id)}
-                  onChange={() => toggleSelect(l.id)}
-                  style={{ marginTop: 4 }}
-                />
-              )}
-              <Avatar name={l.name} size={42} className="leave-avatar" />
-              <div className="leave-body">
-                <div className="leave-name">
-                  {l.name}
+          {list.map((l) => {
+            const isOwner = currentUser.employeeId && String(l.empId) === String(currentUser.employeeId);
+            return (
+              <div className="leave-item" key={l.id}>
+                {l.status === 'pending' && canActOn(l) && (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(l.id)}
+                    onChange={() => toggleSelect(l.id)}
+                    style={{ marginTop: 4 }}
+                  />
+                )}
+                <Avatar name={l.name} size={42} className="leave-avatar" />
+                <div className="leave-body">
+                  <div className="leave-name">
+                    {l.name}
+                    {l.status !== 'pending' && (
+                      <span className={`state-badge ${l.status}`}>{l.status}</span>
+                    )}
+                    {l.isHalfDay && (
+                      <span className="state-badge pending" style={{ marginLeft: 6 }}>Half-Day ({l.halfDayTiming === 'second-half' ? 'PM' : 'AM'})</span>
+                    )}
+                  </div>
+                  <div className="leave-meta">
+                    {l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))} working day(s) · {formatDate(l.start)} – {formatDate(l.end)} · {l.dept}
+                  </div>
+                  {l.reason && <div className="leave-reason">“{l.reason}”</div>}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                    <span className={`leave-tag ${leaveTagClass(l.type)}`}>{leaveTagLabel(l.type)}</span>
+                    {l.attachment && (
+                      <a href={l.attachment} target="_blank" rel="noreferrer" className="muted-text" style={{ fontSize: '11.5px', textDecoration: 'underline' }}>
+                        📎 Document Attachment
+                      </a>
+                    )}
+                  </div>
+                  {l.status === 'pending' && (() => {
+                    const stages = l.approvalStages?.length ? l.approvalStages : DEFAULT_STAGES;
+                    const stage = l.currentStage || 0;
+                    const requiredRole = stages[stage] || stages[stages.length - 1];
+                    const canAct = currentUser.role === 'HR Director' || currentUser.role === requiredRole;
+                    return (
+                      <>
+                        <div className="leave-meta" style={{ marginTop: 2 }}>
+                          Stage {stage + 1} of {stages.length} — awaiting <strong>{requiredRole}</strong>
+                        </div>
+                        <div className="leave-actions">
+                          {canAct && (
+                            <>
+                              <button className="mini-btn approve" onClick={() => approveLeave(l.id)}>Approve</button>
+                              <button className="mini-btn" onClick={() => declineLeave(l.id)}>Decline</button>
+                            </>
+                          )}
+                          {(isOwner || currentUser.role === 'HR Director') && (
+                            <button className="mini-btn danger" onClick={() => withdrawLeave(l.id)}>Withdraw</button>
+                          )}
+                          {!canAct && !isOwner && currentUser.role !== 'HR Director' && (
+                            <span className="muted-text">Waiting on {requiredRole}</span>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                   {l.status !== 'pending' && (
-                    <span className={`state-badge ${l.status}`}>{l.status}</span>
+                    <div className="leave-actions">
+                      <button className="mini-btn danger" onClick={() => setConfirm(l)}>
+                        <IconTrash width="12" height="12" /> Delete
+                      </button>
+                    </div>
                   )}
                 </div>
-                <div className="leave-meta">
-                  {daysBetween(l.start, l.end)} days · {formatDate(l.start)} – {formatDate(l.end)} · {l.dept}
-                </div>
-                {l.reason && <div className="leave-reason">“{l.reason}”</div>}
-                <span className={`leave-tag ${leaveTagClass(l.type)}`}>{leaveTagLabel(l.type)}</span>
-                {l.status === 'pending' && (() => {
-                  const stages = l.approvalStages?.length ? l.approvalStages : DEFAULT_STAGES;
-                  const stage = l.currentStage || 0;
-                  const requiredRole = stages[stage] || stages[stages.length - 1];
-                  const canAct = currentUser.role === 'HR Director' || currentUser.role === requiredRole;
-                  return (
-                    <>
-                      <div className="leave-meta" style={{ marginTop: 2 }}>
-                        Stage {stage + 1} of {stages.length} — awaiting <strong>{requiredRole}</strong>
-                      </div>
-                      <div className="leave-actions">
-                        {canAct ? (
-                          <>
-                            <button className="mini-btn approve" onClick={() => approveLeave(l.id)}>Approve</button>
-                            <button className="mini-btn" onClick={() => declineLeave(l.id)}>Decline</button>
-                          </>
-                        ) : (
-                          <span className="muted-text">Waiting on {requiredRole}</span>
-                        )}
-                      </div>
-                    </>
-                  );
-                })()}
-                {l.status !== 'pending' && (
-                  <div className="leave-actions">
-                    <button className="mini-btn danger" onClick={() => setConfirm(l)}>
-                      <IconTrash width="12" height="12" /> Delete
-                    </button>
-                  </div>
-                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

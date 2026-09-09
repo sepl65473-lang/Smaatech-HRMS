@@ -7,8 +7,12 @@ const leaveSchema = new mongoose.Schema({
   type: { type: String, required: true }, // sick | casual | earned
   start: { type: String, required: true }, // YYYY-MM-DD
   end: { type: String, required: true },
-  status: { type: String, default: 'pending' }, // pending | approved | declined
+  status: { type: String, default: 'pending' }, // pending | approved | declined | withdrawn
   reason: { type: String, default: '' },
+  attachment: { type: String, default: '' },
+  isHalfDay: { type: Boolean, default: false },
+  halfDayTiming: { type: String, enum: ['first-half', 'second-half', ''], default: '' },
+  workingDays: { type: Number, default: 0 },
   // Multi-stage approval (see routes/leave.js) — approvalStages is a snapshot
   // of Settings.approvalWorkflows.leave at creation time, so editing the
   // workflow config later doesn't change requests already in flight.

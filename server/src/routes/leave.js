@@ -5,8 +5,9 @@ import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { getSettingsDoc } from './settings.js';
 import { logAudit } from '../lib/auditLogger.js';
 import User from '../models/User.js';
+import Holiday from '../models/Holiday.js';
 import { sendNotification, resolveChannels, fillTemplate } from '../lib/notificationService.js';
-import { dateRangeInclusive } from '../lib/dateUtils.js';
+import { dateRangeInclusive, calculateWorkingDays } from '../lib/dateUtils.js';
 
 // Marks every date in an approved leave as Attendance status 'leave' —
 // upserts the row (mirrors attendanceCorrections.js's approve handler) since
@@ -14,12 +15,13 @@ import { dateRangeInclusive } from '../lib/dateUtils.js';
 // future-dated leave. Never overwrites a day the employee already genuinely
 // checked into (e.g. leave approved retroactively after they'd come in).
 async function markLeaveOnAttendance(leave) {
+  const targetStatus = leave.isHalfDay ? 'half-day' : 'leave';
   for (const date of dateRangeInclusive(leave.start, leave.end)) {
     // eslint-disable-next-line no-await-in-loop
     const existing = await Attendance.findOne({ empId: leave.empId, date, company: leave.company });
     if (existing) {
       if (!existing.checkIn) {
-        existing.status = 'leave';
+        existing.status = targetStatus;
         // eslint-disable-next-line no-await-in-loop
         await existing.save();
       }
@@ -27,7 +29,7 @@ async function markLeaveOnAttendance(leave) {
       try {
         // eslint-disable-next-line no-await-in-loop
         await Attendance.create({
-          empId: leave.empId, name: leave.name, dept: leave.dept, date, status: 'leave', company: leave.company,
+          empId: leave.empId, name: leave.name, dept: leave.dept, date, status: targetStatus, company: leave.company,
         });
       } catch (err) {
         // Unique (empId, date) index — the daily job or another request
@@ -68,13 +70,43 @@ router.get('/:id', async (req, res) => {
 // submit an already-'approved' request for themselves.
 router.post('/', async (req, res) => {
   const isManager = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
-  const { empId, name, dept, type, start, end, reason } = req.body || {};
+  const { empId, name, dept, type, start, end, reason, isHalfDay, halfDayTiming, attachment } = req.body || {};
   if (!isManager && empId !== req.auth.employeeId) {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'You can only file leave for yourself.' } });
   }
+
+  // 1. Overlapping Leave Request Validation
+  const existingOverlap = await Leave.findOne({
+    empId,
+    company: req.auth.company,
+    status: { $in: ['pending', 'approved'] },
+    $or: [
+      { start: { $lte: end }, end: { $gte: start } },
+    ],
+  });
+  if (existingOverlap) {
+    return res.status(409).json({
+      error: {
+        code: 'OVERLAPPING_LEAVE',
+        message: `An active leave request already exists between ${existingOverlap.start} and ${existingOverlap.end}.`,
+      },
+    });
+  }
+
   const settingsDoc = await getSettingsDoc(req.auth.company);
+
+  // 2. Working Days Calculation (excluding company weekends and holidays)
+  const holidays = await Holiday.find({ company: req.auth.company });
+  const holidaySet = new Set(holidays.map((h) => h.date));
+  const calcWorkingDays = calculateWorkingDays(start, end, settingsDoc.workWeek || '5-day', holidaySet);
+  const workingDays = isHalfDay ? 0.5 : calcWorkingDays;
+
   const created = await Leave.create({
     empId, name, dept, type, start, end, reason,
+    attachment: attachment || '',
+    isHalfDay: Boolean(isHalfDay),
+    halfDayTiming: isHalfDay ? (halfDayTiming || 'first-half') : '',
+    workingDays,
     company: req.auth.company,
     approvalStages: settingsDoc.approvalWorkflows?.leave?.length ? settingsDoc.approvalWorkflows.leave : DEFAULT_STAGES,
     currentStage: 0,
@@ -90,7 +122,7 @@ router.post('/', async (req, res) => {
       await sendNotification({
         recipientId: hr._id,
         title: 'New Leave Request',
-        message: `${created.name} (${created.dept}) has filed a ${created.type} leave request from ${created.start} to ${created.end}.`,
+        message: `${created.name} (${created.dept}) has filed a ${created.isHalfDay ? 'half-day ' : ''}${created.type} leave request from ${created.start} to ${created.end}.`,
         type: 'leave',
         actionUrl: '/leave',
         channels,
@@ -102,6 +134,29 @@ router.post('/', async (req, res) => {
   }
 
   res.status(201).json(created);
+});
+
+// Self-service withdrawal for pending requests owned by the employee (or Admin)
+router.post('/:id/withdraw', async (req, res) => {
+  const leave = await Leave.findOne({ _id: req.params.id, ...companyFilter(req) });
+  if (!leave) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Leave request not found.' } });
+
+  const isOwner = req.auth.employeeId && String(leave.empId) === String(req.auth.employeeId);
+  const isAdmin = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
+  if (!isOwner && !isAdmin) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'You can only withdraw your own pending leave request.' } });
+  }
+
+  if (leave.status !== 'pending') {
+    return res.status(400).json({ error: { code: 'CANNOT_WITHDRAW', message: 'Only pending leave requests can be withdrawn.' } });
+  }
+
+  const before = leave.toObject ? leave.toObject() : JSON.parse(JSON.stringify(leave));
+  leave.status = 'withdrawn';
+  await leave.save();
+
+  await logAudit(req, { action: 'Leave withdrawn', subject: leave.name, before, after: leave });
+  res.json(leave);
 });
 
 router.patch('/:id', requireRole('HR Manager'), async (req, res) => {

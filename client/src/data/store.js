@@ -81,6 +81,7 @@ export const leavesApi = {
   // server checks the caller's role against the request's current stage.
   approve: (id) => apiFetch(`/leaves/${id}/approve`, { method: 'POST' }),
   decline: (id) => apiFetch(`/leaves/${id}/decline`, { method: 'POST' }),
+  withdraw: (id) => apiFetch(`/leaves/${id}/withdraw`, { method: 'POST' }),
 };
 export const payrollApi = restResource('payroll');
 export const holidaysApi = restResource('holidays');

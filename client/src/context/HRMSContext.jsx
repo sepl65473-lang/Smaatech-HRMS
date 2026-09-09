@@ -556,6 +556,20 @@ export function HRMSProvider({ children }) {
     return created;
   };
 
+  const withdrawLeave = async (id) => {
+    let updated;
+    try {
+      updated = await leavesApi.withdraw(id);
+    } catch (err) {
+      toast('error', err.message || 'Failed to withdraw leave request.');
+      throw err;
+    }
+    setLeaves((list) => list.map((l) => (l.id === id ? updated : l)));
+    auditLocal('Leave withdrawn', updated.name);
+    toast('info', `Leave request for <strong>${updated.name}</strong> has been withdrawn.`);
+    return updated;
+  };
+
   // Goes through the server's stage-aware approve/decline endpoints (see
   // routes/leave.js) rather than a plain status PATCH — the server checks
   // the caller's role against the request's current approval stage, and
@@ -1553,7 +1567,7 @@ export function HRMSProvider({ children }) {
     // users (real login accounts, HR Director only)
     users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount, resendUserWelcomeEmail,
     // leave
-    addLeave, approveLeave, declineLeave, deleteLeave, bulkApproveLeave, bulkDeclineLeave,
+    addLeave, approveLeave, declineLeave, deleteLeave, withdrawLeave, bulkApproveLeave, bulkDeclineLeave,
     // attendance
     checkIn, checkOut, setAttendanceStatus, recordPunch, enrollFace, faceEnrolled, getQrToken, qrCheckIn,
     loadDeviceMappings, linkDeviceUser, regenerateDeviceKey,

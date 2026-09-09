@@ -26,3 +26,18 @@ export function dateRangeInclusive(startISO, endISO) {
   }
   return dates;
 }
+
+// Calculates working days between startISO and endISO, excluding company weekends and official holidays
+export function calculateWorkingDays(startISO, endISO, workWeek = '5-day', holidaySet = new Set()) {
+  const dates = dateRangeInclusive(startISO, endISO);
+  let count = 0;
+  for (const dateStr of dates) {
+    if (holidaySet.has(dateStr)) continue;
+    const dayOfWeek = new Date(`${dateStr}T00:00:00Z`).getUTCDay(); // 0 = Sun, 6 = Sat
+    if (dayOfWeek === 0) continue; // Sunday is non-working for all schemes
+    if (workWeek === '5-day' && dayOfWeek === 6) continue; // Saturday non-working for 5-day
+    count += 1;
+  }
+  return count;
+}
+

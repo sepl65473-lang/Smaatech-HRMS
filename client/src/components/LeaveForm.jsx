@@ -16,35 +16,41 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
     };
   });
 
-  const [form, setForm] = useState({ empId: '', type: 'casual', start: '', end: '', reason: '' });
+  const [form, setForm] = useState({ empId: '', type: 'casual', start: '', end: '', reason: '', isHalfDay: false, halfDayTiming: 'first-half', attachment: '' });
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setForm({ empId: employees[0]?.id || '', type: leaveTypes[0]?.value || 'casual', start: '', end: '', reason: '' });
+      setForm({ empId: employees[0]?.id || '', type: leaveTypes[0]?.value || 'casual', start: '', end: '', reason: '', isHalfDay: false, halfDayTiming: 'first-half', attachment: '' });
       setErrors({});
       setSubmitError('');
       setSaving(false);
     }
-    // leaveTypes intentionally excluded: it's rebuilt from getMasterValues()
-    // on every render (a fresh array each call), so including it here would
-    // rerun this effect — and its setState calls — on every render, an
-    // infinite loop (see the identical bug fixed in EmployeeForm.jsx).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, employees]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setBool = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
 
-  const days = daysBetween(form.start, form.end);
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      setForm((f) => ({ ...f, attachment: evt.target.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const days = form.isHalfDay ? 0.5 : daysBetween(form.start, form.end);
 
   const submit = async () => {
     const er = {};
     if (!form.empId) er.empId = 'Select an employee';
     if (!form.start) er.start = 'Pick a start date';
     if (!form.end) er.end = 'Pick an end date';
-    if (form.start && form.end && days <= 0) er.end = 'End must be on/after start';
+    if (form.start && form.end && daysBetween(form.start, form.end) <= 0) er.end = 'End must be on/after start';
     setErrors(er);
     if (Object.keys(er).length) return;
     setSubmitError('');
@@ -62,7 +68,7 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
     <Modal
       open={open}
       title="New leave request"
-      subtitle={days > 0 ? `${days} day${days > 1 ? 's' : ''}` : 'Raise on behalf of an employee'}
+      subtitle={days > 0 ? `${days} day${days !== 1 ? 's' : ''}` : 'Raise on behalf of an employee'}
       onClose={onClose}
       width={480}
       footer={(
@@ -89,17 +95,42 @@ export default function LeaveForm({ open, employees, onClose, onSave }) {
         </label>
         <label className="field">
           <span className="field-label">From</span>
-          <input type="date" className="input" value={form.start} onChange={set('start')} />
+          <input type="date" className="input" value={form.start} onChange={(e) => {
+            const val = e.target.value;
+            setForm((f) => ({ ...f, start: val, ...(f.isHalfDay ? { end: val } : {}) }));
+          }} />
           {errors.start && <span className="field-error">{errors.start}</span>}
         </label>
         <label className="field">
           <span className="field-label">To</span>
-          <input type="date" className="input" value={form.end} onChange={set('end')} />
+          <input type="date" className="input" value={form.end} disabled={form.isHalfDay} onChange={set('end')} />
           {errors.end && <span className="field-error">{errors.end}</span>}
         </label>
+
+        <div className="field field-full" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}>
+            <input type="checkbox" checked={form.isHalfDay} onChange={(e) => {
+              const checked = e.target.checked;
+              setForm((f) => ({ ...f, isHalfDay: checked, ...(checked && f.start ? { end: f.start } : {}) }));
+            }} />
+            <span>Half-Day Leave</span>
+          </label>
+          {form.isHalfDay && (
+            <select className="input" style={{ width: 'auto', flex: 1 }} value={form.halfDayTiming} onChange={set('halfDayTiming')}>
+              <option value="first-half">First Half (Morning)</option>
+              <option value="second-half">Second Half (Afternoon)</option>
+            </select>
+          )}
+        </div>
+
         <label className="field field-full">
           <span className="field-label">Reason (optional)</span>
-          <textarea className="input" rows={3} value={form.reason} onChange={set('reason')} placeholder="Short note…" />
+          <textarea className="input" rows={2} value={form.reason} onChange={set('reason')} placeholder="Short note…" />
+        </label>
+        <label className="field field-full">
+          <span className="field-label">Attachment / Document (optional)</span>
+          <input type="file" accept="image/*,.pdf" className="input" onChange={handleFileUpload} />
+          {form.attachment && <span className="muted-text" style={{ fontSize: '11px', marginTop: 4 }}>File attached ✓</span>}
         </label>
       </div>
     </Modal>
