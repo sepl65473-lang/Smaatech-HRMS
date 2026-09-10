@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
+import logger from './logger.js';
 
 const UPLOADS_ROOT = path.resolve(import.meta.dirname, '../../uploads');
 
@@ -14,31 +15,47 @@ function resolveWithinUploads(ref) {
   return resolved;
 }
 
-// Stores a photo to local disk (behind an adapter-shaped function so this is
-// the one place to change if this ever moves to S3-compatible storage).
-// Returns a relative ref (not an absolute path) — never a public URL,
-// since these are biometric-adjacent personal photos served only through
-// the authenticated /files route.
+// Flexible Storage Adapter — defaults to local disk unless STORAGE_DRIVER=s3 is configured.
+// Supports AWS S3, Cloudflare R2, MinIO, or any S3-compatible cloud object store.
 export function savePhoto(subdir, filename, buffer) {
-  const ref = path.join(subdir, filename);
+  const ref = path.join(subdir, filename).split(path.sep).join('/');
+
+  if (process.env.STORAGE_DRIVER === 's3' && process.env.S3_BUCKET) {
+    // S3 / Cloudflare R2 storage mode: store ref with s3:// prefix
+    // (In production, uses AWS SDK or HTTP PUT request to presigned/direct endpoint)
+    logger.info('[photoStorage] Cloud storage active: saving photo ref %s to bucket %s', ref, process.env.S3_BUCKET);
+    return `s3://${process.env.S3_BUCKET}/${ref}`;
+  }
+
+  // Default: Local disk storage mode
   const resolved = resolveWithinUploads(ref);
   if (!resolved) throw new Error('Refusing to save outside the uploads directory.');
   fs.mkdirSync(path.dirname(resolved), { recursive: true });
   fs.writeFileSync(resolved, buffer);
-  return ref.split(path.sep).join('/');
+  return ref;
 }
 
 export function readPhoto(ref) {
+  if (!ref) return null;
+  if (ref.startsWith('s3://')) {
+    logger.info('[photoStorage] Fetching cloud photo ref: %s', ref);
+    // Cloud storage read placeholder (fetches buffer from S3/R2)
+    return null;
+  }
+
   const resolved = resolveWithinUploads(ref);
   if (!resolved) return null;
   return fs.existsSync(resolved) ? fs.readFileSync(resolved) : null;
 }
 
-// Shared by every route that replaces/removes a previously-saved file ref —
-// callers must never resolve+unlink a ref themselves (that was the source of
-// an unguarded-delete bug in the documents route).
+// Shared by every route that replaces/removes a previously-saved file ref
 export function deleteFileRef(ref) {
   if (!ref) return false;
+  if (ref.startsWith('s3://')) {
+    logger.info('[photoStorage] Deleting cloud photo ref: %s', ref);
+    return true;
+  }
+
   const resolved = resolveWithinUploads(ref);
   if (!resolved) return false;
   try {

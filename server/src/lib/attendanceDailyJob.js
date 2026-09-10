@@ -18,39 +18,58 @@ export async function createTodaysAttendanceRows() {
     logger.info('[Attendance Daily Job] Creating today\'s attendance rows...');
     const date = todayISO();
     const employees = await Employee.find({});
+    if (!employees.length) return;
+
+    // Single query to find all existing attendance records for today
+    const empIds = employees.map((e) => e._id);
+    const existingRows = await Attendance.find({ date, empId: { $in: empIds } }, { empId: 1 }).lean();
+    const existingSet = new Set(existingRows.map((r) => String(r.empId)));
+
+    const pendingEmployees = employees.filter((emp) => !existingSet.has(String(emp._id)));
+    if (!pendingEmployees.length) {
+      logger.info(`[Attendance Daily Job] Finished. All ${employees.length} attendance rows already exist for ${date}.`);
+      return;
+    }
+
+    // Batch load holidays for involved companies
+    const companies = [...new Set(pendingEmployees.map((e) => e.company || 'Smaatech'))];
+    const holidays = await Holiday.find({ company: { $in: companies } }).lean();
     const holidaysByCompany = new Map();
-    let createdCount = 0;
+    for (const h of holidays) {
+      const c = h.company || 'Smaatech';
+      if (!holidaysByCompany.has(c)) holidaysByCompany.set(c, []);
+      holidaysByCompany.get(c).push(h);
+    }
 
-    for (const emp of employees) {
+    // Prepare bulkWrite insert operations
+    const bulkOps = pendingEmployees.map((emp) => {
       const company = emp.company || 'Smaatech';
-      // eslint-disable-next-line no-await-in-loop
-      const exists = await Attendance.findOne({ empId: emp._id, date });
-      if (exists) continue;
-
-      if (!holidaysByCompany.has(company)) {
-        // eslint-disable-next-line no-await-in-loop
-        holidaysByCompany.set(company, await Holiday.find({ company }));
-      }
-      const holidays = holidaysByCompany.get(company);
+      const companyHolidays = holidaysByCompany.get(company) || [];
       const status = emp.status === 'on-leave'
         ? 'leave'
-        : (isHoliday(date, holidays) ? 'holiday' : 'absent');
+        : (isHoliday(date, companyHolidays) ? 'holiday' : 'absent');
 
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await Attendance.create({
-          empId: emp._id, name: emp.name, dept: emp.dept, date, status, company,
-        });
-        createdCount += 1;
-      } catch (err) {
-        // Unique (empId, date) index — a concurrent run already created this
-        // row between the findOne check above and this create(). Safe to skip.
-        if (err.code !== 11000) logger.error('[Attendance Daily Job Error] %o', err);
-      }
-    }
-    logger.info(`[Attendance Daily Job] Finished. Created ${createdCount} attendance row(s) for ${date}.`);
+      return {
+        insertOne: {
+          document: {
+            empId: emp._id,
+            name: emp.name,
+            dept: emp.dept,
+            date,
+            status,
+            company,
+          },
+        },
+      };
+    });
+
+    const result = await Attendance.bulkWrite(bulkOps, { ordered: false });
+    const createdCount = result.insertedCount || bulkOps.length;
+    logger.info(`[Attendance Daily Job] Finished. Bulk created ${createdCount} attendance row(s) for ${date}.`);
   } catch (err) {
-    logger.error('[Attendance Daily Job Error] %o', err);
+    if (err.code !== 11000) {
+      logger.error('[Attendance Daily Job Error] %o', err);
+    }
   }
 }
 

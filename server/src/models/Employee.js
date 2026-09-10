@@ -71,6 +71,7 @@ employeeSchema.index(
   { company: 1, email: 1 },
   { unique: true, partialFilterExpression: { email: { $type: 'string', $gt: '' } } },
 );
+employeeSchema.index({ company: 1, dept: 1, status: 1 });
 
 // Shape the API response to match the frontend's existing `id` (string) convention
 employeeSchema.set('toJSON', {

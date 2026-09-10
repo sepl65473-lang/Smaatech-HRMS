@@ -41,6 +41,8 @@ const attendanceSchema = new mongoose.Schema({
 // One row per employee per calendar day — lets the daily row-creation job
 // (lib/attendanceDailyJob.js) safely re-run without ever double-inserting.
 attendanceSchema.index({ empId: 1, date: 1 }, { unique: true });
+attendanceSchema.index({ company: 1, date: 1, status: 1 });
+attendanceSchema.index({ company: 1, date: -1 });
 
 attendanceSchema.set('toJSON', {
   virtuals: true,

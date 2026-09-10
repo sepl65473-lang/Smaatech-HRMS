@@ -37,6 +37,7 @@ import resignationsRoutes from './routes/resignations.js';
 import attendanceCorrectionsRoutes from './routes/attendanceCorrections.js';
 import deviceIngestRoutes from './routes/deviceIngest.js';
 import deviceMappingsRoutes from './routes/deviceMappings.js';
+import healthRoutes from './routes/health.js';
 
 const app = express();
 
@@ -140,6 +141,7 @@ app.use('/api/v1/attendance-corrections', attendanceCorrectionsRoutes);
 // must sit outside that router's router.use(requireAuth).
 app.use('/api/v1/device-punch', deviceIngestRoutes);
 app.use('/api/v1/device-mappings', deviceMappingsRoutes);
+app.use('/api/v1', healthRoutes);
 
 // Error Handling Middleware
 app.use((err, _req, res, _next) => {

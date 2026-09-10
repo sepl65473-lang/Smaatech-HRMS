@@ -10,6 +10,8 @@ const notificationSchema = new mongoose.Schema({
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
+notificationSchema.index({ recipientId: 1, read: 1, createdAt: -1 });
+
 notificationSchema.set('toJSON', {
   virtuals: true,
   transform: (_doc, ret) => {

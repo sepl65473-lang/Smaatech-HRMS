@@ -26,6 +26,8 @@ const leaveSchema = new mongoose.Schema({
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
+leaveSchema.index({ company: 1, status: 1, start: 1 });
+
 leaveSchema.set('toJSON', {
   virtuals: true,
   transform: (_doc, ret) => {

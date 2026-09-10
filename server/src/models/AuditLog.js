@@ -17,6 +17,8 @@ const auditLogSchema = new mongoose.Schema({
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
+auditLogSchema.index({ company: 1, createdAt: -1 });
+
 auditLogSchema.set('toJSON', {
   virtuals: true,
   transform: (_doc, ret) => {
