@@ -23,6 +23,8 @@ const expenseSchema = new mongoose.Schema({
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
+expenseSchema.index({ company: 1, createdAt: -1 });
+
 expenseSchema.set('toJSON', {
   virtuals: true,
   transform: (_doc, ret) => {

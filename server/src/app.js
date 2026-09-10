@@ -3,6 +3,7 @@
 // caller) can import a real, fully-wired `app` and drive it with supertest
 // without booting the actual server process or its side effects.
 import express from 'express';
+import 'express-async-errors';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';

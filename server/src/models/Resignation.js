@@ -36,6 +36,8 @@ const resignationSchema = new mongoose.Schema({
   company: { type: String, default: 'Smaatech', index: true }
 }, { timestamps: true });
 
+resignationSchema.index({ company: 1, createdAt: -1 });
+
 resignationSchema.set('toJSON', {
   virtuals: true,
   transform: (_doc, ret) => {

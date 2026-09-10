@@ -3,6 +3,8 @@ import Resignation from '../models/Resignation.js';
 import Employee from '../models/Employee.js';
 import User from '../models/User.js';
 import { requireAuth, companyFilter } from '../middleware/auth.js';
+import { idempotency } from '../middleware/idempotency.js';
+import { runInTransaction } from '../lib/transactionHelper.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { sendNotification } from '../lib/notificationService.js';
 
@@ -26,8 +28,22 @@ router.get('/', async (req, res) => {
     }
   }
 
-  const rows = await Resignation.find(scope).sort({ createdAt: -1 });
-  res.json(rows);
+  const { page, limit, status } = req.query;
+  if (status) scope.status = status;
+
+  if (!page && !limit) {
+    const DEFAULT_CAP = 100;
+    const rows = await Resignation.find(scope).sort({ createdAt: -1 }).limit(DEFAULT_CAP);
+    return res.json(rows);
+  }
+
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+  const [rows, total] = await Promise.all([
+    Resignation.find(scope).sort({ createdAt: -1 }).skip((pageNum - 1) * limitNum).limit(limitNum),
+    Resignation.countDocuments(scope),
+  ]);
+  res.json({ rows, total, page: pageNum, limit: limitNum });
 });
 
 // Submit a new resignation
@@ -172,7 +188,7 @@ router.post('/:id/fnf', async (req, res) => {
 });
 
 // Pay Full & Final (FnF) Settlement and terminate employee status
-router.post('/:id/fnf/pay', async (req, res) => {
+router.post('/:id/fnf/pay', idempotency(), async (req, res) => {
   const isFinance = req.auth.role === 'Finance Lead' || req.auth.role === 'HR Director';
   if (!isFinance) {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Only Finance Lead or HR Director can pay FnF.' } });
@@ -185,16 +201,19 @@ router.post('/:id/fnf/pay', async (req, res) => {
 
   const before = JSON.parse(JSON.stringify(resignation));
 
-  resignation.fnfSettlement.status = 'Paid';
-  resignation.status = 'Approved';
-  if (!resignation.approvedLastWorkingDay) {
-    resignation.approvedLastWorkingDay = resignation.requestedLastWorkingDay;
-  }
-  await resignation.save();
+  await runInTransaction(async (session) => {
+    const opts = session ? { session } : {};
+    resignation.fnfSettlement.status = 'Paid';
+    resignation.status = 'Approved';
+    if (!resignation.approvedLastWorkingDay) {
+      resignation.approvedLastWorkingDay = resignation.requestedLastWorkingDay;
+    }
+    await resignation.save(opts);
 
-  // Lifecycle automation: mark employee as exited, and disable credentials
-  await Employee.findByIdAndUpdate(resignation.employeeId, { status: 'exited' });
-  await User.findOneAndUpdate({ employeeId: resignation.employeeId }, { active: false });
+    // Lifecycle automation: mark employee as exited, and disable credentials
+    await Employee.findByIdAndUpdate(resignation.employeeId, { status: 'exited' }, opts);
+    await User.findOneAndUpdate({ employeeId: resignation.employeeId }, { active: false }, opts);
+  });
 
   await logAudit(req, { action: 'FnF Paid & Employee Terminated', subject: resignation.employeeName, before, after: resignation });
 

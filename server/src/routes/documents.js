@@ -56,9 +56,24 @@ router.get('/', async (req, res) => {
     };
   }
 
+  const { page, limit, folder, type } = req.query;
   const combinedFilter = { ...filter, ...visibilityFilter };
-  const docs = await Document.find(combinedFilter).sort({ createdAt: -1 });
-  res.json(docs);
+  if (folder) combinedFilter.folder = folder;
+  if (type) combinedFilter.type = type;
+
+  if (!page && !limit) {
+    const DEFAULT_CAP = 100;
+    const docs = await Document.find(combinedFilter).sort({ createdAt: -1 }).limit(DEFAULT_CAP);
+    return res.json(docs);
+  }
+
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+  const [docs, total] = await Promise.all([
+    Document.find(combinedFilter).sort({ createdAt: -1 }).skip((pageNum - 1) * limitNum).limit(limitNum),
+    Document.countDocuments(combinedFilter),
+  ]);
+  res.json({ rows: docs, total, page: pageNum, limit: limitNum });
 });
 
 // Create document metadata and upload file to disk

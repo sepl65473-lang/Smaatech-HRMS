@@ -110,6 +110,33 @@ async function maybeStartTwoFactor(user, res) {
   return true;
 }
 
+/**
+ * @openapi
+ * /api/v1/auth/login:
+ *   post:
+ *     summary: Authenticate user with email and password
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful or 2FA required
+ *       401:
+ *         description: Invalid credentials
+ *       423:
+ *         description: Account locked
+ */
 router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
   const { email, password } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });

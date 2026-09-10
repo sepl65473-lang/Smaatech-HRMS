@@ -2,6 +2,9 @@ import { Router } from 'express';
 import Leave from '../models/Leave.js';
 import Attendance from '../models/Attendance.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
+import { runInTransaction } from '../lib/transactionHelper.js';
+import { validate } from '../middleware/validation.js';
+import { fileLeaveSchema } from '../validations/leaveValidation.js';
 import { getSettingsDoc } from './settings.js';
 import { logAudit } from '../lib/auditLogger.js';
 import User from '../models/User.js';
@@ -16,28 +19,31 @@ import { dateRangeInclusive, calculateWorkingDays } from '../lib/dateUtils.js';
 // checked into (e.g. leave approved retroactively after they'd come in).
 async function markLeaveOnAttendance(leave) {
   const targetStatus = leave.isHalfDay ? 'half-day' : 'leave';
-  for (const date of dateRangeInclusive(leave.start, leave.end)) {
-    // eslint-disable-next-line no-await-in-loop
-    const existing = await Attendance.findOne({ empId: leave.empId, date, company: leave.company });
-    if (existing) {
-      if (!existing.checkIn) {
-        existing.status = targetStatus;
-        // eslint-disable-next-line no-await-in-loop
-        await existing.save();
-      }
-    } else {
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await Attendance.create({
-          empId: leave.empId, name: leave.name, dept: leave.dept, date, status: targetStatus, company: leave.company,
-        });
-      } catch (err) {
-        // Unique (empId, date) index — the daily job or another request
-        // created this row in the meantime. Safe to leave as-is.
-        if (err.code !== 11000) throw err;
+  await runInTransaction(async (session) => {
+    const opts = session ? { session } : {};
+    for (const date of dateRangeInclusive(leave.start, leave.end)) {
+      // eslint-disable-next-line no-await-in-loop
+      const existing = await Attendance.findOne({ empId: leave.empId, date, company: leave.company }, null, opts);
+      if (existing) {
+        if (!existing.checkIn) {
+          existing.status = targetStatus;
+          // eslint-disable-next-line no-await-in-loop
+          await existing.save(opts);
+        }
+      } else {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await Attendance.create([{
+            empId: leave.empId, name: leave.name, dept: leave.dept, date, status: targetStatus, company: leave.company,
+          }], opts);
+        } catch (err) {
+          // Unique (empId, date) index — the daily job or another request
+          // created this row in the meantime. Safe to leave as-is.
+          if (err.code !== 11000) throw err;
+        }
       }
     }
-  }
+  });
 }
 
 // Falls back to this sequence when HR hasn't configured Settings > Workflows
@@ -51,11 +57,52 @@ function stagesFor(leave) {
 const router = Router();
 router.use(requireAuth);
 
+/**
+ * @openapi
+ * /api/v1/leaves:
+ *   get:
+ *     summary: List leave applications
+ *     tags: [Leaves]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of leave records or paginated object
+ */
 router.get('/', async (req, res) => {
   const isManager = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
   const scope = { ...companyFilter(req), ...(isManager ? {} : { empId: req.auth.employeeId }) };
-  const rows = await Leave.find(scope).sort({ createdAt: -1 });
-  res.json(rows);
+  const { page, limit, status } = req.query;
+
+  const filter = { ...scope };
+  if (status) filter.status = status;
+
+  if (!page && !limit) {
+    const DEFAULT_CAP = 100;
+    const rows = await Leave.find(filter).sort({ createdAt: -1 }).limit(DEFAULT_CAP);
+    return res.json(rows);
+  }
+
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+  const [rows, total] = await Promise.all([
+    Leave.find(filter).sort({ createdAt: -1 }).skip((pageNum - 1) * limitNum).limit(limitNum),
+    Leave.countDocuments(filter),
+  ]);
+  res.json({ rows, total, page: pageNum, limit: limitNum });
 });
 
 router.get('/:id', async (req, res) => {
@@ -68,7 +115,7 @@ router.get('/:id', async (req, res) => {
 // of someone else. Self-service requests are always created 'pending' —
 // `status` is never taken from the request body, so an employee can't
 // submit an already-'approved' request for themselves.
-router.post('/', async (req, res) => {
+router.post('/', validate(fileLeaveSchema), async (req, res) => {
   const isManager = req.auth.role === 'HR Director' || req.auth.role === 'HR Manager';
   const { empId, name, dept, type, start, end, reason, isHalfDay, halfDayTiming, attachment } = req.body || {};
   if (!isManager && empId !== req.auth.employeeId) {

@@ -13,6 +13,8 @@ const documentSchema = new mongoose.Schema({
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
+documentSchema.index({ company: 1, createdAt: -1 });
+
 documentSchema.set('toJSON', {
   virtuals: true,
   transform: (_doc, ret) => {

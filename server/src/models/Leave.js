@@ -27,6 +27,7 @@ const leaveSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 leaveSchema.index({ company: 1, status: 1, start: 1 });
+leaveSchema.index({ company: 1, createdAt: -1 });
 
 leaveSchema.set('toJSON', {
   virtuals: true,

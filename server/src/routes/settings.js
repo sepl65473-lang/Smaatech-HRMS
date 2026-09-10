@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import Settings from '../models/Settings.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-
+import { getCache, setCache, invalidateCache } from '../lib/cacheStore.js';
 import { logAudit } from '../lib/auditLogger.js';
 
 const router = Router();
@@ -18,8 +18,14 @@ const SERVER_OWNED_KEYS = [
 ];
 
 export async function getSettingsDoc(company = 'Smaatech') {
+  const isTest = process.env.NODE_ENV === 'test';
+  const cacheKey = `settings:${company}`;
+  const cached = !isTest && getCache(cacheKey);
+  if (cached) return cached;
+
   let doc = await Settings.findById(company);
   if (!doc) doc = await Settings.create({ _id: company });
+  if (!isTest) setCache(cacheKey, doc, 5 * 60 * 1000);
   return doc;
 }
 
@@ -42,6 +48,7 @@ router.patch('/', requireAuth, requireRole('HR Manager'), async (req, res) => {
   const company = req.auth.company;
   const before = await getSettingsDoc(company);
   const doc = await Settings.findByIdAndUpdate(company, patch, { new: true, upsert: true });
+  invalidateCache(`settings:${company}`);
   await logAudit(req, { action: 'Settings updated', subject: 'System Settings', before, after: doc });
   res.json(doc);
 });
@@ -54,6 +61,7 @@ router.post('/device-key/regenerate', requireAuth, requireRole('HR Manager'), as
   const company = req.auth.company;
   const biometricDeviceApiKey = crypto.randomBytes(24).toString('hex');
   await Settings.findByIdAndUpdate(company, { biometricDeviceApiKey }, { upsert: true });
+  invalidateCache(`settings:${company}`);
   await logAudit(req, { action: 'Biometric device key regenerated', subject: 'System Settings' });
   res.json({ biometricDeviceApiKey });
 });

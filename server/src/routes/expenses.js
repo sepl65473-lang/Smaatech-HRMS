@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import Expense from '../models/Expense.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
+import { validate } from '../middleware/validation.js';
+import { fileExpenseSchema } from '../validations/expenseValidation.js';
 import { getSettingsDoc } from './settings.js';
 import { logAudit } from '../lib/auditLogger.js';
 
@@ -18,8 +20,24 @@ router.use(requireAuth);
 router.get('/', async (req, res) => {
   const canActForOthers = ['HR Director', 'HR Manager', 'Finance Lead'].includes(req.auth.role);
   const scope = { ...companyFilter(req), ...(canActForOthers ? {} : { empId: req.auth.employeeId }) };
-  const rows = await Expense.find(scope).sort({ createdAt: -1 });
-  res.json(rows);
+  const { page, limit, status } = req.query;
+
+  const filter = { ...scope };
+  if (status) filter.status = status;
+
+  if (!page && !limit) {
+    const DEFAULT_CAP = 100;
+    const rows = await Expense.find(filter).sort({ createdAt: -1 }).limit(DEFAULT_CAP);
+    return res.json(rows);
+  }
+
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+  const [rows, total] = await Promise.all([
+    Expense.find(filter).sort({ createdAt: -1 }).skip((pageNum - 1) * limitNum).limit(limitNum),
+    Expense.countDocuments(filter),
+  ]);
+  res.json({ rows, total, page: pageNum, limit: limitNum });
 });
 
 router.get('/:id', async (req, res) => {
@@ -31,7 +49,7 @@ router.get('/:id', async (req, res) => {
 // HR Manager/Finance Lead/Director can file one on someone else's behalf.
 // Self-service claims are always created 'pending' — `status` is never
 // taken from the request body, so an employee can't self-approve.
-router.post('/', async (req, res) => {
+router.post('/', validate(fileExpenseSchema), async (req, res) => {
   const canActForOthers = ['HR Director', 'HR Manager', 'Finance Lead'].includes(req.auth.role);
   const { empId, name, category, amount, date, description } = req.body || {};
   if (!canActForOthers && empId !== req.auth.employeeId) {

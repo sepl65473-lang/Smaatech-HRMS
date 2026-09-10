@@ -2,6 +2,8 @@ import { Router } from 'express';
 import Employee from '../models/Employee.js';
 import User from '../models/User.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
+import { validate } from '../middleware/validation.js';
+import { createEmployeeSchema, patchEmployeeSchema } from '../validations/employeeValidation.js';
 import { logAudit } from '../lib/auditLogger.js';
 
 const router = Router();
@@ -15,6 +17,31 @@ const SORT_MAP = {
   newest: { joinDate: -1 },
 };
 
+/**
+ * @openapi
+ * /api/v1/employees:
+ *   get:
+ *     summary: List employees with optional search, sorting, and pagination
+ *     tags: [Employees]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of employees or paginated employee object
+ */
 router.get('/', async (req, res) => {
   const { page, limit, search, dept, sort } = req.query;
 
@@ -49,7 +76,7 @@ router.get('/:id', async (req, res) => {
   res.json(row || null);
 });
 
-router.post('/', requireRole('HR Manager'), async (req, res) => {
+router.post('/', requireRole('HR Manager'), validate(createEmployeeSchema), async (req, res) => {
   const body = { ...(req.body || {}), company: req.auth.company };
   try {
     const created = await Employee.create(body);
@@ -84,7 +111,7 @@ router.post('/bulk-update', requireRole('HR Manager'), async (req, res) => {
   res.json({ updatedCount: result.modifiedCount });
 });
 
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', validate(patchEmployeeSchema), async (req, res) => {
   const isSelf = req.auth.employeeId && String(req.auth.employeeId) === String(req.params.id);
   const isHR = ['HR Director', 'HR Manager'].includes(req.auth.role);
 

@@ -2,6 +2,8 @@ import { Router } from 'express';
 import Payroll from '../models/Payroll.js';
 import Attendance from '../models/Attendance.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
+import { validate } from '../middleware/validation.js';
+import { createPayrollSchema } from '../validations/payrollValidation.js';
 
 import { logAudit } from '../lib/auditLogger.js';
 import User from '../models/User.js';
@@ -29,8 +31,25 @@ async function computeLopFromAttendance(empId, cycle, company, gross) {
 router.get('/', async (req, res) => {
   const canSeeAll = ['HR Director', 'HR Manager', 'Finance Lead'].includes(req.auth.role);
   const scope = { ...companyFilter(req), ...(canSeeAll ? {} : { empId: req.auth.employeeId }) };
-  const rows = await Payroll.find(scope).sort({ createdAt: -1 });
-  res.json(rows);
+  const { page, limit, cycle, status } = req.query;
+
+  const filter = { ...scope };
+  if (cycle) filter.cycle = cycle;
+  if (status) filter.status = status;
+
+  if (!page && !limit) {
+    const DEFAULT_CAP = 100;
+    const rows = await Payroll.find(filter).sort({ createdAt: -1 }).limit(DEFAULT_CAP);
+    return res.json(rows);
+  }
+
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+  const [rows, total] = await Promise.all([
+    Payroll.find(filter).sort({ createdAt: -1 }).skip((pageNum - 1) * limitNum).limit(limitNum),
+    Payroll.countDocuments(filter),
+  ]);
+  res.json({ rows, total, page: pageNum, limit: limitNum });
 });
 
 router.get('/:id', async (req, res) => {
@@ -43,7 +62,7 @@ router.get('/:id', async (req, res) => {
 // HR Manager needs this too — addEmployee/updateEmployee/deleteEmployee (all
 // gated to HR Manager on /employees) cascade payroll row create/patch/delete
 // for denormalization sync, alongside Finance Lead's own process/pay actions.
-router.post('/', requireRole('HR Manager', 'Finance Lead'), async (req, res) => {
+router.post('/', requireRole('HR Manager', 'Finance Lead'), validate(createPayrollSchema), async (req, res) => {
   const body = { ...(req.body || {}), company: req.auth.company };
 
   // Only auto-compute when the caller didn't explicitly send a value —
