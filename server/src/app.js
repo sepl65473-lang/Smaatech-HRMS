@@ -38,6 +38,7 @@ import attendanceCorrectionsRoutes from './routes/attendanceCorrections.js';
 import deviceIngestRoutes from './routes/deviceIngest.js';
 import deviceMappingsRoutes from './routes/deviceMappings.js';
 import healthRoutes from './routes/health.js';
+import aiPredictorRoutes from './routes/aiPredictorRoutes.js';
 
 const app = express();
 
@@ -142,6 +143,7 @@ app.use('/api/v1/attendance-corrections', attendanceCorrectionsRoutes);
 app.use('/api/v1/device-punch', deviceIngestRoutes);
 app.use('/api/v1/device-mappings', deviceMappingsRoutes);
 app.use('/api/v1', healthRoutes);
+app.use('/api/v1/ai', aiPredictorRoutes);
 
 // Error Handling Middleware
 app.use((err, _req, res, _next) => {

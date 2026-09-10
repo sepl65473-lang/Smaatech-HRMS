@@ -79,13 +79,11 @@ router.get('/', async (req, res) => {
   const scope = { ...companyFilter(req), ...(isManager ? {} : { empId: req.auth.employeeId }) };
   const { page, limit, date, from, to } = req.query;
 
-  // Legacy callers (loadAll()'s initial hydrate, Dashboard's direct array
-  // consumption) get the same unpaginated full-array shape as before —
-  // nothing downstream of those expects pagination. Only opt into
-  // paging/filtering when a caller explicitly asks for it (same convention
-  // as GET /audit-logs).
+  // Legacy callers get the array shape, but capped at a safe max limit (100 rows)
+  // to prevent out-of-memory (OOM) process crashes on large datasets.
   if (!page && !limit) {
-    const rows = await Attendance.find(scope).sort({ createdAt: 1 });
+    const DEFAULT_CAP = 100;
+    const rows = await Attendance.find(scope).sort({ date: -1, createdAt: -1 }).limit(DEFAULT_CAP);
     return res.json(rows);
   }
 

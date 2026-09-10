@@ -84,8 +84,8 @@ function jpegBufferToTensor(buffer, tf) {
   return { tensor: tf.tensor3d(rgb, [height, width, 3]) };
 }
 
-// Returns { descriptor: number[] } or { error: 'NO_FACE' | 'MULTIPLE_FACES' | 'LOW_RESOLUTION' | 'LOW_QUALITY' }.
-export async function extractDescriptor(jpegBuffer) {
+// Internal CPU-bound descriptor extraction
+export async function extractDescriptorDirect(jpegBuffer) {
   const modules = await initFaceEngine();
   if (!modules || !tfModule || !faceapiModule) {
     return { error: 'ENGINE_NOT_READY' };
@@ -105,6 +105,32 @@ export async function extractDescriptor(jpegBuffer) {
     return { descriptor: Array.from(results[0].descriptor) };
   } finally {
     tfModule.dispose(tensor);
+  }
+}
+
+// Offloads heavy WASM CPU calculation to a background worker thread to keep the main Express Event Loop free.
+export async function extractDescriptor(jpegBuffer) {
+  if (process.env.DISABLE_FACE_WORKER === 'true' || process.env.NODE_ENV === 'test') {
+    return extractDescriptorDirect(jpegBuffer);
+  }
+
+  try {
+    const { Worker } = await import('node:worker_threads');
+    const workerPath = path.resolve(import.meta.dirname, './faceWorker.js');
+
+    return await new Promise((resolve) => {
+      const worker = new Worker(workerPath, {
+        workerData: { buffer: Array.from(jpegBuffer) },
+      });
+
+      worker.on('message', (msg) => resolve(msg));
+      worker.on('error', () => resolve(extractDescriptorDirect(jpegBuffer)));
+      worker.on('exit', (code) => {
+        if (code !== 0) resolve(extractDescriptorDirect(jpegBuffer));
+      });
+    });
+  } catch {
+    return extractDescriptorDirect(jpegBuffer);
   }
 }
 
