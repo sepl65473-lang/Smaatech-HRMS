@@ -2,11 +2,12 @@ import cron from 'node-cron';
 import Document from '../models/Document.js';
 import User from '../models/User.js';
 import { sendNotification } from './notificationService.js';
+import { processInNonBlockingBatches } from './jobQueue.js';
 import logger from './logger.js';
 
 import { connectDB } from '../db.js';
 
-// Checks for documents expiring within 30 days and sends alerts.
+// Checks for documents expiring within 30 days and sends alerts in non-blocking batches.
 export async function checkDocumentExpirations() {
   try {
     await connectDB();
@@ -18,31 +19,35 @@ export async function checkDocumentExpirations() {
     // Find documents with expiryDate that have not been notified yet
     const docs = await Document.find({
       expiryDate: { $ne: '' },
-      reminderSent: { $ne: true }
+      reminderSent: { $ne: true },
     });
 
-    let sentCount = 0;
-    for (const doc of docs) {
+    if (!docs.length) return;
+
+    // Filter documents expiring within 30 days
+    const expiringDocs = docs.filter((doc) => {
       const expiry = new Date(doc.expiryDate);
-      // Validate date
-      if (isNaN(expiry.getTime())) continue;
+      return !isNaN(expiry.getTime()) && expiry <= thirtyDaysFromNow;
+    });
 
-      // Check if it expires within 30 days
-      if (expiry <= thirtyDaysFromNow) {
-        // Find recipient user account (either by ownerId or email match)
-        let recipientId = null;
-        if (doc.ownerId) {
-          const user = await User.findOne({ employeeId: doc.ownerId });
-          if (user) recipientId = user._id;
-        }
+    if (!expiringDocs.length) return;
 
+    // Batch query recipient Users in 1 single query instead of N+1 loop calls
+    const ownerIds = [...new Set(expiringDocs.map((d) => d.ownerId).filter(Boolean))];
+    const users = ownerIds.length ? await User.find({ employeeId: { $in: ownerIds } }).lean() : [];
+    const userByEmpId = new Map(users.map((u) => [String(u.employeeId), u._id]));
+
+    let sentCount = 0;
+    await processInNonBlockingBatches(expiringDocs, 50, async (chunk) => {
+      await Promise.all(chunk.map(async (doc) => {
+        const expiry = new Date(doc.expiryDate);
+        const recipientId = doc.ownerId ? userByEmpId.get(String(doc.ownerId)) || null : null;
         const formattedExpiry = expiry.toLocaleDateString('en-IN', {
           day: '2-digit',
           month: 'short',
-          year: 'numeric'
+          year: 'numeric',
         });
 
-        // Send notification
         await sendNotification({
           recipientId,
           title: `Document Expiry Warning: ${doc.title}`,
@@ -50,15 +55,16 @@ export async function checkDocumentExpirations() {
           type: 'system',
           actionUrl: '/documents',
           channels: recipientId ? ['in-app', 'email'] : ['in-app'],
-          company: doc.company
+          company: doc.company,
         });
 
         doc.reminderSent = true;
         await doc.save();
         sentCount++;
-      }
-    }
-    logger.info(`[Document Expiry Job] Finished expiry check. Reminded ${sentCount} expiring documents.`);
+      }));
+    });
+
+    logger.info(`[Document Expiry Job] Finished expiry check. Non-blocking reminded ${sentCount} expiring document(s).`);
   } catch (err) {
     logger.error('[Document Expiry Job Error] %o', err);
   }

@@ -5,13 +5,12 @@ import Holiday from '../models/Holiday.js';
 import { isHoliday } from './holidays.js';
 import { todayISO, isoDateDaysAgo } from './dateUtils.js';
 import { notifyAttendanceEvent } from './attendanceNotify.js';
+import { processInNonBlockingBatches } from './jobQueue.js';
 import logger from './logger.js';
 
 import { connectDB } from '../db.js';
 
-// Creates today's Attendance row for every employee who doesn't already have
-// one — the root fix for there being no daily attendance history at all
-// (previously a row was only ever created once, at seed/hire time).
+// Creates today's Attendance row for every employee in non-blocking chunked batches
 export async function createTodaysAttendanceRows() {
   try {
     await connectDB();
@@ -63,9 +62,14 @@ export async function createTodaysAttendanceRows() {
       };
     });
 
-    const result = await Attendance.bulkWrite(bulkOps, { ordered: false });
-    const createdCount = result.insertedCount || bulkOps.length;
-    logger.info(`[Attendance Daily Job] Finished. Bulk created ${createdCount} attendance row(s) for ${date}.`);
+    // Execute bulkWrite in non-blocking 250-item batches with event loop pauses
+    let totalCreated = 0;
+    await processInNonBlockingBatches(bulkOps, 250, async (chunk) => {
+      const res = await Attendance.bulkWrite(chunk, { ordered: false });
+      totalCreated += res.insertedCount || chunk.length;
+    });
+
+    logger.info(`[Attendance Daily Job] Finished. Non-blocking bulk created ${totalCreated} attendance row(s) for ${date}.`);
   } catch (err) {
     if (err.code !== 11000) {
       logger.error('[Attendance Daily Job Error] %o', err);
@@ -73,24 +77,23 @@ export async function createTodaysAttendanceRows() {
   }
 }
 
-// By the time this runs (midnight), yesterday's attendance is final — no
-// more chances for those employees to check in for that date. Notifies the
-// employee and their manager for every row that's still 'absent' with no
-// check-in at all (skips 'leave'/'holiday'/anything with a real check-in).
+// Notifies yesterday's absences in non-blocking chunked batches
 export async function notifyYesterdaysAbsences() {
   try {
     await connectDB();
     const yesterday = isoDateDaysAgo(1);
     const rows = await Attendance.find({ date: yesterday, status: 'absent', checkIn: null });
-    for (const row of rows) {
-      // eslint-disable-next-line no-await-in-loop
-      await notifyAttendanceEvent({
+    if (!rows.length) return;
+
+    await processInNonBlockingBatches(rows, 50, async (chunk) => {
+      await Promise.all(chunk.map((row) => notifyAttendanceEvent({
         empId: row.empId,
         title: 'Unexplained Absence',
         message: `${row.name} did not check in on ${yesterday}.`,
         company: row.company,
-      });
-    }
+      })));
+    });
+
     logger.info(`[Attendance Daily Job] Notified ${rows.length} absence(s) for ${yesterday}.`);
   } catch (err) {
     logger.error('[Attendance Daily Job Error] %o', err);
