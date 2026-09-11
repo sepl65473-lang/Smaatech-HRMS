@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
 import { greeting, formatLongDate, formatINR } from '../lib/helpers';
+import { canDo } from '../lib/permissions';
 import {
   IconBell, IconMenu, IconPlus, IconMail, IconHelp, IconChevronDown, IconLogOut,
 } from './Icons';
@@ -265,9 +266,11 @@ export default function Topbar({ onMenu, onAddEmployee }) {
             </div>
           )}
         </div>
-        <button className="btn" onClick={onAddEmployee}>
-          <IconPlus width="14" height="14" /> Add Employee
-        </button>
+        {canDo(currentUser?.role, 'manageEmployees') && (
+          <button className="btn" onClick={onAddEmployee}>
+            <IconPlus width="14" height="14" /> Add Employee
+          </button>
+        )}
       </div>
 
       <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
