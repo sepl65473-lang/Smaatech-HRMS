@@ -327,7 +327,7 @@ export default function Attendance() {
                     <th style={{ whiteSpace: 'nowrap' }}>Check-in</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Check-out</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Status</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Location</th>
+                    <th style={{ whiteSpace: 'nowrap', maxWidth: 240 }}>Location</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -336,15 +336,15 @@ export default function Attendance() {
                     const locText = a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc;
                     return (
                       <tr key={a.id}>
-                        <td>
-                          <div className="emp-cell">
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <div className="emp-cell" style={{ whiteSpace: 'nowrap' }}>
                             <Avatar name={a.name} size={30} />
-                            <div className="emp-name">{a.name}</div>
+                            <div className="emp-name" style={{ whiteSpace: 'nowrap' }}>{a.name}</div>
                           </div>
                         </td>
-                        <td>{a.dept}</td>
-                        <td className="muted-text">{shiftNameFor(a.empId)}</td>
-                        <td className="mono">
+                        <td style={{ whiteSpace: 'nowrap' }}>{a.dept}</td>
+                        <td className="muted-text" style={{ whiteSpace: 'nowrap' }}>{shiftNameFor(a.empId)}</td>
+                        <td className="mono" style={{ whiteSpace: 'nowrap' }}>
                           {a.checkIn || '—'}
                           {a.checkIn && (
                             <button
@@ -360,7 +360,7 @@ export default function Attendance() {
                             <span className="status-dot status-late" title={`Flagged: ${a.anomalyFlags.join(', ')}`} style={{ marginLeft: 6 }} />
                           )}
                         </td>
-                        <td className="mono">
+                        <td className="mono" style={{ whiteSpace: 'nowrap' }}>
                           {a.checkOut || '—'}
                           {a.checkOut && (
                             <button
@@ -373,7 +373,7 @@ export default function Attendance() {
                             </button>
                           )}
                         </td>
-                        <td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
                           {isHR ? (
                             <label className="status-control">
                               <span className={`status-dot ${s.cls}`} />
@@ -396,7 +396,17 @@ export default function Attendance() {
                             </div>
                           )}
                         </td>
-                        <td className="muted-text">
+                        <td
+                          className="muted-text"
+                          style={{
+                            maxWidth: 240,
+                            fontSize: 12,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                          title={locText || undefined}
+                        >
                           {locText ? `📍 ${locText}` : '—'}
                         </td>
                       </tr>
