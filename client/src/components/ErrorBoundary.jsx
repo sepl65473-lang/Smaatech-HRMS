@@ -12,9 +12,17 @@ export class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('[React ErrorBoundary caught error]:', error, errorInfo);
+    if (error?.message && (error.message.includes('dynamically imported module') || error.message.includes('Importing a module script failed'))) {
+      const reloaded = sessionStorage.getItem('chunk_reload');
+      if (!reloaded) {
+        sessionStorage.setItem('chunk_reload', 'true');
+        window.location.reload();
+      }
+    }
   }
 
   handleReload = () => {
+    sessionStorage.removeItem('chunk_reload');
     window.location.reload();
   };
 
