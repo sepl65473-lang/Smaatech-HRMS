@@ -90,6 +90,14 @@ const EXPORT_COLUMNS = [
   { key: 'location', label: 'Location' },
 ];
 
+function cleanLocationText(text) {
+  if (!text) return '—';
+  // Formats raw display_name like "Saheednagar, Khordha, Odisha, 751025, India" -> "Saheednagar, Khordha, Odisha - 751025"
+  return text
+    .replace(/,\s*(\d{5,8})\s*(?:,\s*India)?$/i, (match, pin) => ` - ${pin}`)
+    .replace(/,\s*India$/i, '');
+}
+
 function LiveIndicator({ lastSyncedAt }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -193,7 +201,7 @@ export default function Attendance() {
       checkIn: a.checkIn || '—',
       checkOut: a.checkOut || '—',
       status: STATUS[a.status]?.label || a.status,
-      location: a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc || '—',
+      location: cleanLocationText(a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc),
     })),
     [filtered, shiftNameFor],
   );
@@ -405,9 +413,9 @@ export default function Attendance() {
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }}
-                          title={locText || undefined}
+                          title={cleanLocationText(locText) || undefined}
                         >
-                          {locText ? `📍 ${locText}` : '—'}
+                          {locText ? `📍 ${cleanLocationText(locText)}` : '—'}
                         </td>
                       </tr>
                     );
@@ -543,7 +551,7 @@ export default function Attendance() {
                   <div className="muted-text" style={{ fontSize: 12.5, lineHeight: 1.8 }}>
                     <div><strong>Method:</strong> {detailsRow[`${cap}Details`] || '—'}</div>
                     <div><strong>Coordinates:</strong> {detailsRow[`${cap}Loc`] || '—'} {detailsRow[`${cap}Accuracy`] != null ? `(±${Math.round(detailsRow[`${cap}Accuracy`])}m)` : ''}</div>
-                    <div><strong>Address:</strong> {detailsRow[`${cap}Address`] || 'Not available'}</div>
+                    <div><strong>Address:</strong> {cleanLocationText(detailsRow[`${cap}Address`]) || 'Not available'}</div>
                     <div><strong>Device:</strong> {device ? `${device.name} · ${device.browser} · ${device.os}` : '—'}</div>
                     <div><strong>IP address:</strong> {detailsRow[`${cap}Ip`] || '—'}</div>
                     <div><strong>Device ID:</strong> {detailsRow[`${cap}DeviceId`] || '—'}</div>
