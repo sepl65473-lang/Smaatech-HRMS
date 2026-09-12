@@ -187,19 +187,19 @@ router.post('/qr-checkin', async (req, res) => {
   }
 
   const time = nowTimeIST();
-  const hasGps = gpsResult?.inside;
+  const hasGpsCoords = lat != null && lng != null;
   const device = parseDeviceInfo(req.headers['user-agent']);
   const ip = clientIp(req);
-  const address = hasGps ? await reverseGeocode(lat, lng) : null;
+  const address = hasGpsCoords ? await reverseGeocode(lat, lng) : null;
   const shift = resolveShiftForToday(String(row.empId), settings);
 
   const patch = direction === 'in'
     ? {
         checkIn: time,
         status: isLate(time, shift) ? 'late' : 'present',
-        checkInLoc: hasGps ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
+        checkInLoc: hasGpsCoords ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
         checkInAddress: address,
-        checkInDetails: `QR Check-in${hasGps ? ' + GPS Verified' : ''}`,
+        checkInDetails: `QR Check-in${hasGpsCoords ? ' + GPS Verified' : ''}`,
         checkInIp: ip,
         checkInDevice: device,
       }
@@ -208,9 +208,9 @@ router.post('/qr-checkin', async (req, res) => {
         status: isHalfDay(row.checkIn, time, shift)
           ? 'half-day'
           : isEarlyExit(time, shift) ? 'early-exit' : row.status,
-        checkOutLoc: hasGps ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
+        checkOutLoc: hasGpsCoords ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
         checkOutAddress: address,
-        checkOutDetails: `QR Check-out${hasGps ? ' + GPS Verified' : ''}`,
+        checkOutDetails: `QR Check-out${hasGpsCoords ? ' + GPS Verified' : ''}`,
         checkOutIp: ip,
         checkOutDevice: device,
       };
