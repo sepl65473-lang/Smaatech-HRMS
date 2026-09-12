@@ -321,12 +321,13 @@ export default function Attendance() {
                   <tr>
                     <th>Employee</th><th>Department</th><th>Shift</th><th>Check-in</th>
                     <th>Check-out</th><th>Status</th>
-                    {isHR && <th style={{ textAlign: 'right' }}>Action</th>}
+                    <th style={{ textAlign: 'left' }}>Location</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((a) => {
                     const s = STATUS[a.status] || STATUS.absent;
+                    const locText = a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc;
                     return (
                       <tr key={a.id}>
                         <td>
@@ -389,19 +390,9 @@ export default function Attendance() {
                             </div>
                           )}
                         </td>
-                        {isHR && (
-                          <td style={{ textAlign: 'right' }}>
-                            {a.status === 'leave' ? (
-                              <span className="muted-text">—</span>
-                            ) : !a.checkIn ? (
-                              <button className="mini-btn approve" onClick={() => checkIn(a.id)}>Check in</button>
-                            ) : !a.checkOut ? (
-                              <button className="mini-btn" onClick={() => checkOut(a.id)}>Check out</button>
-                            ) : (
-                              <span className="muted-text">Done</span>
-                            )}
-                          </td>
-                        )}
+                        <td style={{ fontSize: 12 }} className="muted-text">
+                          {locText ? `📍 ${locText}` : '—'}
+                        </td>
                       </tr>
                     );
                   })}
