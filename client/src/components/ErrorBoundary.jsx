@@ -22,8 +22,8 @@ export class ErrorBoundary extends React.Component {
   }
 
   handleReload = () => {
-    sessionStorage.removeItem('chunk_reload');
-    window.location.reload();
+    sessionStorage.clear();
+    window.location.href = window.location.origin + window.location.pathname + '?v=' + Date.now();
   };
 
   render() {
