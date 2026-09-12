@@ -10,6 +10,7 @@ import {
   IconPlus, IconCheck, IconX, IconFaceScan, IconDashboard, IconChevronRight,
 } from '../components/Icons';
 import { formatDate, daysBetween, formatINR, leaveTagClass, leaveTagLabel, todayISO } from '../lib/helpers';
+import { ATTENDANCE_STATUS } from '../lib/attendanceStatus';
 import Modal from '../components/Modal';
 import { downloadPayslip } from '../lib/payslip';
 import { apiFetchBlob } from '../lib/apiClient';
