@@ -10,8 +10,76 @@ import {
   IconPlus, IconCheck, IconX, IconFaceScan, IconDashboard, IconChevronRight,
 } from '../components/Icons';
 import { formatDate, daysBetween, formatINR, leaveTagClass, leaveTagLabel, todayISO } from '../lib/helpers';
-import { ATTENDANCE_STATUS } from '../lib/attendanceStatus';
+import Modal from '../components/Modal';
 import { downloadPayslip } from '../lib/payslip';
+import { apiFetchBlob } from '../lib/apiClient';
+
+function AttendancePhotoPreview({ attendanceId, which }) {
+  const [url, setUrl] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = null;
+    setLoading(true);
+    setError(false);
+
+    apiFetchBlob(`/files/attendance/${attendanceId}/${which}`)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attendanceId, which]);
+
+  if (loading) {
+    return (
+      <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '10px 0', textAlign: 'center' }}>
+        📷 Loading captured face selfie…
+      </div>
+    );
+  }
+
+  if (error || !url) {
+    return (
+      <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '4px 0', fontStyle: 'italic' }}>
+        No face photo captured (e.g. HR Manual / QR Punch).
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10, textAlign: 'center' }}>
+      <img
+        src={url}
+        alt="Captured Selfie Evidence"
+        style={{
+          maxWidth: '100%',
+          maxHeight: 220,
+          borderRadius: 10,
+          border: '2px solid var(--accent, #3b7ddd)',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+          objectFit: 'cover',
+        }}
+      />
+      <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: 4 }}>
+        🔒 Verified Captured Face Snapshot
+      </div>
+    </div>
+  );
+}
 
 export default function MyDashboard() {
   const {
@@ -34,6 +102,7 @@ export default function MyDashboard() {
   const [pendingRowId, setPendingRowId] = useState(null);
   const [pendingLoc, setPendingLoc] = useState(null);
   const [faceEnrollOpen, setFaceEnrollOpen] = useState(false);
+  const [selfieModalRow, setSelfieModalRow] = useState(null);
 
   // Haversine distance calculation in meters
   const getDistanceMeters = (lat1, lon1, lat2, lon2) => {
@@ -301,10 +370,32 @@ export default function MyDashboard() {
             <div className="leave-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
               <div className="leave-body">
                 <div className="leave-meta">
-                  Check-in: <strong className="mono">{todayRow.checkIn || '—'}</strong> 
+                  Check-in: <strong className="mono">{todayRow.checkIn || '—'}</strong>
+                  {todayRow.checkIn && (
+                    <button
+                      type="button"
+                      className="icon-btn sm"
+                      title="View verified check-in selfie"
+                      style={{ marginLeft: 6, fontSize: 13 }}
+                      onClick={() => setSelfieModalRow({ ...todayRow, which: 'checkIn' })}
+                    >
+                      📸
+                    </button>
+                  )}
                   {todayRow.checkInLoc && <span className="muted-text"> ({todayRow.checkInDetails || 'GPS'}: {todayRow.checkInLoc})</span>}
                   <br />
                   Check-out: <strong className="mono">{todayRow.checkOut || '—'}</strong>
+                  {todayRow.checkOut && (
+                    <button
+                      type="button"
+                      className="icon-btn sm"
+                      title="View verified check-out selfie"
+                      style={{ marginLeft: 6, fontSize: 13 }}
+                      onClick={() => setSelfieModalRow({ ...todayRow, which: 'checkOut' })}
+                    >
+                      📸
+                    </button>
+                  )}
                   {todayRow.checkOutLoc && <span className="muted-text"> ({todayRow.checkOutDetails || 'GPS'}: {todayRow.checkOutLoc})</span>}
                 </div>
               </div>
@@ -602,6 +693,23 @@ export default function MyDashboard() {
         onClose={() => setQrModalOpen(false)}
         onScanSuccess={handleQrScanSuccess}
       />
+
+      <Modal
+        open={Boolean(selfieModalRow)}
+        title={selfieModalRow ? `Verified ${selfieModalRow.which === 'checkIn' ? 'Check-in' : 'Check-out'} Selfie` : ''}
+        subtitle={selfieModalRow?.date}
+        onClose={() => setSelfieModalRow(null)}
+        width={440}
+      >
+        {selfieModalRow && (
+          <div>
+            <div className="muted-text" style={{ fontSize: 13, marginBottom: 8, textAlign: 'center' }}>
+              <strong>{me?.name || currentUser.name}</strong> · {selfieModalRow[selfieModalRow.which]}
+            </div>
+            <AttendancePhotoPreview attendanceId={selfieModalRow.id} which={selfieModalRow.which} />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

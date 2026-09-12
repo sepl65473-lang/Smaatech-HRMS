@@ -11,6 +11,74 @@ import { todayISO } from '../lib/helpers';
 import { resolveShiftForToday } from '../lib/shifts';
 import { downloadCSV } from '../lib/exportCsv';
 import { ATTENDANCE_STATUS as STATUS } from '../lib/attendanceStatus';
+import { apiFetchBlob } from '../lib/apiClient';
+
+function AttendancePhotoPreview({ attendanceId, which }) {
+  const [url, setUrl] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = null;
+    setLoading(true);
+    setError(false);
+
+    apiFetchBlob(`/files/attendance/${attendanceId}/${which}`)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attendanceId, which]);
+
+  if (loading) {
+    return (
+      <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '10px 0', textAlign: 'center' }}>
+        📷 Loading captured face selfie…
+      </div>
+    );
+  }
+
+  if (error || !url) {
+    return (
+      <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '4px 0', fontStyle: 'italic' }}>
+        No face photo captured (e.g. HR Manual / QR Punch).
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10, textAlign: 'center' }}>
+      <img
+        src={url}
+        alt="Captured Selfie Evidence"
+        style={{
+          maxWidth: '100%',
+          maxHeight: 220,
+          borderRadius: 10,
+          border: '2px solid var(--accent, #3b7ddd)',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+          objectFit: 'cover',
+        }}
+      />
+      <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: 4 }}>
+        🔒 Verified Captured Face Snapshot
+      </div>
+    </div>
+  );
+}
 
 const EXPORT_COLUMNS = [
   { key: 'name', label: 'Employee' },
@@ -271,21 +339,33 @@ export default function Attendance() {
                         <td className="muted-text">{shiftNameFor(a.empId)}</td>
                         <td className="mono">
                           {a.checkIn || '—'}
-                          {(a.checkIn || a.checkOut) && (
+                          {a.checkIn && (
                             <button
                               className="icon-btn sm"
-                              title="View check-in/out details"
-                              style={{ marginLeft: 6 }}
+                              title="View captured check-in selfie & details"
+                              style={{ marginLeft: 6, fontSize: 13 }}
                               onClick={() => setDetailsRow(a)}
                             >
-                              <IconInfo width="13" height="13" />
+                              📸
                             </button>
                           )}
                           {a.anomalyFlags?.length > 0 && (
                             <span className="status-dot status-late" title={`Flagged: ${a.anomalyFlags.join(', ')}`} style={{ marginLeft: 6 }} />
                           )}
                         </td>
-                        <td className="mono">{a.checkOut || '—'}</td>
+                        <td className="mono">
+                          {a.checkOut || '—'}
+                          {a.checkOut && (
+                            <button
+                              className="icon-btn sm"
+                              title="View captured check-out selfie & details"
+                              style={{ marginLeft: 6, fontSize: 13 }}
+                              onClick={() => setDetailsRow(a)}
+                            >
+                              📸
+                            </button>
+                          )}
+                        </td>
                         <td>
                           {isHR ? (
                             <label className="status-control">
@@ -462,6 +542,7 @@ export default function Attendance() {
                     <div><strong>Device ID:</strong> {detailsRow[`${cap}DeviceId`] || '—'}</div>
                     <div><strong>Face match confidence:</strong> {detailsRow[`${cap}FaceConfidence`] != null ? `${Math.round(detailsRow[`${cap}FaceConfidence`])}%` : 'Not available yet'}</div>
                   </div>
+                  <AttendancePhotoPreview attendanceId={detailsRow.id} which={dir} />
                 </div>
               );
             })}
