@@ -267,9 +267,9 @@ export default function Dashboard() {
             <IconDashboard width="13" height="13" />
             <span>Dashboard</span>
             <IconChevronRight width="12" height="12" />
-            <span className="breadcrumb-current">Admin Dashboard</span>
+            <span className="breadcrumb-current">HR Dashboard</span>
           </div>
-          <h1 className="page-header-title">Admin Dashboard</h1>
+          <h1 className="page-header-title">HR Dashboard</h1>
         </div>
         <div className="page-header-actions">
           <button className="btn btn-ghost dropdown-btn" onClick={handleExport}>
