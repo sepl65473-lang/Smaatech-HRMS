@@ -320,8 +320,7 @@ export default function Attendance() {
                 <thead>
                   <tr>
                     <th>Employee</th><th>Department</th><th>Shift</th><th>Check-in</th>
-                    <th>Check-out</th><th>Status</th>
-                    <th style={{ textAlign: 'left' }}>Location</th>
+                    <th>Check-out</th><th>Status</th><th>Location</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -390,7 +389,7 @@ export default function Attendance() {
                             </div>
                           )}
                         </td>
-                        <td style={{ fontSize: 12 }} className="muted-text">
+                        <td className="muted-text">
                           {locText ? `📍 ${locText}` : '—'}
                         </td>
                       </tr>
