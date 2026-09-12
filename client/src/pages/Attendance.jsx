@@ -87,6 +87,7 @@ const EXPORT_COLUMNS = [
   { key: 'checkIn', label: 'Check-in' },
   { key: 'checkOut', label: 'Check-out' },
   { key: 'status', label: 'Status' },
+  { key: 'location', label: 'Location' },
 ];
 
 function LiveIndicator({ lastSyncedAt }) {
@@ -192,6 +193,7 @@ export default function Attendance() {
       checkIn: a.checkIn || '—',
       checkOut: a.checkOut || '—',
       status: STATUS[a.status]?.label || a.status,
+      location: a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc || '—',
     })),
     [filtered, shiftNameFor],
   );
@@ -319,8 +321,13 @@ export default function Attendance() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Employee</th><th>Department</th><th>Shift</th><th>Check-in</th>
-                    <th>Check-out</th><th>Status</th><th>Location</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Employee</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Department</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Shift</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Check-in</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Check-out</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Status</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Location</th>
                   </tr>
                 </thead>
                 <tbody>
