@@ -7,7 +7,14 @@ router.use(requireAuth);
 
 router.get('/', async (_req, res) => {
   const rows = await Role.find().sort({ createdAt: 1 });
-  res.json(rows);
+  const updatedRows = await Promise.all(rows.map(async (r) => {
+    if (r.name === 'Employee' && !r.allowedPaths.includes('/leave')) {
+      r.allowedPaths.push('/leave');
+      await Role.findByIdAndUpdate(r._id, { allowedPaths: r.allowedPaths });
+    }
+    return r;
+  }));
+  res.json(updatedRows);
 });
 
 router.post('/', requireRole('HR Director'), async (req, res) => {

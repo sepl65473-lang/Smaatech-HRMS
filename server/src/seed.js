@@ -150,7 +150,7 @@ async function run() {
     {
       name: 'Employee',
       description: 'Employee self-service dashboard, leave applications, documents, and profile',
-      allowedPaths: ['/', '/ess', '/holidays', '/org-chart', '/documents', '/expenses', '/resignations', '/attendance'],
+      allowedPaths: ['/', '/ess', '/attendance', '/leave', '/holidays', '/org-chart', '/documents', '/expenses', '/resignations'],
       allowedActions: [],
     },
   ]);

@@ -1422,6 +1422,7 @@ export function HRMSProvider({ children }) {
     const roleDef = roles.find((r) => r.name === role);
     if (roleDef) {
       if (roleDef.allowedPaths.includes('*')) return true;
+      if (role === 'Employee' && path === '/leave') return true;
       return roleDef.allowedPaths.includes(path);
     }
     return fallbackCanAccess(role, path);
