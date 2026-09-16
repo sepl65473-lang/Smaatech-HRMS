@@ -9,12 +9,16 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
-import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './lib/swagger.js';
 import logger from './lib/logger.js';
-import { isE2EModeEnabled, warnIfE2EEnabled } from './lib/e2eGuard.js';
+import { warnIfE2EEnabled } from './lib/e2eGuard.js';
+import {
+  apiLimiter, ipCeilingLimiter,
+  loginIpLimiter, loginBurstLimiter, loginAccountLimiter,
+  faceUserLimiter, faceIpLimiter, attendanceUserLimiter, financialUserLimiter,
+} from './middleware/rateLimits.js';
 import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
 import usersRoutes from './routes/users.js';
@@ -178,52 +182,37 @@ app.use(cors({
   maxAge: 600,
 }));
 
-// Rate Limiters
+// Rate limiting lives in middleware/rateLimits.js. It is LAYERED rather than
+// purely per-IP, because 100 employees behind one office NAT previously shared
+// a single 10-login bucket. See that file for the full rationale.
 //
-// Relaxed for automated tests only. A browser-E2E run makes hundreds of
-// requests from a single address across many roles, which would otherwise trip
-// the real limits for reasons unrelated to what is under test. Both conditions
-// are impossible on a real deployment: NODE_ENV is 'production' there, which
-// also forces isE2EModeEnabled() false — see lib/e2eGuard.js. The limiters
-// themselves are unchanged and still apply in production.
-const isTestEnv = process.env.NODE_ENV === 'test' || isE2EModeEnabled();
-
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many requests, please try again later.' } }
-});
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 15,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many authentication attempts. Please try again in 15 minutes.' } }
-});
-
-const financialLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many transaction requests. Please try again later.' } }
-});
-
+// ORDER MATTERS HERE:
+//   - the IP ceiling and the general API limiter need no request body, so they
+//     run first and shed abusive load before anything is parsed;
+//   - the per-ACCOUNT login limiter keys on the submitted email, so it must run
+//     AFTER express.json(). Registering it earlier silently fell back to the IP
+//     key and provided no account-level protection at all.
+app.use('/api/', ipCeilingLimiter);
 app.use('/api/', apiLimiter);
-app.use('/api/v1/auth/login', authLimiter);
-app.use('/api/v1/auth/verify-2fa', authLimiter);
-app.use('/api/v1/auth/forgot-password', authLimiter);
-app.use('/api/v1/auth/reset-password', authLimiter);
-app.use('/api/v1/resignations/:id/fnf/pay', financialLimiter);
 
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+
+// Login: three independent layers - sustained per-network volume, a short
+// per-network burst, and per-account attempts that no amount of IP rotation
+// can dilute.
+const loginPaths = ['/api/v1/auth/login', '/api/v1/auth/face-login'];
+for (const path of loginPaths) {
+  app.use(path, loginIpLimiter, loginBurstLimiter, loginAccountLimiter);
+}
+app.use('/api/v1/auth/verify-2fa', loginIpLimiter, loginBurstLimiter, loginAccountLimiter);
+app.use('/api/v1/auth/forgot-password', loginIpLimiter, loginAccountLimiter);
+app.use('/api/v1/auth/reset-password', loginIpLimiter, loginAccountLimiter);
+
+// Expensive, CPU-bound routes get their own per-user cap plus an IP backstop.
+app.use('/api/v1/face', faceUserLimiter, faceIpLimiter);
+app.use('/api/v1/attendance', attendanceUserLimiter);
+app.use('/api/v1/resignations/:id/fnf/pay', financialUserLimiter);
 
 // Swagger API Documentation Endpoint
 app.use('/api-docs', swaggerCsp, swaggerUi.serve, swaggerUi.setup(swaggerSpec));

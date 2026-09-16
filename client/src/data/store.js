@@ -1,4 +1,5 @@
 import { apiFetch, apiFetchBlob, setAccessToken } from '../lib/apiClient';
+import { canAccess } from '../lib/permissions';
 
 // ─────────────────────────────────────────────────────────────
 //  DATA LAYER
@@ -398,7 +399,22 @@ export const payComponentsApi = {
 // Load everything at once for the app shell. Requires an authenticated
 // session (employees/attendance/geofence and all 9 modules below are behind
 // requireAuth) — only call this after authApi has established a session.
-export async function loadAll() {
+/**
+ * Hydrates the app.
+ *
+ * `role` is optional and, when given, SKIPS the collections that role cannot
+ * read anyway. Those endpoints already answered 403 and every call site
+ * already fell back to [], so skipping produces an identical result with one
+ * fewer round trip. An ordinary employee was previously issuing 20 requests on
+ * every load, several of which were guaranteed to be refused.
+ *
+ * Omitting `role` keeps the original behaviour of fetching everything, so any
+ * caller that does not know the role yet is unaffected.
+ */
+export async function loadAll(role) {
+  const may = (path) => !role || canAccess(role, path);
+  const isAdmin = !role || role === 'HR Director';
+  const skip = () => Promise.resolve([]);
   const [
     employees, attendance, leaves, payroll, celebrations, holidays,
     recruitment, reviews, expenses, assets, jobs,
@@ -421,16 +437,16 @@ export async function loadAll() {
     payrollApi.list().catch(() => []),
     celebrationsApi.list().catch(() => []),
     holidaysApi.list().catch(() => []),
-    recruitmentApi.list().catch(() => []),
+    may('/recruitment') ? recruitmentApi.list().catch(() => []) : skip(),
     reviewsApi.list().catch(() => []),
     expensesApi.list().catch(() => []),
-    assetsApi.list().catch(() => []),
-    jobsApi.list().catch(() => []),
+    may('/assets') ? assetsApi.list().catch(() => []) : skip(),
+    may('/recruitment') ? jobsApi.list().catch(() => []) : skip(),
     settingsApi.get(),
-    rolesApi.list().catch(() => []),
+    isAdmin ? rolesApi.list().catch(() => []) : skip(),
     masterCategoriesApi.list().catch(() => []),
     masterValuesApi.list().catch(() => []),
-    auditLogsApi.list().catch(() => []),
+    isAdmin ? auditLogsApi.list().catch(() => []) : skip(),
     notificationsApi.list().catch(() => []),
     documentsApi.list().catch(() => []),
     resignationsApi.list().catch(() => []),
@@ -445,8 +461,8 @@ export async function loadAll() {
 }
 
 // Re-reads and refetches all backend collections.
-export async function reloadFromDisk() {
-  return loadAll();
+export async function reloadFromDisk(role) {
+  return loadAll(role);
 }
 
 // Reset company settings back to default values.

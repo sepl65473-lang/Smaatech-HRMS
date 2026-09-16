@@ -152,10 +152,11 @@ export function HRMSProvider({ children }) {
     setLastSyncedAt(Date.now());
   }, []);
 
-  const loadAuthenticatedData = useCallback(async (userId) => {
+  // `role` lets loadAll skip collections this role cannot read anyway.
+  const loadAuthenticatedData = useCallback(async (userId, role) => {
     setLoading(true);
     try {
-      const [all, faceStatus] = await Promise.all([loadAll(), faceApi.status(userId)]);
+      const [all, faceStatus] = await Promise.all([loadAll(role), faceApi.status(userId)]);
       hydrate(all);
       setFaceEnrolled(faceStatus.enrolled);
     } finally {
@@ -194,7 +195,7 @@ export function HRMSProvider({ children }) {
     }
 
     try {
-      await loadAuthenticatedData(user.id);
+      await loadAuthenticatedData(user.id, user.role);
       toast('success', `Welcome back, <strong>${user.name.split(' ')[0]}</strong>`);
     } catch {
       // The session itself is valid (setAuthUser already ran) — only the
@@ -233,7 +234,7 @@ export function HRMSProvider({ children }) {
     const result = await authApi.changePassword(currentPassword, newPassword);
     setAuthUser((user) => (user ? { ...user, mustChangePassword: false } : user));
     const userId = authUser?.id;
-    if (userId) await loadAuthenticatedData(userId).catch(() => {});
+    if (userId) await loadAuthenticatedData(userId, authUser?.role).catch(() => {});
     return result;
   }, [authUser, loadAuthenticatedData]);
 
@@ -302,7 +303,7 @@ export function HRMSProvider({ children }) {
       if (!alive) return;
       if (user) {
         setAuthUser(user);
-        await loadAuthenticatedData(user.id);
+        await loadAuthenticatedData(user.id, user.role);
       } else {
         setLoading(false);
       }
@@ -323,7 +324,7 @@ export function HRMSProvider({ children }) {
     if (!authUser) return undefined;
     const handler = (e) => {
       if (e.key !== null && e.key !== DB_STORAGE_KEY) return;
-      reloadFromDisk().then(hydrate);
+      reloadFromDisk(authUser?.role).then(hydrate);
     };
     window.addEventListener('storage', handler);
     return () => window.removeEventListener('storage', handler);

@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
-import bcrypt from 'bcryptjs';
+import { comparePassword, hashPassword } from '../lib/passwordHasher.js';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
 import RefreshToken from '../models/RefreshToken.js';
@@ -17,7 +16,7 @@ import { getSettingsDoc } from './settings.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { extractDescriptor, matchDescriptor, faceFailureMessage } from '../lib/faceEngine.js';
 import { imageUploadMiddleware } from '../lib/photoStorage.js';
-import { hasValidE2EHeader, isE2EModeEnabled } from '../lib/e2eGuard.js';
+import { hasValidE2EHeader } from '../lib/e2eGuard.js';
 
 const router = Router();
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -25,24 +24,12 @@ const LOCK_THRESHOLD = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
 const faceLoginUpload = imageUploadMiddleware('photo', 'Face-login photo must be a JPEG, PNG, or WebP image.');
 
-// The app-wide 300/15min limiter (index.js) is shared across every /api/*
-// route, so it does little to stop credential stuffing on login/face-login
-// specifically. This one is scoped tighter and just to those two routes.
-// Relaxed under test (Vitest sets NODE_ENV=test) — integration tests make
-// many rapid, legitimate login/verify calls from the same "IP" and would
-// otherwise trip this real limit for reasons unrelated to what's under test.
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  // Relaxed for automated tests only. Browser E2E signs in as five different
-  // roles many times over, all from one address, and would otherwise trip this
-  // real limit for reasons unrelated to what is under test. Both conditions
-  // are impossible in production: NODE_ENV is 'production' there, which also
-  // makes isE2EModeEnabled() false — see lib/e2eGuard.js.
-  max: (process.env.NODE_ENV === 'test' || isE2EModeEnabled()) ? 1000 : 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many login attempts from this network. Please try again in a few minutes.' } },
-});
+// Rate limiting for these routes is layered and lives in
+// middleware/rateLimits.js, wired in app.js. It used to be a single
+// 10-per-IP bucket declared here, which meant 100 employees behind one
+// office NAT shared ten sign-ins per fifteen minutes between them.
+// Per-account protection now comes from loginAccountLimiter plus the
+// 5-strike lockout below, neither of which depends on the source address.
 
 // Guards against a dangling employeeId (e.g. a demo/data reseed deleted the
 // employee a user account was linked to) so a login/refresh/me response
@@ -110,7 +97,7 @@ async function maybeStartTwoFactor(user, res, req = null) {
   }
 
   const otp = String(Math.floor(100000 + Math.random() * 900000));
-  user.loginOtpHash = await bcrypt.hash(otp, 10);
+  user.loginOtpHash = await hashPassword(otp, 10);
   user.loginOtpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
   await user.save();
 
@@ -152,7 +139,7 @@ async function maybeStartTwoFactor(user, res, req = null) {
  *       423:
  *         description: Account locked
  */
-router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
+router.post('/login', validate(loginSchema), async (req, res) => {
   const { email, password } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
 
@@ -165,7 +152,7 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
     return res.status(423).json({ error: { code: 'ACCOUNT_LOCKED', message: `Too many failed attempts. Try again in ${minutes} minute(s).` } });
   }
 
-  const valid = user && await bcrypt.compare(password || '', user.passwordHash);
+  const valid = user && await comparePassword(password || '', user.passwordHash);
   if (!valid) {
     if (user) {
       user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
@@ -208,7 +195,7 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
 // enrolled descriptor, exactly the way attendance check-in already does
 // (handlePunch in routes/attendance.js), so a forged/modified client can't
 // just assert "matched: true" the way the old version of this route did.
-router.post('/face-login', loginLimiter, faceLoginUpload, async (req, res) => {
+router.post('/face-login', faceLoginUpload, async (req, res) => {
   const { email } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   if (!user) {
@@ -257,7 +244,7 @@ router.post('/face-login', loginLimiter, faceLoginUpload, async (req, res) => {
 // code counts toward the same failedLoginAttempts/lockedUntil lockout as a
 // wrong password — closes the gap where an IP-rotating attacker could
 // otherwise keep guessing the 6-digit code past what loginLimiter alone stops.
-router.post('/verify-2fa', loginLimiter, validate(verifyTwoFactorSchema), async (req, res) => {
+router.post('/verify-2fa', validate(verifyTwoFactorSchema), async (req, res) => {
   const { email, otp } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   if (!user || !user.loginOtpHash || !user.loginOtpExpiresAt || user.loginOtpExpiresAt < new Date()) {
@@ -266,7 +253,7 @@ router.post('/verify-2fa', loginLimiter, validate(verifyTwoFactorSchema), async 
   if (user.active === false) {
     return res.status(403).json({ error: { code: 'ACCOUNT_DISABLED', message: 'This account has been deactivated.' } });
   }
-  const otpValid = await bcrypt.compare(String(otp || ''), user.loginOtpHash);
+  const otpValid = await comparePassword(String(otp || ''), user.loginOtpHash);
   if (!otpValid) {
     user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
     if (user.failedLoginAttempts >= LOCK_THRESHOLD) {
@@ -414,12 +401,12 @@ router.post('/change-password', requireAuth, validate(changePasswordSchema), asy
   const user = await User.findById(req.auth.sub);
   if (!user) return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'Session expired.' } });
 
-  const valid = await bcrypt.compare(currentPassword || '', user.passwordHash);
+  const valid = await comparePassword(currentPassword || '', user.passwordHash);
   if (!valid) {
     return res.status(400).json({ error: { code: 'INVALID_PASSWORD', message: 'Current password is incorrect.' } });
   }
 
-  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.passwordHash = await hashPassword(newPassword, 10);
   user.mustChangePassword = false;
   await user.save();
 
@@ -453,7 +440,7 @@ router.post('/change-password', requireAuth, validate(changePasswordSchema), asy
 // old flow where the client just self-certified an email address with no
 // verification at all. The code itself is never returned in the response;
 // it only ever reaches the user via their inbox.
-router.post('/forgot-password', loginLimiter, validate(forgotPasswordSchema), async (req, res) => {
+router.post('/forgot-password', validate(forgotPasswordSchema), async (req, res) => {
   const { email } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   // Same response whether or not the account exists, so this can't be used
@@ -464,7 +451,7 @@ router.post('/forgot-password', loginLimiter, validate(forgotPasswordSchema), as
   }
 
   const otp = String(Math.floor(100000 + Math.random() * 900000));
-  user.otpHash = await bcrypt.hash(otp, 10);
+  user.otpHash = await hashPassword(otp, 10);
   user.otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
   await user.save();
 
@@ -485,13 +472,13 @@ router.post('/forgot-password', loginLimiter, validate(forgotPasswordSchema), as
 // lockout as a wrong password/2FA guess — closes the gap where an
 // IP-rotating attacker could otherwise keep guessing the 6-digit code past
 // what loginLimiter alone stops (mirrors /verify-2fa).
-router.post('/reset-password', loginLimiter, validate(resetPasswordSchema), async (req, res) => {
+router.post('/reset-password', validate(resetPasswordSchema), async (req, res) => {
   const { email, otp, newPassword } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
   if (!user || !user.otpHash || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
     return res.status(400).json({ error: { code: 'INVALID_OTP', message: 'Code expired or not requested — request a new one.' } });
   }
-  const otpValid = await bcrypt.compare(String(otp || ''), user.otpHash);
+  const otpValid = await comparePassword(String(otp || ''), user.otpHash);
   if (!otpValid) {
     user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
     if (user.failedLoginAttempts >= LOCK_THRESHOLD) {
@@ -502,7 +489,7 @@ router.post('/reset-password', loginLimiter, validate(resetPasswordSchema), asyn
     return res.status(400).json({ error: { code: 'INVALID_OTP', message: 'Incorrect verification code.' } });
   }
 
-  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.passwordHash = await hashPassword(newPassword, 10);
   user.otpHash = null;
   user.otpExpiresAt = null;
   if (user.failedLoginAttempts || user.lockedUntil) {

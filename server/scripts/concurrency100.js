@@ -47,7 +47,18 @@ const PASSWORD = 'LoadTestPass123';
 // address comes from X-Forwarded-For. 100 employees on 100 phones are 100
 // distinct addresses; sending them all from one makes the per-IP rate limiter
 // reject 90% of the run and measures the limiter rather than the system.
-const ipFor = (i) => `10.${Math.floor(i / 256) % 256}.${i % 256}.${(i % 250) + 1}`;
+// SAME_IP=1 puts every virtual employee behind ONE public address, which is
+// what an office NAT actually looks like. This is the case the original run
+// never exercised: it always handed each user its own X-Forwarded-For, so the
+// per-IP limiter was never under test and a shared-bucket failure could not
+// show up. Both modes matter, so both are run.
+const SAME_IP = process.env.SAME_IP === '1';
+const OFFICE_IP = '203.0.113.7';
+const ipFor = (i) => (SAME_IP ? OFFICE_IP : `10.${Math.floor(i / 256) % 256}.${i % 256}.${(i % 250) + 1}`);
+
+const outMs = [];
+const outCounts = { ok: 0, rateLimited: 0, rejected: 0, error: 0 };
+const outCodes = {};
 
 const pct = (sorted, p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))] : 0);
 
@@ -236,13 +247,47 @@ Firing ${USERS} SIMULTANEOUS login + face check-in flows...
       } catch (err) {
         counts.punchError += 1;
       }
+
+      // Check-OUT, same employee, same row. Runs only if the punch-in worked,
+      // because checking out of a shift that never started is a different test.
+      const t2 = performance.now();
+      try {
+        const res = await fetch(`${BASE}/api/v1/attendance/${rowId}/check-out`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'X-Forwarded-For': ipFor(i) },
+          body: buildForm(faceJpeg, { deviceId: `load-device-${i}`, lat: 19.0760, lng: 72.8777, accuracy: 10 }),
+        });
+        outMs.push(performance.now() - t2);
+        if (res.status === 200) outCounts.ok += 1;
+        else if (res.status === 429) outCounts.rateLimited += 1;
+        else {
+          const body = await res.json().catch(() => ({}));
+          const code = body?.error?.code || `HTTP_${res.status}`;
+          outCodes[code] = (outCodes[code] || 0) + 1;
+          outCounts.rejected += 1;
+        }
+      } catch {
+        outCounts.error += 1;
+      }
     }));
 
     const wallMs = Date.now() - startedAt;
-    loginMs.sort((a, b) => a - b); punchMs.sort((a, b) => a - b);
+    loginMs.sort((a, b) => a - b); punchMs.sort((a, b) => a - b); outMs.sort((a, b) => a - b);
 
     // ── Correctness under concurrency ───────────────────────────────────────
     const withCheckIn = await Attendance.countDocuments({ company: COMPANY, date, checkIn: { $ne: null } });
+    const withCheckOut = await Attendance.countDocuments({ company: COMPANY, date, checkOut: { $ne: null } });
+    // Cross-user contamination: every row for the day must belong to exactly
+    // one expected employee, and no employee may own two rows.
+    const rows = await Attendance.find({ company: COMPANY, date }).select('empId checkIn checkOut').lean();
+    const expected = new Set(users.map((u) => String(u.employeeId)));
+    const seen = new Set();
+    let crossUser = 0;
+    for (const r of rows) {
+      const id = String(r.empId);
+      if (!expected.has(id) || seen.has(id)) crossUser += 1;
+      seen.add(id);
+    }
     const dupes = await Attendance.aggregate([
       { $match: { company: COMPANY, date } },
       { $group: { _id: { empId: '$empId', date: '$date' }, n: { $sum: 1 } } },
@@ -252,22 +297,33 @@ Firing ${USERS} SIMULTANEOUS login + face check-in flows...
     console.log('════════ RESULT ════════');
     console.log(`Virtual users              : ${USERS}`);
     console.log(`Wall clock                 : ${(wallMs / 1000).toFixed(1)}s`);
+    console.log(`Source addresses           : ${SAME_IP ? `ONE shared office IP (${OFFICE_IP})` : `${USERS} distinct`}`);
+    console.log(`Throughput                 : ${(( counts.loginOk + counts.punchOk + outCounts.ok) / (wallMs/1000)).toFixed(1)} successful req/s`);
     console.log('');
     console.log('LOGIN');
     console.log(`  succeeded                : ${counts.loginOk}`);
     console.log(`  rate-limited (expected)  : ${counts.loginRateLimited}`);
     console.log(`  failed                   : ${counts.loginFailed}`);
-    console.log(`  p50 / p95 / max          : ${Math.round(pct(loginMs,50))} / ${Math.round(pct(loginMs,95))} / ${Math.round(loginMs.at(-1) || 0)} ms`);
+    console.log(`  p50/p95/p99/max          : ${Math.round(pct(loginMs,50))} / ${Math.round(pct(loginMs,95))} / ${Math.round(pct(loginMs,99))} / ${Math.round(loginMs.at(-1) || 0)} ms`);
     console.log('');
     console.log('FACE CHECK-IN');
     console.log(`  succeeded                : ${counts.punchOk}`);
     console.log(`  rate-limited             : ${counts.punchRateLimited}`);
     console.log(`  rejected by a check      : ${counts.punchRejected} ${Object.keys(rejectionCodes).length ? JSON.stringify(rejectionCodes) : ''}`);
     console.log(`  network/transport errors : ${counts.punchError}`);
-    console.log(`  p50 / p95 / max          : ${Math.round(pct(punchMs,50))} / ${Math.round(pct(punchMs,95))} / ${Math.round(punchMs.at(-1) || 0)} ms`);
+    console.log(`  p50/p95/p99/max          : ${Math.round(pct(punchMs,50))} / ${Math.round(pct(punchMs,95))} / ${Math.round(pct(punchMs,99))} / ${Math.round(punchMs.at(-1) || 0)} ms`);
+    console.log('');
+    console.log('FACE CHECK-OUT');
+    console.log(`  succeeded                : ${outCounts.ok}`);
+    console.log(`  rate-limited             : ${outCounts.rateLimited}`);
+    console.log(`  rejected by a check      : ${outCounts.rejected} ${Object.keys(outCodes).length ? JSON.stringify(outCodes) : ''}`);
+    console.log(`  network/transport errors : ${outCounts.error}`);
+    console.log(`  p50/p95/p99/max          : ${Math.round(pct(outMs,50))} / ${Math.round(pct(outMs,95))} / ${Math.round(pct(outMs,99))} / ${Math.round(outMs.at(-1) || 0)} ms`);
     console.log('');
     console.log('CORRECTNESS');
     console.log(`  attendance rows with a check-in : ${withCheckIn}`);
+    console.log(`  attendance rows with a check-out: ${withCheckOut}`);
+    console.log(`  CROSS-USER row errors           : ${crossUser}`);
     console.log(`  DUPLICATE employee-day rows     : ${dupes.length}  ${dupes.length === 0 ? '(none — unique index held)' : '*** RACE CONDITION ***'}`);
 
     try {
