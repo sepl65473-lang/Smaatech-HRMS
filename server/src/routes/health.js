@@ -4,6 +4,7 @@ import os from 'node:os';
 import { requireInternalAccess } from '../middleware/internalAuth.js';
 import { poolStats as facePoolStats } from '../lib/faceWorkerPool.js';
 import { lastBackupStatus } from '../lib/backupJob.js';
+import { portalUrl } from '../lib/portalUrl.js';
 
 const router = Router();
 
@@ -28,6 +29,18 @@ const DEPLOYED_COMMIT = (
   || ''
 ).slice(0, 7) || null;
 
+// The address every onboarding email will send a new employee to.
+//
+// This is NOT decoration. It is derived from APP_PORTAL_URL/CLIENT_ORIGIN, both
+// of which live in the deployment's own dashboard and cannot be read from
+// outside - so before this, nobody could confirm what link employees would
+// actually receive until one of them received a wrong one. The template
+// previously carried a hardcoded domain that was verified unreachable, which is
+// exactly that failure. It is a public URL, not a secret.
+//
+// null means no address is configured, in which case the welcome email omits
+// the sign-in button rather than shipping a dead link.
+
 const DB_STATES = {
   0: 'disconnected',
   1: 'connected',
@@ -45,6 +58,7 @@ router.get('/health', (_req, res) => {
     status: isHealthy ? 'ok' : 'degraded',
     db: dbStatus,
     commit: DEPLOYED_COMMIT,
+    portalUrl: portalUrl(),
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
   });

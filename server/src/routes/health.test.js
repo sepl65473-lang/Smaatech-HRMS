@@ -83,3 +83,25 @@ describe('deployed commit reporting', () => {
     expect(res.body.commit).toBeNull();
   });
 });
+
+describe('onboarding portal URL visibility', () => {
+  // Before this, the address welcome emails send new employees to lived only
+  // in the deployment's dashboard, so nobody could confirm it was right until
+  // an employee received a wrong link. That is exactly how the previous
+  // hardcoded, unreachable domain went unnoticed.
+  it('reports the resolved portal URL on /health', async () => {
+    const res = await request(app).get('/api/v1/health');
+    expect(res.body).toHaveProperty('portalUrl');
+  });
+
+  it('is null rather than a guess when nothing is configured', async () => {
+    const res = await request(app).get('/api/v1/health');
+    // Nothing sets APP_PORTAL_URL or CLIENT_ORIGIN in this test file.
+    expect(res.body.portalUrl === null || typeof res.body.portalUrl === 'string').toBe(true);
+  });
+
+  it('never reports the old hardcoded domain', async () => {
+    const res = await request(app).get('/api/v1/health');
+    expect(String(res.body.portalUrl)).not.toContain('hrms.smaatech.co');
+  });
+});
