@@ -12,6 +12,7 @@ import { resolveShiftForToday } from '../lib/shifts';
 import { downloadCSV } from '../lib/exportCsv';
 import { ATTENDANCE_STATUS as STATUS } from '../lib/attendanceStatus';
 import { apiFetchBlob } from '../lib/apiClient';
+import { attendanceApi } from '../data/store';
 
 function AttendancePhotoPreview({ attendanceId, which }) {
   const [url, setUrl] = useState(null);
@@ -206,15 +207,60 @@ export default function Attendance() {
     [filtered, shiftNameFor],
   );
 
-  const exportCsv = () => downloadCSV('attendance-roster', exportRows, EXPORT_COLUMNS);
-  const exportXlsx = async () => {
+  const [exporting, setExporting] = useState(false);
+
+  // Exports pull the FULL result set from the server rather than reusing the
+  // hydrated list. That list comes from the uncapped-looking GET /attendance,
+  // which the server limits to 100 rows to protect itself - so with 100
+  // employees a single day filled it and every export silently lost people.
+  // Nothing is trimmed quietly any more: if the safety valve is ever reached
+  // the user is told.
+  const collectExportRows = useCallback(async () => {
+    const { rows, truncated } = await attendanceApi.listAll();
+    if (truncated) {
+      toast('error', 'This export is too large to build in the browser. Narrow the date range and try again.');
+      return null;
+    }
+    const scoped = rows.filter((a) => {
+      const deptMatch = dept === 'All' || a.dept === dept;
+      const statusMatch = status === 'all' || a.status === status;
+      return deptMatch && statusMatch;
+    });
+    return scoped.map((a) => ({
+      name: a.name,
+      dept: a.dept,
+      shift: shiftNameFor(a.empId),
+      checkIn: a.checkIn || '—',
+      checkOut: a.checkOut || '—',
+      status: STATUS[a.status]?.label || a.status,
+      location: cleanLocationText(a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc),
+    }));
+  }, [dept, status, shiftNameFor, toast]);
+
+  const runExport = useCallback(async (build) => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const rows = await collectExportRows();
+      if (rows) await build(rows);
+    } catch (err) {
+      // Say what actually went wrong; the API client now classifies this
+      // properly instead of reporting every failure as a network error.
+      toast('error', err?.message || 'The export could not be generated.');
+    } finally {
+      setExporting(false);
+    }
+  }, [collectExportRows, exporting, toast]);
+
+  const exportCsv = () => runExport((rows) => downloadCSV('attendance-roster', rows, EXPORT_COLUMNS));
+  const exportXlsx = () => runExport(async (rows) => {
     const { downloadXLSX } = await import('../lib/exportXlsx');
-    downloadXLSX('attendance-roster', exportRows, EXPORT_COLUMNS);
-  };
-  const exportPdf = async () => {
+    downloadXLSX('attendance-roster', rows, EXPORT_COLUMNS);
+  });
+  const exportPdf = () => runExport(async (rows) => {
     const { downloadPDF } = await import('../lib/exportPdf');
-    downloadPDF('attendance-roster', 'Attendance Roster', exportRows, EXPORT_COLUMNS);
-  };
+    downloadPDF('attendance-roster', 'Attendance Roster', rows, EXPORT_COLUMNS);
+  });
 
   const handleRequestCorrection = async () => {
     if (!corrForm.date || !corrForm.checkIn || !corrForm.checkOut || !corrForm.reason) {

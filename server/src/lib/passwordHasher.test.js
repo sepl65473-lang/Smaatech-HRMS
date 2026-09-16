@@ -9,12 +9,15 @@ import bcrypt from 'bcryptjs';
  */
 const originalNodeEnv = process.env.NODE_ENV;
 process.env.NODE_ENV = 'production';
+// Explicit opt-in: the pool stays off for every other suite.
+process.env.HASH_WORKER_FORCE = 'true';
 process.env.HASH_WORKER_POOL_SIZE = '2';
 
 const { comparePassword, hashPassword, poolStats, stopHashPool } = await import('./passwordHasher.js');
 
 afterAll(async () => {
   await stopHashPool();
+  delete process.env.HASH_WORKER_FORCE;
   process.env.NODE_ENV = originalNodeEnv;
 });
 

@@ -223,6 +223,42 @@ export const celebrationsApi = restResource('celebrations', ['list', 'update']);
 
 export const attendanceApi = {
   ...restResource('attendance'),
+  /**
+   * Every attendance row the caller is allowed to see, for export.
+   *
+   * WHY THIS EXISTS: `list()` hits GET /attendance with no paging, and that
+   * branch is capped server-side at 100 rows to avoid an OOM on a large
+   * dataset. The Attendance page exported whatever was in that hydrated list,
+   * so with 100 employees a single working day already fills the cap and every
+   * export from then on was SILENTLY truncated - no error, no warning, just
+   * missing people. The existing E2E export test could not catch it because
+   * its tenant holds fewer rows than the cap.
+   *
+   * This pages through the server's real paginated branch instead, so an
+   * export contains the whole result set. `hardLimit` is a safety valve: it
+   * stops a runaway loop rather than silently trimming, and the caller is told
+   * when it was hit so nothing is ever quietly dropped again.
+   */
+  async listAll({ from, to, pageSize = 200, hardLimit = 100000 } = {}) {
+    const rows = [];
+    let page = 1;
+    let total = null;
+    let truncated = false;
+    for (;;) {
+      const qs = new URLSearchParams({ page: String(page), limit: String(pageSize) });
+      if (from) qs.set('from', from);
+      if (to) qs.set('to', to);
+      // eslint-disable-next-line no-await-in-loop
+      const body = await apiFetch(`/attendance?${qs.toString()}`);
+      const batch = Array.isArray(body) ? body : (body.rows || []);
+      if (total == null) total = Array.isArray(body) ? batch.length : (body.total ?? batch.length);
+      rows.push(...batch);
+      if (batch.length < pageSize || rows.length >= total) break;
+      if (rows.length >= hardLimit) { truncated = true; break; }
+      page += 1;
+    }
+    return { rows, total: total ?? rows.length, truncated };
+  },
   // The verified self check-in/out path — the server independently re-derives
   // geofence distance and lateness rather than trusting anything in `payload`.
   checkIn: (id, payload) => apiFetch(`/attendance/${id}/check-in`, { method: 'POST', body: payload }),
@@ -268,6 +304,8 @@ export const geofenceApi = {
   update: (patch) => apiFetch('/settings', { method: 'PATCH', body: patch }),
 };
 
+let bootstrapPromise = null;
+
 export const authApi = {
   // Returns either { accessToken, user } (session issued immediately) or
   // { requiresTwoFactor: true, email } (server emailed a real OTP and is
@@ -294,15 +332,30 @@ export const authApi = {
   },
   // Called on app load: no access token in memory yet (a page refresh wipes
   // JS memory), but a valid httpOnly refresh cookie may still be present.
-  async bootstrap() {
-    try {
-      const data = await apiFetch('/auth/refresh', { method: 'POST', skipAuth: true });
-      setAccessToken(data.accessToken);
-      return data.user;
-    } catch {
-      setAccessToken(null);
-      return null;
+  //
+  // SINGLE-FLIGHT. This went straight to apiFetch, bypassing the shared
+  // refresh promise in lib/apiClient.js, so two overlapping callers each fired
+  // their own POST /auth/refresh. Browser measurement showed the login screen
+  // issuing repeated refreshes, every one of them answering 401 and logging a
+  // console error, before anybody had typed anything. Concurrent callers now
+  // share one request; the promise is released once it settles so a later
+  // bootstrap still works.
+  bootstrap() {
+    if (!bootstrapPromise) {
+      bootstrapPromise = (async () => {
+        try {
+          const data = await apiFetch('/auth/refresh', { method: 'POST', skipAuth: true });
+          setAccessToken(data.accessToken);
+          return data.user;
+        } catch {
+          setAccessToken(null);
+          return null;
+        } finally {
+          bootstrapPromise = null;
+        }
+      })();
     }
+    return bootstrapPromise;
   },
   async logout() {
     try { await apiFetch('/auth/logout', { method: 'POST' }); } catch { /* best effort */ }

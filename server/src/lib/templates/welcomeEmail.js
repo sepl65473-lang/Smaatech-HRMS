@@ -1,4 +1,9 @@
-export function generateWelcomeEmail({ userName, role, tempPassword, company = 'Smaatech', portalUrl = 'https://hrms.smaatech.co' }) {
+// portalUrl is supplied by lib/mailer.js from CLIENT_ORIGIN/APP_PORTAL_URL.
+// It deliberately has NO hardcoded default any more: the previous one pointed
+// at a fixed domain that is not where this deployment lives, so every new
+// employee received a sign-in button that went nowhere. A missing value now
+// omits the button rather than shipping a dead link.
+export function generateWelcomeEmail({ userName, role, tempPassword, company = 'Smaatech', portalUrl = null }) {
   const subject = `Welcome to ${company} HRMS — Your Account Credentials`;
 
   const text = `Hello ${userName},
@@ -6,8 +11,8 @@ export function generateWelcomeEmail({ userName, role, tempPassword, company = '
 Welcome to ${company}! Your HRMS login profile has been created successfully.
 
 Here are your account login details:
-- Portal URL: ${portalUrl}
-- Username / Email: ${userName}
+${portalUrl ? `- Portal URL: ${portalUrl}
+` : ''}- Username / Email: ${userName}
 - Assigned Role: ${role}
 - Temporary Password: ${tempPassword}
 
@@ -56,7 +61,7 @@ ${company}`;
       <strong>Security Requirement:</strong> You will be prompted to set a new password on your first login before accessing the HRMS portal.
     </div>
 
-    <a href="${portalUrl}" class="btn" target="_blank">Sign In to HRMS</a>
+    ${portalUrl ? `<a href="${portalUrl}" class="btn" target="_blank">Sign In to HRMS</a>` : ''}
 
     <div class="footer">
       This is an automated system notification from ${company} HRMS.<br>

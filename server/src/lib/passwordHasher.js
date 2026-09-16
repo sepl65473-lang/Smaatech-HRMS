@@ -39,7 +39,19 @@ const TASK_TIMEOUT_MS = Number(process.env.HASH_TASK_TIMEOUT_MS || 15000);
 
 // Disabled under test so the suite does not pay thread-startup cost on every
 // file, and so a worker cannot outlive a test run.
-const DISABLED = process.env.DISABLE_HASH_WORKER === 'true' || process.env.NODE_ENV === 'test';
+//
+// The VITEST check matters: several suites deliberately set NODE_ENV to
+// 'production' to exercise production-only paths (rate limiting, CORS on a
+// 429). Keying only on NODE_ENV meant those files silently switched this pool
+// ON as a side effect and spawned threads nothing ever tore down, which showed
+// up later in the run as unrelated files timing out. A suite that genuinely
+// wants the real pool opts in explicitly with HASH_WORKER_FORCE.
+const FORCED = process.env.HASH_WORKER_FORCE === 'true';
+const DISABLED = !FORCED && (
+  process.env.DISABLE_HASH_WORKER === 'true'
+  || process.env.NODE_ENV === 'test'
+  || !!process.env.VITEST
+);
 
 let state = null;
 let nextId = 1;

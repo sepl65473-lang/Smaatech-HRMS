@@ -46,6 +46,30 @@ export async function sendOtpEmail(toEmail, otp, purpose = 'password reset') {
   });
 }
 
+/**
+ * The HRMS address a welcome email should point a new employee at.
+ *
+ * The template carried a hardcoded default and sendWelcomeEmail never passed
+ * anything, so every onboarding email shipped a "Sign In to HRMS" button
+ * aimed at that one fixed domain regardless of where this deployment actually
+ * lives. Verified unreachable from here, which means each new employee would
+ * have received a dead link.
+ *
+ * CLIENT_ORIGIN is the right source: it is already the deployed frontend
+ * origin, production refuses to start without it (see lib/startupChecks.js),
+ * and it is exactly the origin the browser client is served from. The first
+ * entry is used when several are configured, since the rest are staging or
+ * preview origins. APP_PORTAL_URL overrides it for the case where the address
+ * employees should use differs from the CORS origin.
+ */
+export function portalUrl(env = process.env) {
+  const explicit = (env.APP_PORTAL_URL || '').trim();
+  if (explicit) return explicit.replace(/\/$/, '');
+  const first = (env.CLIENT_ORIGIN || '').split(',')[0].trim();
+  if (first) return first.replace(/\/$/, '');
+  return null;
+}
+
 export async function sendWelcomeEmail({ toEmail, userName, role, tempPassword, company = 'Smaatech', userId = null, idempotencyKey = '' }) {
   const EmailLog = (await import('../models/EmailLog.js')).default;
   const { generateWelcomeEmail } = await import('./templates/welcomeEmail.js');
@@ -59,7 +83,9 @@ export async function sendWelcomeEmail({ toEmail, userName, role, tempPassword, 
     }
   }
 
-  const { subject, text, html } = generateWelcomeEmail({ userName, role, tempPassword, company });
+  const { subject, text, html } = generateWelcomeEmail({
+    userName, role, tempPassword, company, portalUrl: portalUrl(),
+  });
 
   try {
     if (process.env.BREVO_API_KEY && process.env.SMTP_USER) {

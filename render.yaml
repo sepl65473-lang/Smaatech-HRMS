@@ -28,6 +28,10 @@ services:
       # without it because an empty list blocks the web client entirely.
       - key: CLIENT_ORIGIN
         sync: false
+      # Address used in onboarding emails. Falls back to CLIENT_ORIGIN, which
+      # is normally right; set it only for a custom employee-facing domain.
+      - key: APP_PORTAL_URL
+        sync: false
       # This project's own Vercel URL prefix, so preview deployments pass CORS.
       - key: VERCEL_PREVIEW_PREFIX
         sync: false
