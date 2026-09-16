@@ -35,6 +35,8 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 
 const SERVER_ENTRY = path.resolve(import.meta.dirname, '../src/index.js');
 const PORT = 4610;
@@ -56,6 +58,15 @@ const SAME_IP = process.env.SAME_IP === '1';
 const OFFICE_IP = '203.0.113.7';
 const ipFor = (i) => (SAME_IP ? OFFICE_IP : `10.${Math.floor(i / 256) % 256}.${i % 256}.${(i % 250) + 1}`);
 
+// LIVENESS=1 turns on the ACTIVE CHALLENGE flow: the server issues a
+// single-use motion challenge and the client must upload a multi-frame burst,
+// every frame of which is re-detected and matched server-side. That is 3-8
+// face extractions per check-in instead of 1, so it is the heaviest path the
+// product has and the one worth measuring for pool behaviour.
+const LIVENESS = process.env.LIVENESS === '1';
+const livenessMs = [];
+const livenessCodes = {};
+
 const outMs = [];
 const outCounts = { ok: 0, rateLimited: 0, rejected: 0, error: 0 };
 const outCodes = {};
@@ -71,6 +82,27 @@ const pct = (sorted, p) => (sorted.length ? sorted[Math.min(sorted.length - 1, M
 // database this script creates, and never leaves the machine.
 const FACE_SAMPLE = process.env.FACE_SAMPLE
   || path.resolve(import.meta.dirname, '../uploads/enrollment/6a576e4124424fc538fc8db6.jpg');
+
+// Builds a burst of BYTE-DISTINCT frames from the one sample photo by
+// re-encoding it at different JPEG qualities.
+//
+// STATED PLAINLY: these frames contain no real head motion, because there is
+// only one source photograph. The server's motion check is therefore EXPECTED
+// to reject them, and that rejection is the correct behaviour - a burst with
+// no movement is exactly what a replayed still looks like. What this measures
+// is the liveness pipeline under concurrency: challenge issue/consume, per
+// frame decode + detect + descriptor match, worker pool saturation and queue
+// behaviour. It does NOT measure a 100/100 liveness success path, which would
+// need 100 genuine multi-frame human captures.
+function buildFrames(sample, count) {
+  const jpeg = require('jpeg-js');
+  const raw = jpeg.decode(sample, { useTArray: true });
+  const frames = [];
+  for (let i = 0; i < count; i += 1) {
+    frames.push(jpeg.encode(raw, 92 - i * 6).data);
+  }
+  return frames;
+}
 
 function loadFaceSample() {
   if (!fs.existsSync(FACE_SAMPLE)) {
@@ -88,6 +120,14 @@ function buildForm(jpegBuffer, fields) {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, String(v));
   form.append('photo', new Blob([jpegBuffer], { type: 'image/jpeg' }), 'selfie.jpg');
+  return form;
+}
+
+// Multi-frame burst for the liveness flow.
+function buildFrameForm(frames, fields) {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, String(v));
+  frames.forEach((f, idx) => form.append('frames', new Blob([f], { type: 'image/jpeg' }), `frame-${idx}.jpg`));
   return form;
 }
 
@@ -109,11 +149,13 @@ async function main() {
   // is a pure arithmetic check with no I/O, so including it would not change
   // the shape of the result, and leaving it off keeps every request on the
   // success path rather than rejecting on a synthetic coordinate.
-  await Settings.create({ _id: COMPANY, twoFactor: false, gpsCheckInEnabled: false });
+  await Settings.create({ _id: COMPANY, twoFactor: false, gpsCheckInEnabled: false, livenessRequired: LIVENESS });
   await Role.create({ name: 'Employee', allowedActions: [] });
 
   const faceJpeg = loadFaceSample();
   console.log(`Face sample: ${path.basename(FACE_SAMPLE)} (${Math.round(faceJpeg.length / 1024)} KB)`);
+  const burst = LIVENESS ? buildFrames(faceJpeg, 3) : null;
+  if (LIVENESS) console.log(`Liveness ON: ${burst.length}-frame burst per check-in (${burst.map((b) => Math.round(b.length / 1024)).join('/')} KB)`);
   console.log(`Seeding ${USERS} employees with enrolled faces...`);
   // One bcrypt hash reused: hashing 100 times here would add minutes to setup
   // and measures nothing (the server still does a full compare per login).
@@ -226,14 +268,38 @@ Firing ${USERS} SIMULTANEOUS login + face check-in flows...
         return;
       }
 
-      // Face check-in
+      // Face check-in (single still, or a liveness burst under LIVENESS=1)
       const rowId = rowByEmp.get(String(u.employeeId));
+
+      let challengeId = null;
+      if (LIVENESS) {
+        const tc = performance.now();
+        try {
+          const cres = await fetch(`${BASE}/api/v1/attendance/liveness/challenge`, {
+            headers: { Authorization: `Bearer ${token}`, 'X-Forwarded-For': ipFor(i) },
+          });
+          livenessMs.push(performance.now() - tc);
+          if (cres.status === 200) {
+            const c = await cres.json();
+            challengeId = c.challengeId;
+          } else {
+            livenessCodes[`CHALLENGE_HTTP_${cres.status}`] = (livenessCodes[`CHALLENGE_HTTP_${cres.status}`] || 0) + 1;
+          }
+        } catch {
+          livenessCodes.CHALLENGE_ERROR = (livenessCodes.CHALLENGE_ERROR || 0) + 1;
+        }
+      }
+
       const t1 = performance.now();
       try {
+        const punchFields = { deviceId: `load-device-${i}`, lat: 19.0760, lng: 72.8777, accuracy: 10 };
+        if (challengeId) punchFields.challengeId = challengeId;
         const res = await fetch(`${BASE}/api/v1/attendance/${rowId}/check-in`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'X-Forwarded-For': ipFor(i) },
-          body: buildForm(faceJpeg, { deviceId: `load-device-${i}`, lat: 19.0760, lng: 72.8777, accuracy: 10 }),
+          body: LIVENESS
+            ? buildFrameForm(burst, punchFields)
+            : buildForm(faceJpeg, punchFields),
         });
         punchMs.push(performance.now() - t1);
         if (res.status === 200) counts.punchOk += 1;
@@ -306,6 +372,14 @@ Firing ${USERS} SIMULTANEOUS login + face check-in flows...
     console.log(`  failed                   : ${counts.loginFailed}`);
     console.log(`  p50/p95/p99/max          : ${Math.round(pct(loginMs,50))} / ${Math.round(pct(loginMs,95))} / ${Math.round(pct(loginMs,99))} / ${Math.round(loginMs.at(-1) || 0)} ms`);
     console.log('');
+    if (LIVENESS) {
+      livenessMs.sort((a, b) => a - b);
+      console.log('LIVENESS CHALLENGE ISSUE');
+      console.log(`  issued                   : ${livenessMs.length}`);
+      console.log(`  failures                 : ${Object.keys(livenessCodes).length ? JSON.stringify(livenessCodes) : 0}`);
+      console.log(`  p50/p95/p99/max          : ${Math.round(pct(livenessMs,50))} / ${Math.round(pct(livenessMs,95))} / ${Math.round(pct(livenessMs,99))} / ${Math.round(livenessMs.at(-1) || 0)} ms`);
+      console.log('');
+    }
     console.log('FACE CHECK-IN');
     console.log(`  succeeded                : ${counts.punchOk}`);
     console.log(`  rate-limited             : ${counts.punchRateLimited}`);
