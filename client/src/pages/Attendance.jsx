@@ -82,6 +82,11 @@ function AttendancePhotoPreview({ attendanceId, which }) {
 }
 
 const EXPORT_COLUMNS = [
+  // Date first. The export carried none at all, which was survivable while it
+  // only ever held one day's roster, but became actively misleading once it
+  // covered a real date range: every row looked alike and nothing said which
+  // day it belonged to. Caught by the multi-month browser export spec.
+  { key: 'date', label: 'Date' },
   { key: 'name', label: 'Employee' },
   { key: 'dept', label: 'Department' },
   { key: 'shift', label: 'Shift' },
@@ -196,6 +201,7 @@ export default function Attendance() {
 
   const exportRows = useMemo(
     () => filtered.map((a) => ({
+      date: a.date,
       name: a.name,
       dept: a.dept,
       shift: shiftNameFor(a.empId),
@@ -227,6 +233,7 @@ export default function Attendance() {
       return deptMatch && statusMatch;
     });
     return scoped.map((a) => ({
+      date: a.date,
       name: a.name,
       dept: a.dept,
       shift: shiftNameFor(a.empId),
