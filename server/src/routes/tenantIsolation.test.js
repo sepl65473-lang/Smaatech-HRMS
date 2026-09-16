@@ -192,7 +192,8 @@ describe('companyFilter scopes HR Director to their own company', () => {
     expect(crossList.body.some((e) => e.id === String(emp._id))).toBe(false);
 
     const crossRead = await request(app).get(`/api/v1/employees/${emp._id}`).set('Authorization', `Bearer ${directorB}`);
-    expect(crossRead.body).toBeNull();
+    expect(crossRead.status).toBe(404);
+    expect(crossRead.body.name).toBeUndefined();
 
     const crossPatch = await request(app)
       .patch(`/api/v1/employees/${emp._id}`)

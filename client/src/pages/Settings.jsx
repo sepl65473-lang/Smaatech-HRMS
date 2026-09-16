@@ -6,6 +6,8 @@ import UserCreationResultModal from '../components/UserCreationResultModal';
 import FaceEnrollModal from '../components/FaceEnrollModal';
 import Modal from '../components/Modal';
 import AuditLogsTab from '../components/AuditLogsTab';
+import LeavePolicyCard from '../components/LeavePolicyCard';
+import EmploymentPolicyCard from '../components/EmploymentPolicyCard';
 import { IconPlus, IconX, IconEdit, IconTrash } from '../components/Icons';
 import { ROLE_SCOPE } from '../lib/permissions';
 
@@ -282,6 +284,10 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        <EmploymentPolicyCard />
+
+        <LeavePolicyCard />
 
         <div className="card">
           <div className="card-head"><div><div className="card-title">Notifications & security</div><div className="card-sub">Control what reaches you</div></div></div>

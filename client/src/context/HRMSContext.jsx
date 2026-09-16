@@ -64,6 +64,10 @@ export function HRMSProvider({ children }) {
     role: authUser.role,
     initials: authUser.initials,
     empId: authUser.employeeId || null,
+    // Layout raises the change-password gate from this, and the server refuses
+    // every ordinary endpoint while it is set — so it has to travel with the
+    // user object rather than being dropped here.
+    mustChangePassword: authUser.mustChangePassword === true,
   } : { name: '', role: '', initials: '' }), [authUser]);
   const [auditLog, setAuditLog] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -177,6 +181,18 @@ export function HRMSProvider({ children }) {
   const finishLogin = useCallback(async (accessToken, user) => {
     setAccessToken(accessToken);
     setAuthUser(user);
+
+    // A temporary password buys access to nothing but the change-password
+    // form: the server refuses every other endpoint with
+    // PASSWORD_CHANGE_REQUIRED. Loading the workspace here would fire a dozen
+    // requests that are all meant to fail and then tell the person their data
+    // "failed to load" — which reads as a fault, not as the requirement it is.
+    if (user.mustChangePassword) {
+      setLoading(false);
+      toast('info', 'Please choose a new password to finish signing in.');
+      return;
+    }
+
     try {
       await loadAuthenticatedData(user.id);
       toast('success', `Welcome back, <strong>${user.name.split(' ')[0]}</strong>`);
@@ -203,7 +219,23 @@ export function HRMSProvider({ children }) {
 
   const forgotPassword = useCallback((email) => authApi.forgotPassword(email), []);
   const resetPassword = useCallback((email, otp, newPassword) => authApi.resetPassword(email, otp, newPassword), []);
-  const changePassword = useCallback((currentPassword, newPassword) => authApi.changePassword(currentPassword, newPassword), []);
+  /**
+   * Changes the password and, when that lifted a temporary-password lock,
+   * loads the workspace.
+   *
+   * The server refuses every ordinary endpoint while `mustChangePassword` is
+   * set (see server/src/middleware/auth.js), so a person signing in with a
+   * temporary password sees an EMPTY app behind the change-password modal.
+   * Re-reading here is what turns it back on the moment they comply, instead
+   * of leaving them to work out that they need to reload.
+   */
+  const changePassword = useCallback(async (currentPassword, newPassword) => {
+    const result = await authApi.changePassword(currentPassword, newPassword);
+    setAuthUser((user) => (user ? { ...user, mustChangePassword: false } : user));
+    const userId = authUser?.id;
+    if (userId) await loadAuthenticatedData(userId).catch(() => {});
+    return result;
+  }, [authUser, loadAuthenticatedData]);
 
   const searchAuditLog = useCallback((params) => auditLogsApi.search(params), []);
   const searchEmployees = useCallback((params) => employeesApi.search(params), []);
@@ -531,6 +563,25 @@ export function HRMSProvider({ children }) {
   // ════════════════════════════════════════════════════════════
   //  LEAVE — CRUD + approve / decline
   // ════════════════════════════════════════════════════════════
+  /**
+   * Re-reads the employee directory from the server.
+   *
+   * Needed after a change made OUTSIDE the employee form — a lifecycle event
+   * (confirmation, promotion, transfer, salary revision) writes to the
+   * employee document through its own endpoint, so the copy this context holds
+   * would otherwise keep showing the pre-change values until a full reload.
+   */
+  const refreshEmployees = useCallback(async () => {
+    try {
+      const rows = await employeesApi.list();
+      setEmployees(rows);
+      return rows;
+    } catch {
+      // A stale directory is better than an error toast on a background refresh.
+      return null;
+    }
+  }, []);
+
   const addLeave = async (data) => {
     const emp = employees.find((e) => e.id === data.empId);
     const record = {
@@ -578,7 +629,12 @@ export function HRMSProvider({ children }) {
   const setLeaveStatus = async (id, action, opts = {}) => {
     let updated;
     try {
-      updated = action === 'approved' ? await leavesApi.approve(id) : await leavesApi.decline(id);
+      // The reason is optional at the API (the server records it when given),
+      // but the UI should always try to supply one — an employee is entitled
+      // to know why a request was turned down.
+      updated = action === 'approved'
+        ? await leavesApi.approve(id)
+        : await leavesApi.decline(id, opts.note);
     } catch (err) {
       if (!opts.silent) toast('error', err.message || 'Failed to update leave status.');
       throw err;
@@ -617,7 +673,7 @@ export function HRMSProvider({ children }) {
     return updated;
   };
   const approveLeave = (id) => setLeaveStatus(id, 'approved');
-  const declineLeave = (id) => setLeaveStatus(id, 'declined');
+  const declineLeave = (id, note) => setLeaveStatus(id, 'declined', { note });
 
   // Bulk approve/decline — reuses setLeaveStatus per id (so every existing
   // side effect: attendance sync, on-leave status, audit entry, all still
@@ -813,6 +869,38 @@ export function HRMSProvider({ children }) {
   // ════════════════════════════════════════════════════════════
   //  PAYROLL — process / mark paid
   // ════════════════════════════════════════════════════════════
+  /**
+   * Runs payroll for a whole cycle (POST /payroll/run).
+   *
+   * The product previously had no way to do this at all: a payslip row only
+   * appeared as a side effect of creating an employee, so anyone hired before
+   * a cycle simply had no payslip for it. The server derives every figure and
+   * is idempotent, so pressing this twice is safe.
+   */
+  const runPayrollCycle = async (cycle) => {
+    let result;
+    try {
+      result = await payrollApi.run(cycle);
+    } catch (err) {
+      toast('error', err.message || 'Could not run payroll for this cycle.');
+      throw err;
+    }
+    if (result.rows?.length) setPayroll((list) => [...result.rows, ...list]);
+    audit('Payroll run', cycle, `${result.created} created · ${result.skipped} already present`);
+
+    if (result.created === 0) {
+      toast('info', `Every payable employee already has a payslip for <strong>${cycle}</strong>.`);
+    } else {
+      toast('success', `Payroll run for <strong>${cycle}</strong> — ${result.created} payslip(s) created.`);
+    }
+    // An employee who could not be paid must be named, not quietly left out of
+    // the register.
+    if (result.unpayable?.length) {
+      toast('info', `${result.unpayable.length} employee(s) skipped — no salary on file: ${result.unpayable.map((u) => u.name).join(', ')}`);
+    }
+    return result;
+  };
+
   const processPayroll = async () => {
     const ready = payroll.filter((p) => p.status === 'ready');
     try {
@@ -892,6 +980,23 @@ export function HRMSProvider({ children }) {
     'Added to payroll',
     'Induction scheduled',
   ];
+
+  /**
+   * Re-reads the candidate pipeline.
+   *
+   * Offers and hiring are made through their own endpoints (they validate the
+   * transition and record it), so the copy this context holds would otherwise
+   * keep showing the pre-offer state.
+   */
+  const reloadRecruitment = useCallback(async () => {
+    try {
+      const rows = await recruitmentApi.list();
+      setRecruitment(rows);
+      return rows;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const moveCandidate = async (id, stage, extra = {}) => {
     const candidate = recruitment.find((c) => c.id === id);
@@ -1016,7 +1121,7 @@ export function HRMSProvider({ children }) {
   const submitSelfReview = async (id, { selfRating, selfComments }) => {
     let updated;
     try {
-      updated = await reviewsApi.update(id, { selfRating, selfComments, status: 'self-submitted' });
+      updated = await reviewsApi.update(id, { selfRating, selfComments });
     } catch (err) {
       toast('error', err.message || 'Failed to submit self review.');
       throw err;
@@ -1030,9 +1135,15 @@ export function HRMSProvider({ children }) {
   const submitManagerReview = async (id, { managerRating, managerComments }) => {
     let updated;
     try {
+      // The server applies the rating to the employee record itself. Doing it
+      // here meant a second call to PATCH /employees/:id — a field only HR may
+      // write — so a reporting manager completing a review got a 403 and the
+      // rating was silently lost.
       updated = await reviewsApi.update(id, { managerRating, managerComments, status: 'completed' });
       if (updated.empId && managerRating != null) {
-        await updateEmployee(updated.empId, { rating: Number(managerRating) });
+        setEmployees((list) => list.map((e) => (
+          e.id === String(updated.empId) ? { ...e, rating: Number(managerRating) } : e
+        )));
       }
     } catch (err) {
       toast('error', err.message || 'Failed to submit manager review.');
@@ -1365,10 +1476,10 @@ export function HRMSProvider({ children }) {
     return updated;
   };
 
-  const rejectCorrection = async (id) => {
+  const rejectCorrection = async (id, note) => {
     let updated;
     try {
-      updated = await attendanceCorrectionsApi.reject(id);
+      updated = await attendanceCorrectionsApi.reject(id, note);
     } catch (err) {
       toast('error', err.message || 'Failed to reject correction.');
       throw err;
@@ -1557,6 +1668,7 @@ export function HRMSProvider({ children }) {
     requestCorrection, approveCorrection, rejectCorrection,
     getMasterValues, addMasterValue, updateMasterValue, deleteMasterValue,
     canAccess: contextCanAccess,
+    runPayrollCycle,
     canDo: contextCanDo,
     addRole, updateRole, deleteRole,
     addExpense, updateExpenseStatus, bulkApproveExpenses, bulkDeclineExpenses,
@@ -1568,6 +1680,7 @@ export function HRMSProvider({ children }) {
     // users (real login accounts, HR Director only)
     users, loadUsers, addUserAccount, updateUserAccount, deleteUserAccount, resendUserWelcomeEmail,
     // leave
+    refreshEmployees,
     addLeave, approveLeave, declineLeave, deleteLeave, withdrawLeave, bulkApproveLeave, bulkDeclineLeave,
     // attendance
     checkIn, checkOut, setAttendanceStatus, recordPunch, enrollFace, faceEnrolled, getQrToken, qrCheckIn,
@@ -1579,6 +1692,7 @@ export function HRMSProvider({ children }) {
     // holidays
     addHoliday, deleteHoliday,
     // recruitment
+    reloadRecruitment,
     moveCandidate, addCandidate, deleteCandidate, toggleOnboardingItem,
     // performance reviews
     startReviewCycle, submitSelfReview, submitManagerReview, addGoal, toggleGoal,

@@ -6,6 +6,7 @@ dist/
 client/.env
 server/.env
 .claude/
+.vscode/
 
 *.log
 logs/

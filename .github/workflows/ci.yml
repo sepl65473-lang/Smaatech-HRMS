@@ -41,3 +41,15 @@ jobs:
 
       - name: Run Client Test Suite
         run: npm --prefix client run test
+
+      # Boots the REAL server process against a throwaway replica set and
+      # drives it over HTTP. The vitest suite uses supertest in-process, which
+      # never proves that `npm start` itself works — that startup config checks
+      # pass, indexes build, schedulers register once, and the port serves.
+      - name: Run Runtime Smoke Test
+        run: npm --prefix server run smoke
+
+      # Production dependencies only: a HIGH/CRITICAL advisory in something
+      # that ships is a release blocker, whereas one in a dev-only tool is not.
+      - name: Audit Production Dependencies
+        run: npm --prefix server audit --omit=dev --audit-level=high

@@ -16,6 +16,7 @@
     "test": "npm --prefix server run test && npm --prefix client run test"
   },
   "dependencies": {
+    "@google/genai": "^2.22.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "express": "^4.19.2",

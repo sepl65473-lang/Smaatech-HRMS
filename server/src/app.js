@@ -3,6 +3,7 @@
 // caller) can import a real, fully-wired `app` and drive it with supertest
 // without booting the actual server process or its side effects.
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import 'express-async-errors';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -13,6 +14,7 @@ import compression from 'compression';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './lib/swagger.js';
 import logger from './lib/logger.js';
+import { isE2EModeEnabled, warnIfE2EEnabled } from './lib/e2eGuard.js';
 import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
 import usersRoutes from './routes/users.js';
@@ -40,11 +42,79 @@ import deviceIngestRoutes from './routes/deviceIngest.js';
 import deviceMappingsRoutes from './routes/deviceMappings.js';
 import healthRoutes from './routes/health.js';
 import aiPredictorRoutes from './routes/aiPredictorRoutes.js';
+import analyticsRoutes from './routes/analytics.js';
+import lifecycleRoutes from './routes/lifecycle.js';
+import payComponentsRoutes from './routes/payComponents.js';
+
+warnIfE2EEnabled();
 
 const app = express();
 
+// Behind Vercel/Render/an nginx front, every request arrives from the proxy's
+// own address. Without this, req.ip is the PROXY for all traffic — which means
+// express-rate-limit buckets the entire internet into one counter (300
+// req/15min shared by every user, a self-inflicted outage) and every audit-log
+// and refresh-token row records the proxy's IP instead of the client's. A
+// specific hop count rather than `true`: blanket trust lets a client forge
+// X-Forwarded-For and evade per-IP limits entirely.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
+
+// Give every request an id, echoed back and attached for logging, so a user
+// reporting "it failed at 14:32" can be traced to exact server-side lines.
+app.use((req, res, next) => {
+  const incoming = req.headers['x-request-id'];
+  req.id = (typeof incoming === 'string' && /^[\w-]{1,64}$/.test(incoming)) ? incoming : randomUUID();
+  res.setHeader('X-Request-Id', req.id);
+  next();
+});
+
 // Security Middleware
-app.use(helmet({ contentSecurityPolicy: false })); // Disable CSP for API flexibility / Swagger UI
+//
+// CSP was previously switched OFF across the whole API ("for flexibility /
+// Swagger UI"). That traded a real header away for one route's convenience.
+// This API does serve browser-reachable responses — attendance selfies inline
+// (routes/files.js) and document downloads (routes/documents.js) — so a
+// response served from this origin can end up as a top-level document. A
+// strict policy here is defence-in-depth for exactly that case, and costs
+// nothing for JSON.
+//
+// 'none' everywhere is correct for an API: no scripts, no styles, no frames,
+// no form posts, no base-tag rewriting. Swagger UI genuinely needs inline
+// script and style, so it gets its own relaxed policy on its own path below
+// rather than every endpoint inheriting the loosest one.
+const API_CSP_DIRECTIVES = {
+  defaultSrc: ["'none'"],
+  scriptSrc: ["'none'"],
+  styleSrc: ["'none'"],
+  imgSrc: ["'none'"],
+  connectSrc: ["'none'"],
+  fontSrc: ["'none'"],
+  objectSrc: ["'none'"],
+  frameAncestors: ["'none'"],
+  baseUri: ["'none'"],
+  formAction: ["'none'"],
+};
+
+app.use(helmet({ contentSecurityPolicy: { useDefaults: false, directives: API_CSP_DIRECTIVES } }));
+
+// Swagger UI ships inline bootstrap script and inline styles, so it cannot run
+// under the API policy above. Scoped to this one path, and it is the docs page
+// only — no application data is rendered here.
+const swaggerCsp = helmet.contentSecurityPolicy({
+  useDefaults: false,
+  directives: {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'", "'unsafe-inline'"],
+    styleSrc: ["'self'", "'unsafe-inline'"],
+    imgSrc: ["'self'", 'data:'],
+    connectSrc: ["'self'"],
+    fontSrc: ["'self'", 'data:'],
+    objectSrc: ["'none'"],
+    frameAncestors: ["'none'"],
+    baseUri: ["'none'"],
+    formAction: ["'self'"],
+  },
+});
 app.use(mongoSanitize());
 app.use(compression());
 
@@ -55,25 +125,68 @@ app.use(compression());
 // can't read it at all and the app sees a bare, misleading "Network Error"
 // instead of the actual "too many requests" message — indistinguishable
 // from the server being unreachable.
+const stripSlash = (value) => String(value).replace(/\/$/, '');
+
+// CLIENT_ORIGIN accepts a comma-separated list so a staging and a production
+// frontend can share one API deployment.
+const configuredOrigins = (process.env.CLIENT_ORIGIN || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean)
+  .map(stripSlash);
+
+const isDevEnv = process.env.NODE_ENV !== 'production';
 const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  process.env.CLIENT_ORIGIN ? process.env.CLIENT_ORIGIN.replace(/\/$/, '') : null,
-].filter(Boolean);
+  ...(isDevEnv ? ['http://localhost:5173', 'http://localhost:3000'] : []),
+  ...configuredOrigins,
+];
+
+// Vercel preview deployments get URLs like
+// <project>-<hash>-<team>.vercel.app, so a preview build genuinely needs a
+// pattern rather than a fixed string. The old pattern was /\.vercel\.app$/ —
+// which matched EVERY app anyone has ever deployed to vercel.app, and paired
+// with credentials:true that let any attacker's Vercel page make authenticated
+// cross-origin calls against this API on a logged-in user's behalf. Scoped to
+// this project's own prefix, and only when explicitly opted into.
+const previewPrefix = process.env.VERCEL_PREVIEW_PREFIX;
+
+// Plain string checks rather than a built regex: the prefix is operator-
+// supplied config, and a stray regex metacharacter in it would quietly widen
+// what this matches — exactly the failure mode being fixed here.
+function isProjectPreviewOrigin(origin) {
+  if (!previewPrefix) return false;
+  if (!origin.startsWith('https://')) return false;
+  const host = origin.slice('https://'.length);
+  if (!host.endsWith('.vercel.app')) return false;
+  if (host.includes('/')) return false;
+  const label = host.slice(0, -'.vercel.app'.length);
+  return label === previewPrefix || label.startsWith(`${previewPrefix}-`);
+}
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // same-origin / server-to-server / curl
+  const normalized = stripSlash(origin);
+  if (allowedOrigins.includes(normalized)) return true;
+  return isProjectPreviewOrigin(normalized);
+}
+
+export { isAllowedOrigin };
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin.replace(/\/$/, '')) || /\.vercel\.app$/.test(origin)) {
-      callback(null, true);
-    } else {
-      callback(null, false);
-    }
-  },
+  origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
   credentials: true,
+  maxAge: 600,
 }));
 
 // Rate Limiters
-const isTestEnv = process.env.NODE_ENV === 'test';
+//
+// Relaxed for automated tests only. A browser-E2E run makes hundreds of
+// requests from a single address across many roles, which would otherwise trip
+// the real limits for reasons unrelated to what is under test. Both conditions
+// are impossible on a real deployment: NODE_ENV is 'production' there, which
+// also forces isE2EModeEnabled() false — see lib/e2eGuard.js. The limiters
+// themselves are unchanged and still apply in production.
+const isTestEnv = process.env.NODE_ENV === 'test' || isE2EModeEnabled();
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -109,11 +222,11 @@ app.use('/api/v1/auth/forgot-password', authLimiter);
 app.use('/api/v1/auth/reset-password', authLimiter);
 app.use('/api/v1/resignations/:id/fnf/pay', financialLimiter);
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
 // Swagger API Documentation Endpoint
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.use('/api-docs', swaggerCsp, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // API V1 Routes
 app.use('/api/v1/auth', authRoutes);
@@ -145,11 +258,46 @@ app.use('/api/v1/device-punch', deviceIngestRoutes);
 app.use('/api/v1/device-mappings', deviceMappingsRoutes);
 app.use('/api/v1', healthRoutes);
 app.use('/api/v1/ai', aiPredictorRoutes);
+app.use('/api/v1/analytics', analyticsRoutes);
+app.use('/api/v1/lifecycle', lifecycleRoutes);
+app.use('/api/v1/pay-components', payComponentsRoutes);
+
+// Unknown API routes get a JSON 404, not Express's default HTML page — a
+// client parsing every response as JSON otherwise sees an opaque parse error
+// instead of "that endpoint does not exist".
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    error: { code: 'NOT_FOUND', message: `No such endpoint: ${req.method} ${req.originalUrl.split('?')[0]}` },
+    requestId: req.id,
+  });
+});
 
 // Error Handling Middleware
-app.use((err, _req, res, _next) => {
-  logger.error('[Express Error Handler] %o', err);
-  res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' } });
+app.use((err, req, res, _next) => {
+  // A body-parser failure (malformed JSON, oversized payload) is a client
+  // error; returning 500 for it both misleads the caller and pollutes error
+  // rate alerting with traffic the server handled correctly.
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: { code: 'PAYLOAD_TOO_LARGE', message: 'Request body is too large.' }, requestId: req.id });
+  }
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: { code: 'INVALID_JSON', message: 'Request body is not valid JSON.' }, requestId: req.id });
+  }
+  if (err?.name === 'ValidationError') {
+    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: err.message }, requestId: req.id });
+  }
+  if (err?.name === 'CastError') {
+    return res.status(400).json({ error: { code: 'INVALID_ID', message: 'Malformed identifier.' }, requestId: req.id });
+  }
+  if (err?.code === 11000) {
+    return res.status(409).json({ error: { code: 'DUPLICATE', message: 'That record already exists.' }, requestId: req.id });
+  }
+
+  logger.error('[Express Error Handler] requestId=%s %o', req.id, err);
+  // The message is deliberately generic — an internal error string can carry
+  // connection URIs, collection names and stack detail. requestId is what ties
+  // the user's report to the full logged error.
+  res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' }, requestId: req.id });
 });
 
 export default app;

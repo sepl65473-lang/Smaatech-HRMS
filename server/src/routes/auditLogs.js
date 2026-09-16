@@ -60,7 +60,11 @@ router.get('/', requireRole('HR Director'), async (req, res) => {
   }
 });
 
-router.post('/', async (req, res) => {
+// Every action on CLIENT_ONLY_ACTIONS is an HR/Finance console operation
+// (imports, exports, review cycles, role edits, Tally/bank file generation).
+// A plain Employee has no legitimate reason to write any of them, and letting
+// them muddies the one record an auditor relies on.
+router.post('/', requireRole('HR Manager', 'Finance Lead'), async (req, res) => {
   try {
     const { action, subject, details } = req.body || {};
     if (!CLIENT_ONLY_ACTIONS.has(action)) {
@@ -76,8 +80,10 @@ router.post('/', async (req, res) => {
         role: req.auth.role,
       } : { name: 'System', role: 'System' },
       action,
-      subject: subject || '',
-      details: details || '',
+      // Bounded: these are the only client-supplied strings that reach the
+      // audit collection, and an unbounded `details` is a cheap way to bloat it.
+      subject: String(subject || '').slice(0, 200),
+      details: String(details || '').slice(0, 1000),
       ip,
       userAgent,
       company: req.auth?.company || 'Smaatech',

@@ -470,7 +470,7 @@ export default function Attendance() {
                           {c.status === 'Pending' ? (
                             <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
                               <button className="btn btn-compact approve" onClick={() => approveCorrection(c.id)}>Approve</button>
-                              <button className="btn btn-compact btn-ghost" style={{ color: 'var(--declined)' }} onClick={() => rejectCorrection(c.id)}>Reject</button>
+                              <button className="btn btn-compact btn-ghost" style={{ color: 'var(--declined)' }} onClick={() => { const note = window.prompt('Reason for rejecting this correction request?'); if (note !== null) rejectCorrection(c.id, note); }}>Reject</button>
                             </div>
                           ) : (
                             <span className="muted-text">—</span>

@@ -1,4 +1,3 @@
-import cron from 'node-cron';
 import Document from '../models/Document.js';
 import User from '../models/User.js';
 import { sendNotification } from './notificationService.js';
@@ -70,15 +69,6 @@ export async function checkDocumentExpirations() {
   }
 }
 
-export function startDocumentExpiryScheduler() {
-  // Run on startup (5 second delay to let DB connect and server boot completely)
-  setTimeout(() => {
-    checkDocumentExpirations().catch((err) => logger.error('[Document Expiry Job Startup Error] %o', err));
-  }, 5000);
-
-  // Run daily at midnight (12:00 AM) using node-cron
-  cron.schedule('0 0 * * *', () => {
-    checkDocumentExpirations().catch((err) => logger.error('[Document Expiry Job Cron Error] %o', err));
-  });
-}
+// Scheduling now lives in lib/jobs.js, behind lib/scheduler.js's
+// single-owner guard — see the note in attendanceDailyJob.js.
 

@@ -3,7 +3,11 @@ import multer from 'multer';
 import path from 'node:path';
 import Document from '../models/Document.js';
 import { requireAuth, companyFilter } from '../middleware/auth.js';
-import { savePhoto, readPhoto, deleteFileRef, wrapUpload } from '../lib/photoStorage.js';
+import {
+  savePhoto, readPhoto, deleteFileRef, wrapUpload,
+  safeExtension, randomFilename, contentTypeForRef, isDurableStorage,
+} from '../lib/photoStorage.js';
+import Employee from '../models/Employee.js';
 import { logAudit } from '../lib/auditLogger.js';
 
 const router = Router();
@@ -20,7 +24,7 @@ const ALLOWED_DOCUMENT_MIMES = new Set([
 ]);
 const upload = wrapUpload(multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 25 },
   fileFilter: (req, file, cb) => {
     if (!ALLOWED_DOCUMENT_MIMES.has(file.mimetype)) {
       return cb(new Error('Unsupported file type. Allowed: PDF, JPEG/PNG, Word, Excel.'));
@@ -86,9 +90,11 @@ router.post('/', upload, async (req, res) => {
 
   let fileRef = '';
   if (req.file) {
-    const ext = path.extname(req.file.originalname) || '.pdf';
-    const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-    fileRef = savePhoto('documents', filename, req.file.buffer);
+    // Never build a stored filename out of the client-supplied originalname,
+    // and never trust its extension: safeExtension() collapses anything off
+    // the allow-list, randomFilename() adds 12 bytes of real entropy so a
+    // stored ref can't be guessed from a timestamp.
+    fileRef = await savePhoto('documents', randomFilename(safeExtension(req.file.originalname, '.pdf')), req.file.buffer);
   }
 
   const docData = {
@@ -125,10 +131,8 @@ router.patch('/:id', upload, async (req, res) => {
 
   if (req.file) {
     // Save new file and remove old one
-    const ext = path.extname(req.file.originalname) || '.pdf';
-    const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-    updateData.fileRef = savePhoto('documents', filename, req.file.buffer);
-    if (before.fileRef) deleteFileRef(before.fileRef);
+    updateData.fileRef = await savePhoto('documents', randomFilename(safeExtension(req.file.originalname, '.pdf')), req.file.buffer);
+    if (before.fileRef) await deleteFileRef(before.fileRef);
   }
 
   // Reset reminder flag if expiryDate gets modified
@@ -152,18 +156,23 @@ router.delete('/:id', async (req, res) => {
   }
 
   await Document.findByIdAndDelete(req.params.id);
-  if (before.fileRef) deleteFileRef(before.fileRef);
+  if (before.fileRef) await deleteFileRef(before.fileRef);
 
   await logAudit(req, { action: 'Document removed', subject: before.title, before });
   res.json({ id: req.params.id });
 });
 
-// Download/Stream document file
+// Download document file.
+//
+// Objects live in a PRIVATE bucket (or a non-served local directory) — there
+// is no public URL for any of them. When object storage is configured, the
+// caller gets a short-lived pre-signed URL AFTER passing the same
+// authorization check that guards the streaming path below; otherwise the
+// bytes are streamed back through this authenticated request.
 router.get('/:id/download', async (req, res) => {
   const doc = await Document.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
 
-  // Access checks
   const isHRDir = req.auth.role === 'HR Director';
   const isHRMgr = req.auth.role === 'HR Manager';
   const isFinance = req.auth.role === 'Finance Lead';
@@ -176,24 +185,44 @@ router.get('/:id/download', async (req, res) => {
     if (doc.visibility === 'finance' && !isFinance) {
       return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Access denied.' } });
     }
+    // 'private' is owner + HR Director only; anything unrecognised is treated
+    // as private rather than defaulting open.
+    if (!['all', 'hr', 'finance'].includes(doc.visibility)) {
+      return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Access denied.' } });
+    }
   }
 
   if (!doc.fileRef) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No file reference exists for this document.' } });
   }
 
-  const buffer = readPhoto(doc.fileRef);
+  const safeTitle = doc.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'download';
+  const downloadName = `${safeTitle}${path.extname(doc.fileRef) || '.pdf'}`;
+
+  await logAudit(req, { action: 'Document downloaded', subject: doc.title, details: `visibility: ${doc.visibility}` });
+
+  // Signed-URL mode is OPT-IN (?mode=url), not the default.
+  //
+  // client/src/data/store.js downloads via apiFetchBlob() with
+  // responseType:'blob' and hands the result to URL.createObjectURL. Returning
+  // a JSON envelope by default meant that the moment real object storage was
+  // configured — the exact P0 fix operators are told to deploy — every
+  // download saved a file containing {"url":"https://..."} instead of the
+  // document. Streaming stays the default so the shipped client keeps working.
+  // Streaming is the only mode. GridFS has no pre-signed URL, and the client
+  // (client/src/data/store.js) downloads via apiFetchBlob with
+  // responseType:'blob' — a JSON envelope here would save a file containing
+  // {"url":...} instead of the document.
+
+  const buffer = await readPhoto(doc.fileRef);
   if (!buffer) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document file missing on server.' } });
 
-  const filename = doc.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'download';
-  let contentType = 'application/octet-stream';
-  if (doc.type === 'PDF') contentType = 'application/pdf';
-  else if (doc.type === 'IMG') contentType = 'image/jpeg';
-  else if (doc.type === 'DOC') contentType = 'application/msword';
-  else if (doc.type === 'XLS') contentType = 'application/vnd.ms-excel';
-
-  res.setHeader('Content-Type', contentType);
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}${path.extname(doc.fileRef) || '.pdf'}"`);
+  // Derive the type from the stored ref's real extension, not from the
+  // client-settable `type` metadata field.
+  res.setHeader('Content-Type', contentTypeForRef(doc.fileRef));
+  res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, no-store');
   res.send(buffer);
 });
 

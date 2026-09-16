@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
+import EmploymentLifecycle from '../components/EmploymentLifecycle';
 import Avatar from '../components/Avatar';
 import Modal from '../components/Modal';
 import {
@@ -298,6 +299,7 @@ export default function EmployeeProfile() {
       <div style={{ display: 'flex', gap: 12, borderBottom: '1px solid var(--line)', padding: '4px 0', margin: '16px 0 20px 0' }}>
         {[
           { id: 'overview', label: 'Overview & Activity' },
+          { id: 'employment', label: 'Employment' },
           { id: 'personal', label: 'Personal & Official Info' },
           { id: 'bank', label: 'Bank Details' },
           { id: 'history', label: 'Education & Career' },
@@ -314,6 +316,8 @@ export default function EmployeeProfile() {
           </button>
         ))}
       </div>
+
+      {profileTab === 'employment' && <EmploymentLifecycle employee={emp} />}
 
       {profileTab === 'overview' && (
         <>

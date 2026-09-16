@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { navigateInternal } from '../lib/safeNavigate';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
 import { greeting, formatLongDate, formatINR } from '../lib/helpers';
@@ -220,9 +221,10 @@ export default function Topbar({ onMenu, onAddEmployee }) {
                     if (!item.read) {
                       await markNotificationRead(item.id);
                     }
-                    if (item.actionUrl) {
-                      navigate(item.actionUrl);
-                    }
+                    // Only internal paths: the target travels through the
+                    // database, and an off-site one would leave the app with
+                    // the user primed to trust where they landed.
+                    navigateInternal(navigate, item.actionUrl);
                     setNotificationsOpen(false);
                   }}
                 >

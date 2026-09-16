@@ -35,15 +35,46 @@ const employeeSchema = new mongoose.Schema({
   },
   bankName: { type: String, default: '' },
 
-  // Statutory identity — needed to file/verify PF, ESI, PT and TDS but the
-  // app does not compute those amounts itself (rates and PT slabs vary by
-  // state and change over time); HR/Finance still enters payroll deduction
-  // amounts manually, this just carries the reference numbers.
+  // Salary structure. PF and the Professional Tax slabs are computed on
+  // basic+DA and gross respectively (lib/statutory.js), so these are the
+  // inputs that make statutory deduction real rather than hand-entered. When
+  // `basic` is left null the engine assumes 50% of gross AND says so in its
+  // warnings, rather than quietly producing a wrong PF figure.
+  basic: { type: Number, default: null },
+  da: { type: Number, default: 0 },
+  hra: { type: Number, default: 0 },
+  pfApplicable: { type: Boolean, default: true },
+  pfOnFullWages: { type: Boolean, default: false },
+
+  // Statutory identity — the reference numbers PF/ESI/PT/TDS are filed under.
+  // lib/statutory.js computes the amounts; these identify the accounts they
+  // are remitted to, and their absence is surfaced as a warning on the payslip.
   pan: { type: String, default: '' },
   uan: { type: String, default: '' },
   esiNumber: { type: String, default: '' },
   taxRegime: { type: String, enum: ['old', 'new'], default: 'new' },
   state: { type: String, default: '' }, // for Professional Tax — distinct from `loc` (city)
+
+
+  /**
+   * EMPLOYMENT LIFECYCLE STATE.
+   *
+   * These are maintained by the lifecycle-event pipeline
+   * (routes/lifecycle.js), never written directly by a client. Each change is
+   * an immutable LifecycleEvent, so "when was she confirmed, by whom, and what
+   * did her salary go from and to" is answerable from the record rather than
+   * from whoever remembers.
+   */
+  employmentStage: {
+    type: String,
+    enum: ['Probation', 'Confirmed', 'Notice Period', 'Exited'],
+    default: 'Probation',
+    index: true,
+  },
+  // Computed from joinDate + Settings.employmentPolicy.probationMonths at hire,
+  // and moved by an explicit probation extension — never silently.
+  probationEndDate: { type: String, default: '' }, // 'YYYY-MM-DD'
+  confirmationDate: { type: String, default: '' }, // 'YYYY-MM-DD'
 
   skills: { type: [String], default: [] },
   education: [{
@@ -72,6 +103,8 @@ employeeSchema.index(
   { unique: true, partialFilterExpression: { email: { $type: 'string', $gt: '' } } },
 );
 employeeSchema.index({ company: 1, dept: 1, status: 1 });
+// Drives the "who is due for confirmation" queue.
+employeeSchema.index({ company: 1, employmentStage: 1, probationEndDate: 1 });
 
 // Shape the API response to match the frontend's existing `id` (string) convention
 employeeSchema.set('toJSON', {

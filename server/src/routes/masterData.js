@@ -2,6 +2,7 @@ import { Router } from 'express';
 import MasterCategory from '../models/MasterCategory.js';
 import MasterValue from '../models/MasterValue.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
+import { pickFields } from '../lib/patchGuard.js';
 import { getCache, setCache, invalidateCache } from '../lib/cacheStore.js';
 
 const router = Router();
@@ -48,7 +49,7 @@ router.patch('/master-values/:id', requireRole('HR Director'), async (req, res) 
   try {
     const updated = await MasterValue.findOneAndUpdate(
       { _id: req.params.id, ...companyFilter(req) },
-      req.body || {},
+      pickFields(req.body, ['value', 'categoryId', 'sortOrder', 'active']),
       { new: true },
     );
     if (!updated) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Value not found.' } });

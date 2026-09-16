@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import Expense from '../models/Expense.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
+import { pickFields, isSelf } from '../lib/patchGuard.js';
 import { validate } from '../middleware/validation.js';
 import { fileExpenseSchema } from '../validations/expenseValidation.js';
 import { getSettingsDoc } from './settings.js';
@@ -68,11 +69,21 @@ router.post('/', validate(fileExpenseSchema), async (req, res) => {
   res.status(201).json(created);
 });
 
+// Deliberately cannot set `status`, `approvals` or `currentStage`: the old
+// handler passed req.body straight through, so an HR Manager could flip a
+// claim to 'approved' here and skip every approval stage and its permission
+// check. Decisions go through /approve and /decline.
+const EXPENSE_PATCH_FIELDS = ['name', 'category', 'amount', 'date', 'description'];
+
 router.patch('/:id', requireRole('HR Manager', 'Finance Lead'), async (req, res) => {
   const before = await Expense.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Expense claim not found.' } });
 
-  const updated = await Expense.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
+  const updated = await Expense.findOneAndUpdate(
+    { _id: req.params.id, ...companyFilter(req) },
+    pickFields(req.body, EXPENSE_PATCH_FIELDS),
+    { new: true },
+  );
   await logAudit(req, { action: 'Expense updated', subject: updated.name, before, after: updated });
   res.json(updated);
 });
@@ -92,7 +103,13 @@ router.post('/:id/approve', async (req, res) => {
   }
   
   const before = expense.toObject ? expense.toObject() : JSON.parse(JSON.stringify(expense));
-  expense.approvals.push({ role: req.auth.role, decision: 'approved' });
+  // Same self-approval hole leave had: an HR Manager or Finance Lead filing
+  // their own claim satisfied their own stage and could approve their own
+  // reimbursement in one click.
+  if (isSelf(req, expense.empId)) {
+    return res.status(403).json({ error: { code: 'SELF_APPROVAL_FORBIDDEN', message: 'You cannot approve your own expense claim.' } });
+  }
+  expense.approvals.push({ role: req.auth.role, decision: 'approved', by: req.auth.name });
   expense.currentStage += 1;
   if (expense.currentStage >= stages.length) expense.status = 'approved';
   await expense.save();
@@ -119,9 +136,18 @@ router.post('/:id/decline', async (req, res) => {
   }
   
   const before = expense.toObject ? expense.toObject() : JSON.parse(JSON.stringify(expense));
-  expense.approvals.push({ role: req.auth.role, decision: 'declined' });
+  if (isSelf(req, expense.empId)) {
+    return res.status(403).json({ error: { code: 'SELF_APPROVAL_FORBIDDEN', message: 'You cannot decline your own expense claim.' } });
+  }
+  // A declined reimbursement with no stated reason leaves the claimant with
+  // nothing to act on.
+  const declineReason = String(req.body?.reason || '').trim();
+  if (!declineReason) {
+    return res.status(400).json({ error: { code: 'REASON_REQUIRED', message: 'A reason is required when declining an expense claim.' } });
+  }
+  expense.approvals.push({ role: req.auth.role, decision: 'declined', by: req.auth.name });
   expense.status = 'declined';
-  expense.reason = req.body?.reason || expense.reason;
+  expense.reason = declineReason;
   await expense.save();
 
   await logAudit(req, { action: 'Expense declined', subject: expense.name, before, after: expense });

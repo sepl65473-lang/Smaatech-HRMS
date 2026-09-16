@@ -7,9 +7,17 @@ const attendanceCorrectionSchema = new mongoose.Schema({
   requestedCheckIn: { type: String, required: true }, // 'HH:MM'
   requestedCheckOut: { type: String, required: true }, // 'HH:MM'
   reason: { type: String, required: true },
-  status: { type: String, default: 'Pending' }, // Pending | Approved | Rejected
+  status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' },
+  // Who decided, when, and why — none of which was recorded before, so an
+  // approved correction had no accountable reviewer in the record itself.
+  reviewedBy: { type: String, default: '' },
+  reviewedAt: { type: Date, default: null },
+  reviewNote: { type: String, default: '' },
   company: { type: String, default: 'Smaatech', index: true }
 }, { timestamps: true });
+
+attendanceCorrectionSchema.index({ company: 1, status: 1, createdAt: -1 });
+attendanceCorrectionSchema.index({ company: 1, employeeId: 1, date: 1 });
 
 attendanceCorrectionSchema.set('toJSON', {
   virtuals: true,

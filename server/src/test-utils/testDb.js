@@ -11,6 +11,12 @@ export async function startTestDB() {
   if (mongod) return mongod;
   mongod = await MongoMemoryServer.create({
     binary: { version: '8.2.6' },
+    // mongodb-memory-server gives a new mongod 10 seconds to come up. On a
+    // loaded machine — the whole suite on one worker, each file starting its
+    // own instance — that is occasionally not enough, and the file fails to
+    // load with "Instance failed to start" while every test inside it is
+    // reported as skipped. Nothing to do with the code under test.
+    instance: { launchTimeout: Number(process.env.MONGOMS_LAUNCH_TIMEOUT || 60000) },
   });
   await mongoose.connect(mongod.getUri());
   return mongod;

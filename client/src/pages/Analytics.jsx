@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import { formatINR } from '../lib/helpers';
 import { downloadCSV } from '../lib/exportCsv';
+import { analyticsApi, fetchAllRows } from '../data/store';
 import {
   IconWorkforce, IconPresent, IconPerformance, IconPayroll,
 } from '../components/Icons';
@@ -68,9 +69,24 @@ export default function Analytics() {
     return next;
   });
 
-  const exportReport = () => {
+  // The preview below shows what the app shell happens to hold; the EXPORT
+  // pages through the API for the full dataset. A CSV that quietly contained
+  // only the first 100 attendance rows looked exactly like a complete one.
+  const [exporting, setExporting] = useState(false);
+  const exportReport = async () => {
     const cols = reportDef.columns.filter((c) => reportCols.has(c.key));
-    downloadCSV(`${reportDef.label.toLowerCase().replace(/\s+/g, '-')}-report`, reportRows, cols);
+    const resource = { employees: 'employees', attendance: 'attendance', leave: 'leaves', payroll: 'payroll' }[reportKey];
+    setExporting(true);
+    try {
+      const all = await fetchAllRows(resource);
+      const rows = dept === 'All' ? all : all.filter((r) => r.dept === dept);
+      downloadCSV(`${reportDef.label.toLowerCase().replace(/\s+/g, '-')}-report`, rows, cols);
+    } catch (err) {
+      // Better to say nothing was exported than to hand over a partial file.
+      window.alert(err.message || 'Could not export the full dataset. Nothing was downloaded.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const scopedEmployees = useMemo(
@@ -78,40 +94,89 @@ export default function Analytics() {
     [employees, dept],
   );
   const scopedIds = useMemo(() => new Set(scopedEmployees.map((e) => e.id)), [scopedEmployees]);
-
-  const scopedAttendance = attendance.filter((a) => scopedIds.has(a.empId));
   const scopedLeaves = leaves.filter((l) => scopedIds.has(l.empId));
-  const scopedPayroll = payroll.filter((p) => scopedIds.has(p.empId));
 
-  const present = scopedAttendance.filter((a) => a.status === 'present' || a.status === 'late').length;
-  const attendanceRate = scopedEmployees.length ? Math.round((present / scopedEmployees.length) * 100) : 0;
+  // The headline figures and the department table come from the SERVER, which
+  // aggregates the whole collection for the chosen window. They used to be
+  // derived here from the app shell's hydrated lists — and GET /attendance caps
+  // an unpaged response at the 100 most recent rows, so for any company with
+  // more than a handful of people the attendance rate shown was computed from a
+  // day or two of data and was simply wrong.
+  const [range, setRange] = useState(() => {
+    const now = new Date();
+    return {
+      from: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10),
+      to: now.toISOString().slice(0, 10),
+    };
+  });
+  const [report, setReport] = useState(null);
+  const [workforce, setWorkforce] = useState(null);
+  const [reportError, setReportError] = useState('');
+  const [loadingReport, setLoadingReport] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingReport(true);
+    // Hiring and attrition span the company, so they ignore the department
+    // chip — a department's "attrition rate" out of three people is noise.
+    analyticsApi.workforce({ from: range.from, to: range.to })
+      .then((data) => { if (!cancelled) setWorkforce(data); })
+      .catch(() => { if (!cancelled) setWorkforce(null); });
+
+    analyticsApi.overview({ from: range.from, to: range.to, dept })
+      .then((data) => {
+        if (cancelled) return;
+        setReport(data);
+        setReportError('');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setReport(null);
+        setReportError(err.message || 'Could not load reporting figures.');
+      })
+      .finally(() => { if (!cancelled) setLoadingReport(false); });
+    return () => { cancelled = true; };
+  }, [range.from, range.to, dept]);
+
+  const headcount = report?.headcount.total ?? scopedEmployees.length;
+  // null means "nothing was marked in this window" — which is not 0%.
+  const attendanceRate = report?.attendance.ratePct;
+  const presentCount = report?.attendance.present ?? 0;
+  const netPayout = report?.payroll.net ?? 0;
   const avgRating = scopedEmployees.length
     ? (scopedEmployees.reduce((sum, e) => sum + Number(e.rating || 0), 0) / scopedEmployees.length).toFixed(1)
     : '0.0';
-  const netPayout = scopedPayroll.reduce((sum, p) => sum + Number(p.net || 0), 0);
   const openRoles = new Set(recruitment.filter((r) => r.stage !== 'Hired').map((r) => r.title)).size;
 
-  const deptRows = departments.map((name) => {
-    const people = employees.filter((e) => e.dept === name);
-    const ids = new Set(people.map((e) => e.id));
-    const att = attendance.filter((a) => ids.has(a.empId));
-    const presentCount = att.filter((a) => a.status === 'present' || a.status === 'late').length;
-    const pay = payroll.filter((p) => ids.has(p.empId)).reduce((sum, p) => sum + p.net, 0);
-    const rating = people.length
-      ? (people.reduce((sum, e) => sum + e.rating, 0) / people.length).toFixed(1)
-      : '0.0';
-    return {
-      name,
-      people: people.length,
-      attendanceRate: people.length ? Math.round((presentCount / people.length) * 100) : 0,
-      pendingLeaves: leaves.filter((l) => ids.has(l.empId) && l.status === 'pending').length,
-      payout: pay,
-      rating,
-    };
-  });
+  const deptRows = (report?.departments || []).map((row) => ({
+    name: row.dept,
+    people: row.headcount,
+    attendanceRate: row.ratePct,
+    present: row.present,
+    absent: row.absent,
+    onLeave: row.onLeave,
+    marked: row.marked,
+  }));
 
   return (
     <div className="page-wrap active">
+      <div className="list-toolbar" style={{ marginBottom: 12 }}>
+        <label className="inline-select">
+          <span>From</span>
+          <input
+            type="date" className="input" value={range.from}
+            onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+          />
+        </label>
+        <label className="inline-select">
+          <span>To</span>
+          <input
+            type="date" className="input" value={range.to}
+            onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+          />
+        </label>
+      </div>
+
       <div className="filter-chips" style={{ marginBottom: 18 }}>
         {['All', ...departments].map((d) => (
           <button key={d} className={`chip ${dept === d ? 'active' : ''}`} onClick={() => setDept(d)}>{d}</button>
@@ -121,11 +186,17 @@ export default function Analytics() {
       <div className="stats">
         <div className="stat">
           <div className="stat-icon tone-accent"><IconWorkforce width="16" height="16" /></div>
-          <div className="stat-label">Headcount</div><div className="stat-value">{scopedEmployees.length}</div><div className="stat-meta">{dept} workforce</div>
+          <div className="stat-label">Headcount</div><div className="stat-value">{headcount}</div><div className="stat-meta">{dept} workforce</div>
         </div>
         <div className="stat">
           <div className="stat-icon tone-sage"><IconPresent width="16" height="16" /></div>
-          <div className="stat-label">Attendance</div><div className="stat-value">{attendanceRate}%</div><div className="stat-meta">{present} present today</div>
+          <div className="stat-label">Attendance</div>
+          <div className="stat-value">{attendanceRate == null ? '—' : `${attendanceRate}%`}</div>
+          <div className="stat-meta">
+            {attendanceRate == null
+              ? 'nothing marked in this window'
+              : `${presentCount} of ${report.attendance.marked} marked present`}
+          </div>
         </div>
         <div className="stat">
           <div className="stat-icon tone-gold"><IconPerformance width="16" height="16" /></div>
@@ -137,19 +208,89 @@ export default function Analytics() {
         </div>
       </div>
 
+      {workforce && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="card-head">
+            <div>
+              <div className="card-title">Workforce movement</div>
+              <div className="card-sub">
+                Company-wide · {workforce.range.from} to {workforce.range.to}
+              </div>
+            </div>
+          </div>
+          <div className="stats">
+            <div className="stat">
+              <div className="stat-label">Joined</div>
+              <div className="stat-value">{workforce.hiring.joined}</div>
+              <div className="stat-meta">new employees in this window</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Left</div>
+              <div className="stat-value">{workforce.attrition.exits}</div>
+              <div className="stat-meta">
+                {workforce.attrition.inNoticePeriod} currently in notice period
+              </div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Attrition</div>
+              <div className="stat-value">
+                {workforce.attrition.ratePct == null ? '\u2014' : `${workforce.attrition.ratePct}%`}
+              </div>
+              <div className="stat-meta">
+                of {workforce.headcount.average} average headcount
+              </div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Offer acceptance</div>
+              <div className="stat-value">
+                {workforce.hiring.offerAcceptanceRatePct == null
+                  ? '\u2014'
+                  : `${workforce.hiring.offerAcceptanceRatePct}%`}
+              </div>
+              <div className="stat-meta">
+                {workforce.hiring.offersAccepted} accepted · {workforce.hiring.offersDeclined} declined
+              </div>
+            </div>
+          </div>
+
+          {workforce.hiring.joiners.length > 0 && (
+            <div className="table-scroll" style={{ marginTop: 14 }}>
+              <table className="table">
+                <thead>
+                  <tr><th>Joined</th><th>Name</th><th>Department</th><th>Role</th></tr>
+                </thead>
+                <tbody>
+                  {workforce.hiring.joiners.map((person) => (
+                    <tr key={person.id}>
+                      <td className="mono">{person.joinDate}</td>
+                      <td><strong>{person.name}</strong></td>
+                      <td>{person.dept}</td>
+                      <td>{person.role}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid">
         <div className="card">
           <div className="card-head">
             <div>
               <div className="card-title">Department health</div>
-              <div className="card-sub">Live from employees, attendance, leave and payroll</div>
+              <div className="card-sub">
+                {loadingReport ? 'Loading…' : `Server-aggregated · ${range.from} to ${range.to}`}
+              </div>
             </div>
             <button
               className="btn btn-ghost"
               onClick={() => downloadCSV('department-health-report', deptRows, [
                 { key: 'name', label: 'Department' }, { key: 'people', label: 'People' },
-                { key: 'attendanceRate', label: 'Attendance %' }, { key: 'pendingLeaves', label: 'Pending leave' },
-                { key: 'rating', label: 'Avg rating' }, { key: 'payout', label: 'Net payout' },
+                { key: 'marked', label: 'Days marked' }, { key: 'present', label: 'Present' },
+                { key: 'absent', label: 'Absent' }, { key: 'onLeave', label: 'On leave' },
+                { key: 'attendanceRate', label: 'Attendance %' },
               ])}
             >
               Export CSV
@@ -159,23 +300,29 @@ export default function Analytics() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Department</th><th>People</th><th>Attendance</th><th>Pending leave</th><th>Rating</th><th style={{ textAlign: 'right' }}>Net payout</th>
+                  <th>Department</th><th>People</th><th>Attendance</th><th>Present</th><th>Absent</th><th style={{ textAlign: 'right' }}>On leave</th>
                 </tr>
               </thead>
               <tbody>
+                {reportError && (
+                  <tr><td colSpan={6}>{reportError}</td></tr>
+                )}
+                {!reportError && deptRows.length === 0 && (
+                  <tr><td colSpan={6}>{loadingReport ? 'Loading…' : 'No attendance marked in this window.'}</td></tr>
+                )}
                 {deptRows.map((row) => (
                   <tr key={row.name}>
                     <td><strong>{row.name}</strong></td>
                     <td>{row.people}</td>
                     <td>
                       <div className="rating-bar" style={{ maxWidth: 140 }}>
-                        <div className="rating-fill" style={{ width: `${row.attendanceRate}%` }} />
+                        <div className="rating-fill" style={{ width: `${row.attendanceRate ?? 0}%` }} />
                       </div>
-                      <span className="mono">{row.attendanceRate}%</span>
+                      <span className="mono">{row.attendanceRate == null ? '—' : `${row.attendanceRate}%`}</span>
                     </td>
-                    <td>{row.pendingLeaves}</td>
-                    <td>{row.rating}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{formatINR(row.payout)}</td>
+                    <td>{row.present}</td>
+                    <td>{row.absent}</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>{row.onLeave}</td>
                   </tr>
                 ))}
               </tbody>
@@ -212,9 +359,13 @@ export default function Analytics() {
         <div className="card-head">
           <div>
             <div className="card-title">Custom report builder</div>
-            <div className="card-sub">{reportRows.length} rows · {dept} · {reportCols.size} of {reportDef.columns.length} columns</div>
+            <div className="card-sub">
+              preview of {reportRows.length} rows · {dept} · {reportCols.size} of {reportDef.columns.length} columns · the export covers every row
+            </div>
           </div>
-          <button className="btn" disabled={reportCols.size === 0} onClick={exportReport}>Export CSV</button>
+          <button className="btn" disabled={reportCols.size === 0 || exporting} onClick={exportReport}>
+            {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
         </div>
 
         <div className="filter-chips" style={{ marginBottom: 12 }}>

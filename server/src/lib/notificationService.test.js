@@ -98,7 +98,10 @@ describe('sendNotification email channel', () => {
     expect(stored.title).toBe('Leave approved');
   });
 
-  it('falls back to the console scaffold without throwing when email is not configured', async () => {
+  it('REPORTS email as undelivered when it is not configured, instead of claiming success', async () => {
+    // The old version logged a "[Email Scaffolding]" console line and returned
+    // as though the send had happened, so an unconfigured deployment silently
+    // delivered nothing while every caller saw success.
     delete process.env.BREVO_API_KEY;
     const user = await seedRecipient();
 
@@ -107,7 +110,30 @@ describe('sendNotification email channel', () => {
     });
 
     expect(sendEmail).not.toHaveBeenCalled();
-    expect(result).toBeNull(); // channels didn't include 'in-app', so no DB record either
+    expect(result.undelivered).toContain('email');
+    expect(result.delivered).not.toContain('email');
+    // channels didn't include 'in-app', so no DB record either
+    expect(result.notification).toBeNull();
+  });
+
+  it('reports SMS, WhatsApp and push as undelivered because they are NOT IMPLEMENTED', async () => {
+    // HR can select these channels in Settings > Notifications. There is no
+    // Twilio/gateway/push client in this codebase, so the honest answer is
+    // "not delivered", not a console line and a success return.
+    const user = await seedRecipient();
+
+    const result = await sendNotification({
+      recipientId: user._id,
+      title: 'Leave approved',
+      message: 'Your leave is approved.',
+      channels: ['in-app', 'sms', 'whatsapp', 'push'],
+      company: 'NotifyCo',
+    });
+
+    expect(result.undelivered).toEqual(expect.arrayContaining(['sms', 'whatsapp', 'push']));
+    // The in-app notification is real and still goes out, so nothing is lost.
+    expect(result.delivered).toContain('in-app');
+    expect(result.notification).not.toBeNull();
   });
 
   it('never lets a send failure escape — sendNotification stays fire-and-forget', async () => {

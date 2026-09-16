@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import OfferModal from '../components/OfferModal';
 import { useHRMS } from '../context/HRMSContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Modal from '../components/Modal';
@@ -21,8 +22,7 @@ export default function Recruitment() {
     importJobs,
     employees,
     audit,
-    toast
-  } = useHRMS();
+    toast, reloadRecruitment } = useHRMS();
 
   // Navigation states
   const [activeTab, setActiveTab] = useState('pipeline'); // 'pipeline' | 'jobs'
@@ -32,6 +32,7 @@ export default function Recruitment() {
   const [form, setForm] = useState({ candidate: '', title: '' });
   const [confirm, setConfirm] = useState(null);
   const [onboarding, setOnboarding] = useState(null);
+  const [offerTarget, setOfferTarget] = useState(null);
 
   // Resume Viewer States
   const [selectedResume, setSelectedResume] = useState(null);
@@ -160,6 +161,12 @@ export default function Recruitment() {
                       {c.stage === 'Interview' && (
                         <button className="mini-btn" onClick={() => setSchedulerTarget(c)}>
                           Schedule
+                        </button>
+                      )}
+
+                      {(c.stage === 'Offer' || c.stage === 'Hired') && (
+                        <button className="mini-btn" onClick={() => setOfferTarget(c)}>
+                          {c.employeeId ? 'Offer' : (c.offer?.status === 'accepted' ? 'Hire' : 'Offer')}
                         </button>
                       )}
 
@@ -443,6 +450,13 @@ export default function Recruitment() {
       />
 
       {/* Onboarding Checklist Modal */}
+      <OfferModal
+        candidate={offerTarget ? recruitment.find((c) => c.id === offerTarget.id) || offerTarget : null}
+        open={Boolean(offerTarget)}
+        onClose={() => setOfferTarget(null)}
+        onChanged={() => reloadRecruitment()}
+      />
+
       <Modal
         open={Boolean(onboardingCandidate)}
         title="Onboarding & Offboarding Checklist"

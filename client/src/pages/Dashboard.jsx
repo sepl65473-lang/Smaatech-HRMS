@@ -577,7 +577,7 @@ export default function Dashboard() {
                   <span className={`leave-tag ${leaveTagClass(l.type)}`}>{leaveTagLabel(l.type)}</span>
                   <div className="leave-actions">
                     <button className="mini-btn approve" onClick={() => approveLeave(l.id)}>Approve</button>
-                    <button className="mini-btn" onClick={() => declineLeave(l.id)}>Decline</button>
+                    <button className="mini-btn" onClick={() => { const note = window.prompt('Reason for declining this leave request?'); if (note !== null) declineLeave(l.id, note); }}>Decline</button>
                   </div>
                 </div>
               </div>

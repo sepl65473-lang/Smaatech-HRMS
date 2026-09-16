@@ -4,6 +4,7 @@ import Avatar from '../components/Avatar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Modal from '../components/Modal';
 import SalaryStructureModal from '../components/SalaryStructureModal';
+import VariablePayCard from '../components/VariablePayCard';
 import { IconPayroll, IconCheck } from '../components/Icons';
 import { formatINR } from '../lib/helpers';
 import { downloadPayslip } from '../lib/payslip';
@@ -16,13 +17,35 @@ const STATUS = {
 };
 
 export default function Payroll() {
-  const { payroll, employees, processPayroll, markPaid, updatePayrollStructure, audit, toast } = useHRMS();
+  const {
+    payroll, employees, processPayroll, markPaid, updatePayrollStructure,
+    runPayrollCycle, canDo, audit, toast,
+  } = useHRMS();
   const [confirm, setConfirm] = useState(false);
   const [slip, setSlip] = useState(null);
   const [structureSlip, setStructureSlip] = useState(null);
-  const cycles = useMemo(() => [...new Set(payroll.map((p) => p.cycle || 'Current'))], [payroll]);
+  const [running, setRunning] = useState(false);
+  // The current month is always offered, even before anything exists for it —
+  // otherwise a fresh cycle can never be started from this page.
+  const thisCycle = new Date().toISOString().slice(0, 7);
+  const cycles = useMemo(
+    () => [...new Set([thisCycle, ...payroll.map((p) => p.cycle || 'Current')])],
+    [payroll, thisCycle],
+  );
   const [cycle, setCycle] = useState('');
   const activeCycle = cycle || cycles[0] || 'Current';
+  const canRunPayroll = canDo('managePayroll');
+
+  const handleRunCycle = async () => {
+    setRunning(true);
+    try {
+      await runPayrollCycle(activeCycle);
+    } catch {
+      // runPayrollCycle already surfaced the reason.
+    } finally {
+      setRunning(false);
+    }
+  };
   const cyclePayroll = useMemo(
     () => payroll.filter((p) => (p.cycle || 'Current') === activeCycle),
     [payroll, activeCycle],
@@ -90,10 +113,27 @@ export default function Payroll() {
             <div className="card-title">Payroll register - {activeCycle}</div>
             <div className="card-sub">{totals.ready} of {cyclePayroll.length} ready to pay</div>
           </div>
-          {cycles.length > 1 && (
-            <select className="input" value={activeCycle} onChange={(e) => setCycle(e.target.value)}>
-              {cycles.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+          <select className="input" value={cycles.includes(activeCycle) ? activeCycle : ''} onChange={(e) => setCycle(e.target.value)}>
+            <option value="" disabled>Select a cycle</option>
+            {cycles.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {/* Any month, not only the ones that already have payslips —
+              otherwise a cycle can never be started except the current one,
+              and a back-dated run is impossible. */}
+          <label className="inline-select">
+            <span>Cycle</span>
+            <input
+              id="payroll-cycle"
+              type="month"
+              className="input"
+              value={/^\d{4}-\d{2}$/.test(activeCycle) ? activeCycle : ''}
+              onChange={(e) => e.target.value && setCycle(e.target.value)}
+            />
+          </label>
+          {canRunPayroll && (
+            <button className="btn btn-ghost" disabled={running} onClick={handleRunCycle}>
+              {running ? 'Running…' : 'Run payroll'}
+            </button>
           )}
           <button className="btn btn-ghost" disabled={cyclePayroll.length === 0} onClick={exportBankFile}>
             Export bank file
@@ -190,6 +230,10 @@ export default function Payroll() {
           </div>
         )}
       </Modal>
+
+      {/* Variable pay is keyed to a real YYYY-MM cycle; legacy rows whose
+          cycle is the literal "Current" have no cycle to attach it to. */}
+      {/^\d{4}-\d{2}$/.test(activeCycle) && <VariablePayCard cycle={activeCycle} />}
 
       <SalaryStructureModal
         open={Boolean(structureSlip)}

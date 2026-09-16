@@ -12,6 +12,10 @@ import Settings from './models/Settings.js';
 import Role from './models/Role.js';
 import MasterCategory from './models/MasterCategory.js';
 import MasterValue from './models/MasterValue.js';
+import LeaveType, { DEFAULT_LEAVE_TYPES } from './models/LeaveType.js';
+
+// Every model defaults `company` to this; the seed writes one tenant.
+const COMPANY = 'Smaatech';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const emailOf = (name) => `${name.toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.')}@smaatech.co`;
@@ -25,6 +29,11 @@ const EMP_SEED = [
 ];
 
 const ALL_EMP_SEED = EMP_SEED;
+
+const DEPT_LEAD = {
+  'Finance & HR': 'Admin',
+  Engineering: 'Priya Sharma',
+};
 
 const MANAGER_OF = {
   'Arjun Bhatt': 'Ananya Nair', 'Priya Sharma': 'Ananya Nair',
@@ -65,6 +74,7 @@ async function run() {
     Role.deleteMany({}),
     MasterCategory.deleteMany({}),
     MasterValue.deleteMany({}),
+    LeaveType.deleteMany({}),
   ]);
 
   const seededCategories = await MasterCategory.insertMany([
@@ -118,6 +128,12 @@ async function run() {
     { categoryId: catMap['leave_types'], value: 'sick' },
     { categoryId: catMap['leave_types'], value: 'casual' },
     { categoryId: catMap['leave_types'], value: 'earned' },
+    // Kept in step with models/LeaveType.js DEFAULT_LEAVE_TYPES — this list is
+    // what the leave form offers, and a code the policy doesn't define is
+    // rejected by POST /leaves with UNKNOWN_LEAVE_TYPE.
+    { categoryId: catMap['leave_types'], value: 'unpaid' },
+    { categoryId: catMap['leave_types'], value: 'maternity' },
+    { categoryId: catMap['leave_types'], value: 'paternity' },
     // Marital Status
     { categoryId: catMap['marital_status'], value: 'Single' },
     { categoryId: catMap['marital_status'], value: 'Married' },
@@ -155,11 +171,18 @@ async function run() {
     },
   ]);
 
+  // Leave policy, so the balance system (lib/leaveLedger.js) has real quotas
+  // to enforce from the first request rather than treating leave as unlimited.
+  await LeaveType.insertMany(DEFAULT_LEAVE_TYPES.map((t) => ({ ...t, company: COMPANY })));
+
   const employees = await Employee.insertMany(ALL_EMP_SEED.map((e, i) => ({
     name: e.name, role: e.role, dept: e.dept, loc: e.loc,
     email: emailOf(e.name), phone: phoneOf(i), status: e.status,
     joinDate: e.join, salary: e.salary, rating: e.rating,
     employmentType: e.employmentType || 'Full-time',
+    // Salary structure inputs for PF / Professional Tax (lib/statutory.js).
+    basic: Math.round((e.salary || 0) * 0.5),
+    state: e.state || 'Karnataka',
   })));
 
   const byName = (n) => employees.find((e) => e.name === n);
@@ -191,7 +214,7 @@ async function run() {
     employeeId: a.empName ? byName(a.empName)._id : null,
   }))));
 
-  await Settings.create({ _id: 'singleton' });
+  await Settings.create({ _id: COMPANY });
 
   console.log(`Seeded ${employees.length} employees and ${DEMO_ACCOUNTS.length} demo accounts.`);
   console.log('Demo logins:');

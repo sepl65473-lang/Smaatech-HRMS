@@ -1,4 +1,3 @@
-import cron from 'node-cron';
 import Employee from '../models/Employee.js';
 import Attendance from '../models/Attendance.js';
 import Holiday from '../models/Holiday.js';
@@ -100,20 +99,7 @@ export async function notifyYesterdaysAbsences() {
   }
 }
 
-async function runDailyJob() {
-  await createTodaysAttendanceRows();
-  await notifyYesterdaysAbsences();
-}
-
-export function startAttendanceDailyScheduler() {
-  // Run on startup (5 second delay to let DB connect and server boot completely)
-  setTimeout(() => {
-    runDailyJob().catch((err) => logger.error('[Attendance Daily Job Startup Error] %o', err));
-  }, 5000);
-
-  // Run daily at midnight using node-cron (same schedule/style as the
-  // document-expiry job — see lib/documentExpiryJob.js).
-  cron.schedule('0 0 * * *', () => {
-    runDailyJob().catch((err) => logger.error('[Attendance Daily Job Cron Error] %o', err));
-  });
-}
+// Scheduling now lives in lib/jobs.js, behind lib/scheduler.js's
+// single-owner guard. Registering cron here meant EVERY clustered worker
+// started its own copy: with 8 workers, 8 concurrent midnight bulk writes
+// over the same employees and 8 copies of every absence email.

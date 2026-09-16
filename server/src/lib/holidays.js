@@ -21,3 +21,37 @@ export function isHoliday(dateISO, holidayDocs) {
     return parsed && parsed.day === day && parsed.month === month;
   });
 }
+
+// Expands the company's year-agnostic holiday display strings into concrete
+// YYYY-MM-DD dates for a given year.
+//
+// This closes a real, silent bug in leave working-day calculation:
+// routes/leave.js built its holiday set with `new Set(holidays.map(h => h.date))`
+// and then asked `holidaySet.has('2026-06-07')`. Holiday.date is a display
+// string like "7 Jun, Sun" (see the model comment), so that lookup could never
+// match ANY date — holidays were never excluded from leave working days, and
+// every employee was silently charged leave for company holidays falling
+// inside their leave period.
+export function holidayDateSet(holidayDocs, year) {
+  const set = new Set();
+  for (const h of holidayDocs) {
+    const parsed = parseHolidayDay(h.date);
+    if (!parsed) continue;
+    const month = String(parsed.month + 1).padStart(2, '0');
+    const day = String(parsed.day).padStart(2, '0');
+    set.add(`${year}-${month}-${day}`);
+  }
+  return set;
+}
+
+// Same, but spanning every year a date range touches (a leave that crosses
+// 31 December still needs January's holidays).
+export function holidayDateSetForRange(holidayDocs, startISO, endISO) {
+  const startYear = Number(String(startISO).slice(0, 4));
+  const endYear = Number(String(endISO).slice(0, 4));
+  const set = new Set();
+  for (let year = startYear; year <= endYear; year += 1) {
+    for (const date of holidayDateSet(holidayDocs, year)) set.add(date);
+  }
+  return set;
+}

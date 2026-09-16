@@ -4,6 +4,10 @@ import mongoose from 'mongoose';
 const settingsSchema = new mongoose.Schema({
   _id: { type: String, default: 'singleton' }, // company name
   gpsCheckInEnabled: { type: Boolean, default: false },
+  // Turns on the active challenge-response liveness flow for self-service
+  // check-in (lib/liveness.js). Off by default because it requires the
+  // multi-frame capture UI; when on, a single still photo is rejected.
+  livenessRequired: { type: Boolean, default: false },
   geofenceLat: { type: Number, default: 19.0760 },
   geofenceLng: { type: Number, default: 72.8777 },
   geofenceRadius: { type: Number, default: 25 },
@@ -19,6 +23,10 @@ const settingsSchema = new mongoose.Schema({
   twoFactor: { type: Boolean, default: true },
   wishesSent: { type: Number, default: 0 },
   totalLeaveDays: { type: Number, default: 24 },
+  // 1 = calendar year, 4 = April-March financial year. Indian companies split
+  // roughly evenly between the two, and it decides which balance year a
+  // request draws from.
+  leaveYearStartMonth: { type: Number, default: 1, min: 1, max: 12 },
   departments: { type: [String], default: [] },
   designations: { type: [String], default: [] },
   
@@ -64,6 +72,41 @@ const settingsSchema = new mongoose.Schema({
     })
   },
   
+
+  /**
+   * EMPLOYMENT POLICY — company configuration, not law and not a default this
+   * codebase is entitled to invent.
+   *
+   * Every value here was previously either absent or hard-coded somewhere.
+   * They are gathered in one place so HR sets them once and every module reads
+   * the same number. The defaults below are deliberately the most neutral
+   * choice available (a common Indian private-sector arrangement), and the API
+   * reports which of them the company has actually confirmed, so nobody
+   * mistakes an unreviewed default for an agreed policy.
+   */
+  employmentPolicy: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({
+      // Probation and confirmation.
+      probationMonths: 6,
+      probationExtensionMonths: 3,
+
+      // Separation.
+      noticePeriodDays: 30,
+      noticePeriodDaysOnProbation: 15,
+
+      // Variable pay. A multiple of the ordinary hourly rate, derived from
+      // gross / (monthlyWorkingDays * dailyWorkHours).
+      overtimeMultiplier: 2,
+      monthlyWorkingDays: 26,
+      dailyWorkHours: 8,
+      overtimeRequiresApproval: true,
+
+      // Set true by HR once these numbers have actually been reviewed. Until
+      // then the API labels them as unconfirmed defaults.
+      confirmedByHR: false,
+    }),
+  },
   approvalWorkflows: {
     type: mongoose.Schema.Types.Mixed,
     default: () => ({

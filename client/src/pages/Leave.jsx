@@ -5,13 +5,14 @@ import LeaveForm from '../components/LeaveForm';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { IconPlus, IconTrash } from '../components/Icons';
 import { formatDate, daysBetween, leaveTagClass, leaveTagLabel } from '../lib/helpers';
+import { canDecideLeave, requiredStageFor, stagesFor } from '../lib/leaveApproval';
+import { leavesApi } from '../data/store';
 
 const FILTERS = ['Pending', 'Approved', 'Declined', 'Withdrawn', 'All'];
-const DEFAULT_STAGES = ['HR Manager', 'HR Director']; // mirrors server/src/routes/leave.js's fallback
 
 export default function Leave() {
   const {
-    leaves, employees, settings, currentUser, addLeave, approveLeave, declineLeave, deleteLeave,
+    leaves, employees, currentUser, addLeave, approveLeave, declineLeave, deleteLeave,
     withdrawLeave, bulkApproveLeave, bulkDeclineLeave,
   } = useHRMS();
   const [filter, setFilter] = useState('Pending');
@@ -25,15 +26,13 @@ export default function Leave() {
     return leaves.filter((l) => l.status === filter.toLowerCase());
   }, [leaves, filter]);
 
-  const canActOn = (l) => {
-    const stages = l.approvalStages?.length ? l.approvalStages : DEFAULT_STAGES;
-    const requiredRole = stages[l.currentStage || 0] || stages[stages.length - 1];
-    return currentUser.role === 'HR Director' || currentUser.role === requiredRole;
-  };
+  // Mirrors the server's own rule (src/lib/leaveApproval.js) rather than
+  // guessing, so the page never offers a decision the API will refuse.
+  const canActOn = (l) => canDecideLeave({ leave: l, currentUser, employees });
   const selectableIds = useMemo(
     () => list.filter((l) => l.status === 'pending' && canActOn(l)).map((l) => l.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [list, currentUser.role],
+    [list, currentUser.role, currentUser.empId, employees],
   );
 
   const toggleSelect = (id) => {
@@ -71,49 +70,43 @@ export default function Leave() {
     All: leaves.length,
   }), [leaves]);
 
-  const balances = useMemo(() => employees.map((employee) => {
-    const approved = leaves.filter((l) => l.empId === employee.id && l.status === 'approved');
-    const pending = leaves.filter((l) => l.empId === employee.id && l.status === 'pending');
-    
-    const used = approved.reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
-    const pendingDays = pending.reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
-
-    const casualUsed = approved.filter((l) => l.type === 'casual').reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
-    const sickUsed = approved.filter((l) => l.type === 'sick').reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
-    const earnedUsed = approved.filter((l) => l.type === 'earned').reduce((sum, l) => sum + (l.workingDays || (l.isHalfDay ? 0.5 : daysBetween(l.start, l.end))), 0);
-
-    const quotaPerType = 12; // 12 days per category
-    const total = Number(settings.totalLeaveDays || 24);
-
-    return {
-      id: employee.id,
-      name: employee.name,
-      dept: employee.dept,
-      used,
-      pendingDays,
-      casualRem: Math.max(0, quotaPerType - casualUsed),
-      sickRem: Math.max(0, quotaPerType - sickUsed),
-      earnedRem: Math.max(0, quotaPerType - earnedUsed),
-      remaining: Math.max(0, total - used),
-      pct: Math.min(100, Math.round((used / total) * 100)),
-    };
-  }).sort((a, b) => b.used - a.used).slice(0, 3), [employees, leaves, settings.totalLeaveDays]);
+  // The authoritative balance comes from the server ledger — the same figures
+  // the reservation on POST /leaves checks against. Deriving it in the browser
+  // (as this page used to) produced a number nothing enforced, so an employee
+  // could be told they had days left and then be refused.
+  const [balances, setBalances] = useState([]);
+  const [balanceError, setBalanceError] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentUser.empId) { setBalances([]); return undefined; }
+    leavesApi.balance()
+      .then((res) => { if (!cancelled) { setBalances(res.balances || []); setBalanceError(''); } })
+      .catch((err) => { if (!cancelled) { setBalances([]); setBalanceError(err.message || 'Could not load your leave balance.'); } });
+    return () => { cancelled = true; };
+    // Re-read after any decision, since approving commits a reservation.
+  }, [currentUser.empId, leaves]);
 
   return (
     <div className="page-wrap active">
       <div className="balance-grid">
-        {balances.map((b) => (
+        {balanceError && <div className="empty">{balanceError}</div>}
+        {balances.filter((b) => b.balanceTracked).map((b) => (
           <div
             className="balance-card"
-            key={b.id}
-            style={{ '--bar-width': `${Math.max(6, b.pct)}%`, '--bar-color': b.remaining < 6 ? 'var(--red)' : 'var(--sage)' }}
+            key={b.type}
+            style={{
+              '--bar-width': `${Math.max(6, Math.min(100, Math.round(((b.used + b.pending) / Math.max(1, b.annualQuota)) * 100)))}%`,
+              '--bar-color': b.available < 2 ? 'var(--red)' : 'var(--sage)',
+            }}
           >
             <div className="balance-label">{b.name}</div>
-            <div className="balance-value">{b.remaining}<small> / 24 days left</small></div>
-            <div className="balance-meta" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-              <span>C: {b.casualRem}d left</span> · <span>S: {b.sickRem}d left</span> · <span>E: {b.earnedRem}d left</span>
+            <div className="balance-value">{b.available}<small> / {b.annualQuota} days left</small></div>
+            <div className="balance-meta">
+              {b.used}d used · {b.pending}d pending{b.adjusted ? ` · ${b.adjusted}d adjusted` : ''}
             </div>
-            <div className="balance-meta">{b.used}d used · {b.pendingDays}d pending · {b.dept}</div>
+            <div className="balance-meta">
+              {b.accrualMode === 'monthly' ? 'Accrues monthly' : 'Credited annually'}
+            </div>
           </div>
         ))}
       </div>
@@ -163,7 +156,7 @@ export default function Leave() {
         <div className="leave-list" style={{ marginTop: 16 }}>
           {list.length === 0 && <div className="empty">Nothing here.</div>}
           {list.map((l) => {
-            const isOwner = currentUser.employeeId && String(l.empId) === String(currentUser.employeeId);
+            const isOwner = currentUser.empId && String(l.empId) === String(currentUser.empId);
             return (
               <div className="leave-item" key={l.id}>
                 {l.status === 'pending' && canActOn(l) && (
@@ -198,10 +191,10 @@ export default function Leave() {
                     )}
                   </div>
                   {l.status === 'pending' && (() => {
-                    const stages = l.approvalStages?.length ? l.approvalStages : DEFAULT_STAGES;
+                    const stages = stagesFor(l);
                     const stage = l.currentStage || 0;
-                    const requiredRole = stages[stage] || stages[stages.length - 1];
-                    const canAct = currentUser.role === 'HR Director' || currentUser.role === requiredRole;
+                    const requiredRole = requiredStageFor(l);
+                    const canAct = canActOn(l);
                     return (
                       <>
                         <div className="leave-meta" style={{ marginTop: 2 }}>
@@ -211,7 +204,7 @@ export default function Leave() {
                           {canAct && (
                             <>
                               <button className="mini-btn approve" onClick={() => approveLeave(l.id)}>Approve</button>
-                              <button className="mini-btn" onClick={() => declineLeave(l.id)}>Decline</button>
+                              <button className="mini-btn" onClick={() => { const note = window.prompt('Reason for declining this leave request?'); if (note !== null) declineLeave(l.id, note); }}>Decline</button>
                             </>
                           )}
                           {(isOwner || currentUser.role === 'HR Director') && (

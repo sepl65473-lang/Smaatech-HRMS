@@ -24,6 +24,51 @@ const attendanceSchema = new mongoose.Schema({
   checkOutAccuracy: { type: Number, default: null },
   checkInAddress: { type: String, default: null },
   checkOutAddress: { type: String, default: null },
+
+  // STRUCTURED location, not just a flattened display line.
+  //
+  // checkInLoc/checkInAddress held "lat, lng" and one joined string, so an
+  // attendance record could not show, sort or filter on place name, city or
+  // postal code independently, and an auditor could not tell which part of
+  // the blob was the PIN. Coordinates are kept alongside — never replaced —
+  // because the geofence decision and any later dispute rest on the raw fix.
+  // See lib/geocode.js structureAddress().
+  checkInLocation: {
+    placeName: { type: String, default: null },
+    fullAddress: { type: String, default: null },
+    pincode: { type: String, default: null },
+    area: { type: String, default: null },
+    city: { type: String, default: null },
+    district: { type: String, default: null },
+    state: { type: String, default: null },
+    country: { type: String, default: null },
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    source: { type: String, default: null }, // nominatim | cache | unresolved
+    resolvedAt: { type: String, default: null },
+  },
+  checkOutLocation: {
+    placeName: { type: String, default: null },
+    fullAddress: { type: String, default: null },
+    pincode: { type: String, default: null },
+    area: { type: String, default: null },
+    city: { type: String, default: null },
+    district: { type: String, default: null },
+    state: { type: String, default: null },
+    country: { type: String, default: null },
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    source: { type: String, default: null },
+    resolvedAt: { type: String, default: null },
+  },
+
+  // Count of rejected verification attempts against this employee-day, so HR
+  // sees "3 failed attempts before this punch" on the record itself rather
+  // than having to read the audit log — which only an HR Director can open.
+  // The attempts themselves live in models/VerificationAttempt.js.
+  failedVerificationCount: { type: Number, default: 0 },
   checkInDeviceId: { type: String, default: null },
   checkOutDeviceId: { type: String, default: null },
   checkInDevice: { type: mongoose.Schema.Types.Mixed, default: null }, // { name, type, browser, os }

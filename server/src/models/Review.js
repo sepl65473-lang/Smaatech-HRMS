@@ -20,6 +20,12 @@ const reviewSchema = new mongoose.Schema({
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
+// One review per employee per cycle. Without this, a retried or double-clicked
+// "start cycle" produced a second review for the same person, and whichever one
+// the UI happened to show was the one that got filled in.
+reviewSchema.index({ company: 1, cycleName: 1, empId: 1 }, { unique: true });
+reviewSchema.index({ company: 1, empId: 1, createdAt: -1 });
+
 reviewSchema.set('toJSON', {
   virtuals: true,
   transform: (_doc, ret) => {

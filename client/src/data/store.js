@@ -80,12 +80,84 @@ export const leavesApi = {
   // Stage-aware approve/decline (see server/src/routes/leave.js) — the
   // server checks the caller's role against the request's current stage.
   approve: (id) => apiFetch(`/leaves/${id}/approve`, { method: 'POST' }),
-  decline: (id) => apiFetch(`/leaves/${id}/decline`, { method: 'POST' }),
+  decline: (id, note) => apiFetch(`/leaves/${id}/decline`, { method: 'POST', body: { note: note || '' } }),
   withdraw: (id) => apiFetch(`/leaves/${id}/withdraw`, { method: 'POST' }),
+  // Server-computed, ledger-backed balance. The Leave page used to derive
+  // "days left" in the browser from the leave rows it happened to hold, against
+  // hardcoded 12/24-day quotas — a number the server never agreed with and
+  // never enforced. These are the figures the server actually reserves against.
+  balance: (empId, year) => {
+    const qs = new URLSearchParams(
+      Object.entries({ empId, year }).filter(([, v]) => v != null && v !== ''),
+    ).toString();
+    return apiFetch(`/leaves/balance${qs ? `?${qs}` : ''}`);
+  },
+  ledger: (empId, year) => {
+    const qs = new URLSearchParams(
+      Object.entries({ empId, year }).filter(([, v]) => v != null && v !== ''),
+    ).toString();
+    return apiFetch(`/leaves/ledger${qs ? `?${qs}` : ''}`);
+  },
+  // The company's configured leave policy. HR passes includeInactive to see
+  // retired types, which are hidden everywhere else so nobody can file against
+  // a policy that has been withdrawn.
+  types: ({ includeInactive = false } = {}) =>
+    apiFetch(`/leaves/types${includeInactive ? '?includeInactive=true' : ''}`),
+  createType: (body) => apiFetch('/leaves/types', { method: 'POST', body }),
+  updateType: (code, body) => apiFetch(`/leaves/types/${encodeURIComponent(code)}`, { method: 'PATCH', body }),
+  deleteType: (code) => apiFetch(`/leaves/types/${encodeURIComponent(code)}`, { method: 'DELETE' }),
+  adjustBalance: (body) => apiFetch('/leaves/balance/adjust', { method: 'POST', body }),
 };
-export const payrollApi = restResource('payroll');
+export const payrollApi = {
+  ...restResource('payroll'),
+  // Generates the register for an entire cycle. Idempotent server-side, so a
+  // double click cannot produce two payslips for one person.
+  run: (cycle) => apiFetch('/payroll/run', { method: 'POST', body: { cycle } }),
+  statutoryPreview: (empId, cycle) => {
+    const qs = new URLSearchParams(
+      Object.entries({ empId, cycle }).filter(([, v]) => v != null && v !== ''),
+    ).toString();
+    return apiFetch(`/payroll/statutory/preview${qs ? `?${qs}` : ''}`);
+  },
+};
 export const holidaysApi = restResource('holidays');
-export const recruitmentApi = restResource('recruitment');
+
+// Server-side reporting. Every figure here is aggregated in MongoDB over the
+// FULL collection for the chosen window — the Analytics page used to compute
+// these in the browser from the (100-row capped) attendance list it happened to
+// have hydrated, which made the attendance rate wrong for any real company.
+export const analyticsApi = {
+  overview: ({ from, to, dept } = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries({ from, to, dept }).filter(([, v]) => v != null && v !== ''),
+    ).toString();
+    return apiFetch(`/analytics/overview${qs ? `?${qs}` : ''}`);
+  },
+  // Hiring and attrition for a window. Attrition is returned with its
+  // denominator (average headcount), so the rate can be checked rather than
+  // taken on trust.
+  workforce: ({ from, to } = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries({ from, to }).filter(([, v]) => v != null && v !== ''),
+    ).toString();
+    return apiFetch(`/analytics/workforce${qs ? `?${qs}` : ''}`);
+  },
+  attendanceTrend: ({ from, to } = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries({ from, to }).filter(([, v]) => v != null && v !== ''),
+    ).toString();
+    return apiFetch(`/analytics/attendance-trend${qs ? `?${qs}` : ''}`);
+  },
+};
+export const recruitmentApi = {
+  ...restResource('recruitment'),
+  // Offer management and hiring. Recruitment previously ended at a "Hired"
+  // column with nothing turning the candidate into an employee.
+  issueOffer: (id, body) => apiFetch(`/recruitment/${id}/offer`, { method: 'POST', body }),
+  offerResponse: (id, decision, reason) =>
+    apiFetch(`/recruitment/${id}/offer/response`, { method: 'POST', body: { decision, reason } }),
+  hire: (id) => apiFetch(`/recruitment/${id}/hire`, { method: 'POST' }),
+};
 export const reviewsApi = restResource('reviews');
 export const expensesApi = {
   ...restResource('expenses'),
@@ -127,14 +199,19 @@ export const resignationsApi = {
   update: (id, patch) => apiFetch(`/resignations/${id}`, { method: 'PATCH', body: patch }),
   signOffClearance: (id, clearance) => apiFetch(`/resignations/${id}/clearance`, { method: 'POST', body: clearance }),
   processFnF: (id, fnf) => apiFetch(`/resignations/${id}/fnf`, { method: 'POST', body: fnf }),
-  payFnF: (id) => apiFetch(`/resignations/${id}/fnf/pay`, { method: 'POST' }),
+  // `overrideClearances` is the explicit, audited way past the server's
+  // outstanding-clearance guard (409 CLEARANCES_PENDING).
+  payFnF: (id, opts = {}) => apiFetch(`/resignations/${id}/fnf/pay`, {
+    method: 'POST',
+    body: { overrideClearances: Boolean(opts.overrideClearances) },
+  }),
 };
 
 export const attendanceCorrectionsApi = {
   list: () => apiFetch('/attendance-corrections'),
   create: (data) => apiFetch('/attendance-corrections', { method: 'POST', body: data }),
   approve: (id) => apiFetch(`/attendance-corrections/${id}/approve`, { method: 'POST' }),
-  reject: (id) => apiFetch(`/attendance-corrections/${id}/reject`, { method: 'POST' }),
+  reject: (id, note) => apiFetch(`/attendance-corrections/${id}/reject`, { method: 'POST', body: { note: note || '' } }),
 };
 
 // Celebrations is computed server-side from real Employee dob/joinDate
@@ -243,6 +320,81 @@ export const authApi = {
   revokeOtherSessions: () => apiFetch('/auth/sessions/revoke-others', { method: 'POST' }),
 };
 
+/**
+ * Pages through a list endpoint and returns EVERY row.
+ *
+ * An unpaged GET returns only the first page (attendance caps at 100), so a
+ * CSV built from the app shell's hydrated list silently omitted most of the
+ * data while looking like a complete export — the worst kind of wrong, because
+ * the person exporting it has no way to tell.
+ */
+export async function fetchAllRows(resource, { pageSize = 500, max = 50000, params = {} } = {}) {
+  const rows = [];
+  for (let page = 1; rows.length < max; page += 1) {
+    const qs = new URLSearchParams({
+      ...Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== '')),
+      page: String(page),
+      limit: String(pageSize),
+    }).toString();
+    const res = await apiFetch(`/${resource}?${qs}`);
+    const batch = Array.isArray(res) ? res : (res.rows || []);
+    rows.push(...batch);
+    const total = Array.isArray(res) ? batch.length : res.total;
+    if (batch.length < pageSize || rows.length >= (total ?? rows.length)) break;
+  }
+  return rows;
+}
+
+/**
+ * EMPLOYMENT LIFECYCLE — confirmation, probation, transfer, promotion and
+ * salary revision.
+ *
+ * These used to be done by PATCHing the employee, which overwrote the previous
+ * value with no effective date and no record of who changed it or why. Each
+ * call here produces an immutable event alongside the change.
+ */
+export const lifecycleApi = {
+  policy: () => apiFetch('/lifecycle/policy'),
+  savePolicy: (body) => apiFetch('/lifecycle/policy', { method: 'PUT', body }),
+  events: ({ empId, type, limit } = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries({ empId, type, limit }).filter(([, v]) => v != null && v !== ''),
+    ).toString();
+    return apiFetch(`/lifecycle/events${qs ? `?${qs}` : ''}`);
+  },
+  probationDue: (withinDays) =>
+    apiFetch(`/lifecycle/probation/due${withinDays ? `?withinDays=${withinDays}` : ''}`),
+  startProbation: (id, body) => apiFetch(`/lifecycle/${id}/probation/start`, { method: 'POST', body }),
+  extendProbation: (id, body) => apiFetch(`/lifecycle/${id}/probation/extend`, { method: 'POST', body }),
+  confirm: (id, body) => apiFetch(`/lifecycle/${id}/confirm`, { method: 'POST', body }),
+  transfer: (id, body) => apiFetch(`/lifecycle/${id}/transfer`, { method: 'POST', body }),
+  promote: (id, body) => apiFetch(`/lifecycle/${id}/promote`, { method: 'POST', body }),
+  reviseSalary: (id, body) => apiFetch(`/lifecycle/${id}/salary-revision`, { method: 'POST', body }),
+};
+
+/**
+ * VARIABLE PAY — overtime, bonus, incentive, arrears, reimbursements and
+ * ad-hoc deductions for a payroll cycle. Payroll could previously only pay a
+ * fixed gross, so none of this could be paid through the system at all.
+ *
+ * Overtime is claimed in HOURS; the server values it from the employee's own
+ * salary and the company's configured multiplier. Sending an amount for
+ * overtime has no effect by design.
+ */
+export const payComponentsApi = {
+  list: ({ cycle, empId, status, kind } = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries({ cycle, empId, status, kind }).filter(([, v]) => v != null && v !== ''),
+    ).toString();
+    return apiFetch(`/pay-components${qs ? `?${qs}` : ''}`);
+  },
+  summary: (cycle) => apiFetch(`/pay-components/summary?cycle=${encodeURIComponent(cycle)}`),
+  raise: (body) => apiFetch('/pay-components', { method: 'POST', body }),
+  decide: (id, decision, note) =>
+    apiFetch(`/pay-components/${id}/decision`, { method: 'POST', body: { decision, note } }),
+  withdraw: (id) => apiFetch(`/pay-components/${id}`, { method: 'DELETE' }),
+};
+
 // Load everything at once for the app shell. Requires an authenticated
 // session (employees/attendance/geofence and all 9 modules below are behind
 // requireAuth) — only call this after authApi has established a session.
@@ -253,21 +405,31 @@ export async function loadAll() {
     settings, roles, masterCategories, masterValues,
     auditLogs, notifications, documents, resignations, attendanceCorrections,
   ] = await Promise.all([
-    employeesApi.list(),
-    attendanceApi.list(),
-    leavesApi.list(),
-    payrollApi.list(),
-    celebrationsApi.list(),
-    holidaysApi.list(),
-    recruitmentApi.list(),
-    reviewsApi.list(),
-    expensesApi.list(),
-    assetsApi.list(),
-    jobsApi.list(),
+    // EVERY collection is individually guarded.
+    //
+    // Only the last five used to be, so the moment any other endpoint started
+    // refusing a role — as /recruitment did once candidate PII was protected —
+    // Promise.all rejected and the ENTIRE app failed to hydrate on login, for
+    // that role, with no partial render and no useful error. A collection this
+    // user may not see should cost them that panel, never the whole product.
+    //
+    // `settings` falls back to an object, not an array, because callers read
+    // fields off it; the rest are lists.
+    employeesApi.list().catch(() => []),
+    attendanceApi.list().catch(() => []),
+    leavesApi.list().catch(() => []),
+    payrollApi.list().catch(() => []),
+    celebrationsApi.list().catch(() => []),
+    holidaysApi.list().catch(() => []),
+    recruitmentApi.list().catch(() => []),
+    reviewsApi.list().catch(() => []),
+    expensesApi.list().catch(() => []),
+    assetsApi.list().catch(() => []),
+    jobsApi.list().catch(() => []),
     settingsApi.get(),
-    rolesApi.list(),
-    masterCategoriesApi.list(),
-    masterValuesApi.list(),
+    rolesApi.list().catch(() => []),
+    masterCategoriesApi.list().catch(() => []),
+    masterValuesApi.list().catch(() => []),
     auditLogsApi.list().catch(() => []),
     notificationsApi.list().catch(() => []),
     documentsApi.list().catch(() => []),

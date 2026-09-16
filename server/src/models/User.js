@@ -27,7 +27,20 @@ const userSchema = new mongoose.Schema({
   // 2FA step) — never on a silent /auth/refresh token renewal.
   lastLoginAt: { type: Date, default: null },
   lastLoginIp: { type: String, default: null },
+
+  // Bumped whenever this account's right to be signed in changes
+  // (deactivation, role change, termination, admin password reset). Every
+  // access token carries the value it was minted with as a `tv` claim, and
+  // requireAuth rejects a token whose `tv` is stale — so a 15-minute access
+  // token stops working the instant the account is disabled instead of
+  // lingering until it expires. See lib/sessionRevoker.js.
+  tokenVersion: { type: Number, default: 0 },
 }, { timestamps: true });
+
+// /auth/login, /refresh and requireAuth all look an account up by email or id
+// within a company; these back those paths.
+userSchema.index({ company: 1, role: 1 });
+userSchema.index({ employeeId: 1 });
 
 userSchema.set('toJSON', {
   virtuals: true,
@@ -43,6 +56,7 @@ userSchema.set('toJSON', {
     delete ret.loginOtpExpiresAt;
     delete ret.failedLoginAttempts;
     delete ret.lockedUntil;
+    delete ret.tokenVersion;
   },
 });
 

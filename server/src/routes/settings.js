@@ -8,10 +8,10 @@ import { logAudit } from '../lib/auditLogger.js';
 const router = Router();
 
 const SERVER_OWNED_KEYS = [
-  'gpsCheckInEnabled', 'geofenceLat', 'geofenceLng', 'geofenceRadius',
+  'gpsCheckInEnabled', 'livenessRequired', 'geofenceLat', 'geofenceLng', 'geofenceRadius',
   'shifts', 'roster', 'employeeShifts', 'approvalWorkflows',
   'orgName', 'workWeek', 'notifyLeave', 'notifyPayroll', 'notifyBirthday', 'twoFactor',
-  'wishesSent', 'totalLeaveDays', 'departments', 'designations',
+  'wishesSent', 'totalLeaveDays', 'leaveYearStartMonth', 'departments', 'designations',
   'gatewayTwilioSid', 'gatewayTwilioToken', 'gatewayTwilioFrom', 'gatewaySendgridKey',
   'gatewaySmtpHost', 'gatewaySmtpUser', 'gatewaySmtpPass',
   'notificationTemplates', 'notifyChannels'
@@ -29,15 +29,38 @@ export async function getSettingsDoc(company = 'Smaatech') {
   return doc;
 }
 
+// Third-party gateway credentials stored on the settings document. GET
+// /settings is readable by EVERY authenticated role (the whole app reads
+// gpsCheckInEnabled, shifts, workWeek and so on from it), so previously any
+// plain Employee could request this endpoint and read the company's live
+// SMTP password, Twilio auth token and SendGrid API key in cleartext —
+// enough to send mail as the company or run up its telephony bill.
+// Only biometricDeviceApiKey was being stripped.
+const SECRET_SETTINGS_KEYS = [
+  'biometricDeviceApiKey',
+  'gatewayTwilioSid', 'gatewayTwilioToken', 'gatewayTwilioFrom',
+  'gatewaySendgridKey',
+  'gatewaySmtpHost', 'gatewaySmtpUser', 'gatewaySmtpPass',
+];
+
+// Never echo a stored secret back, even to an admin — the UI only needs to
+// know whether one is configured, so it can render "Configured"/"Not set"
+// without the value ever leaving the server again after it was written.
+function redactSecrets(json, { includeStatus = false } = {}) {
+  const status = {};
+  for (const key of SECRET_SETTINGS_KEYS) {
+    status[key] = Boolean(json[key]);
+    delete json[key];
+  }
+  if (includeStatus) json.secretsConfigured = status;
+  return json;
+}
+
 router.get('/', requireAuth, async (req, res) => {
   const doc = await getSettingsDoc(req.auth.company);
   const json = doc.toJSON();
-  // GET /settings is readable by every authenticated role (the whole app
-  // reads gpsCheckInEnabled, shifts, etc. from it) — a device secret has no
-  // business being in a response a plain Employee can request. It's only
-  // ever returned directly from POST /device-key/regenerate below.
-  delete json.biometricDeviceApiKey;
-  res.json(json);
+  const isAdmin = ['HR Director', 'HR Manager'].includes(req.auth.role);
+  res.json(redactSecrets(json, { includeStatus: isAdmin }));
 });
 
 router.patch('/', requireAuth, requireRole('HR Manager'), async (req, res) => {
@@ -45,12 +68,31 @@ router.patch('/', requireAuth, requireRole('HR Manager'), async (req, res) => {
   for (const key of SERVER_OWNED_KEYS) {
     if (req.body && key in req.body) patch[key] = req.body[key];
   }
+
+  // Write-only secrets: blank means "leave unchanged", never "erase".
+  //
+  // GET /settings redacts these, so Settings.jsx seeds its inputs from
+  // undefined and renders them EMPTY. Its "Save Credentials" button then
+  // PATCHes all six fields back as '' — which without this rule silently
+  // destroyed the company's live SMTP password and Twilio auth token, and
+  // stopped all outbound email. Rotating a secret still works: send a value.
+  for (const key of SECRET_SETTINGS_KEYS) {
+    if (key in patch && String(patch[key] ?? '').trim() === '') delete patch[key];
+  }
   const company = req.auth.company;
   const before = await getSettingsDoc(company);
-  const doc = await Settings.findByIdAndUpdate(company, patch, { new: true, upsert: true });
+  const doc = await Settings.findByIdAndUpdate(company, patch, { new: true, upsert: true, runValidators: true });
   invalidateCache(`settings:${company}`);
-  await logAudit(req, { action: 'Settings updated', subject: 'System Settings', before, after: doc });
-  res.json(doc);
+  // before/after land verbatim in the audit trail, so redact there too —
+  // otherwise the secrets just move from the API response into AuditLog rows
+  // that /audit-logs then serves.
+  await logAudit(req, {
+    action: 'Settings updated',
+    subject: 'System Settings',
+    before: redactSecrets(before.toJSON()),
+    after: redactSecrets(doc.toJSON()),
+  });
+  res.json(redactSecrets(doc.toJSON(), { includeStatus: true }));
 });
 
 // Server-generated only — never settable via the generic PATCH above, so a

@@ -40,7 +40,7 @@ router.post('/enroll', upload, async (req, res) => {
     return res.status(400).json({ error: { code: result.error, message: faceFailureMessage(result.error) } });
   }
 
-  const photoRef = savePhoto('enrollment', `${targetUserId}.jpg`, req.file.buffer);
+  const photoRef = await savePhoto('enrollment', `${targetUserId}.jpg`, req.file.buffer);
   await FaceDescriptor.findOneAndUpdate(
     { userId: targetUserId },
     { descriptor: result.descriptor, photoRef, enrolledAt: new Date() },

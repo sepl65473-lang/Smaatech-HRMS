@@ -9,7 +9,17 @@ export const DEFAULT_SHIFTS = [
 
 // Mirrors src/lib/shifts.js on the frontend — the server is the one whose
 // answer actually counts now, this copy just has to stay behaviorally identical.
-export const weekdayKeyOf = (date = new Date()) => WEEKDAY_KEYS[date.getDay()];
+//
+// Pinned to IST, like todayISO() in dateUtils.js. Using the server's LOCAL
+// weekday meant a UTC-hosted server (Render, most containers) resolved the
+// wrong roster day for every punch between 00:00 and 05:30 IST — a night-shift
+// employee clocking in at 00:30 IST on Tuesday was rostered against Monday,
+// and so judged late or on-time against the wrong shift entirely.
+export const weekdayKeyOf = (date = new Date()) => {
+  const istWeekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(date);
+  const index = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(istWeekday);
+  return WEEKDAY_KEYS[index === -1 ? date.getUTCDay() : index];
+};
 
 export function resolveShiftForToday(empId, settings) {
   const shifts = settings?.shifts?.length ? settings.shifts : DEFAULT_SHIFTS;

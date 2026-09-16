@@ -70,10 +70,12 @@ describe('cross-tenant isolation on /employees/:id', () => {
     expect(ownRead.status).toBe(200);
     expect(ownRead.body.name).toBe('Real Employee');
 
-    // Company B's token gets a scoped-out null, not the real record.
+    // Company B's token gets a 404, not the real record. (This used to be a
+    // 200 carrying `null`, which a client can't distinguish from "an employee
+    // exists here but has no fields".)
     const crossRead = await request(app).get(`/api/v1/employees/${empId}`).set('Authorization', `Bearer ${tokenB}`);
-    expect(crossRead.status).toBe(200);
-    expect(crossRead.body).toBeNull();
+    expect(crossRead.status).toBe(404);
+    expect(crossRead.body.name).toBeUndefined();
 
     // Company B cannot edit it either — record must remain unchanged.
     const crossPatch = await request(app)

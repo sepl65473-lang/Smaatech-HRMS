@@ -9,6 +9,13 @@ const resignationSchema = new mongoose.Schema({
   reason: { type: String, required: true },
   status: { type: String, default: 'Submitted' }, // Submitted | Approved | Rejected
 
+  // Notice period, resolved from company policy at the moment of filing and
+  // stored with the record — so a later policy change never silently rewrites
+  // what this person was actually held to.
+  noticePolicyDays: { type: Number, default: 0 },
+  earliestCompliantLastWorkingDay: { type: String, default: '' },
+  noticeShortfallDays: { type: Number, default: 0 },
+
   // Exit Clearance Checklist stages
   clearances: [{
     dept: { type: String, required: true }, // IT | Finance | HR | Admin

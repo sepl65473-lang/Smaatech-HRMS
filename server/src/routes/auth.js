@@ -9,7 +9,7 @@ import {
   signAccessToken, generateRefreshToken, hashToken,
   refreshCookieOptions, REFRESH_TOKEN_TTL_MS, REFRESH_COOKIE_NAME,
 } from '../lib/tokens.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, invalidateAccountStateCache } from '../middleware/auth.js';
 import { validate } from '../middleware/validation.js';
 import { loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyTwoFactorSchema, changePasswordSchema } from '../validations/authValidation.js';
 import { sendOtpEmail } from '../lib/mailer.js';
@@ -17,6 +17,7 @@ import { getSettingsDoc } from './settings.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { extractDescriptor, matchDescriptor, faceFailureMessage } from '../lib/faceEngine.js';
 import { imageUploadMiddleware } from '../lib/photoStorage.js';
+import { hasValidE2EHeader, isE2EModeEnabled } from '../lib/e2eGuard.js';
 
 const router = Router();
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -32,7 +33,12 @@ const faceLoginUpload = imageUploadMiddleware('photo', 'Face-login photo must be
 // otherwise trip this real limit for reasons unrelated to what's under test.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  // Relaxed for automated tests only. Browser E2E signs in as five different
+  // roles many times over, all from one address, and would otherwise trip this
+  // real limit for reasons unrelated to what is under test. Both conditions
+  // are impossible in production: NODE_ENV is 'production' there, which also
+  // makes isE2EModeEnabled() false — see lib/e2eGuard.js.
+  max: (process.env.NODE_ENV === 'test' || isE2EModeEnabled()) ? 1000 : 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many login attempts from this network. Please try again in a few minutes.' } },
@@ -90,9 +96,18 @@ async function recordLogin(user, req) {
 // issue a real session immediately. Real second factor: the code is
 // generated and hashed server-side and only ever leaves via email — unlike
 // the old client-simulated version, nothing usable is returned here.
-async function maybeStartTwoFactor(user, res) {
+async function maybeStartTwoFactor(user, res, req = null) {
   const settingsDoc = await getSettingsDoc(user.company);
   if (!settingsDoc.twoFactor) return false;
+
+  // Isolated browser-E2E mode only. Gated on NODE_ENV !== 'production', an
+  // explicit E2E_TEST_MODE flag AND a 32+ char shared secret presented on the
+  // request — see lib/e2eGuard.js. Production 2FA is untouched: on Render
+  // NODE_ENV is 'production', which makes this unreachable.
+  if (req && hasValidE2EHeader(req)) {
+    console.warn('[e2e] 2FA step skipped for %s under isolated E2E test mode', user.email);
+    return false;
+  }
 
   const otp = String(Math.floor(100000 + Math.random() * 900000));
   user.loginOtpHash = await bcrypt.hash(otp, 10);
@@ -175,7 +190,7 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
     await user.save();
   }
   await sanitizeEmployeeLink(user);
-  if (await maybeStartTwoFactor(user, res)) return;
+  if (await maybeStartTwoFactor(user, res, req)) return;
   await recordLogin(user, req);
   await logAudit(req, {
     action: 'User signed in', subject: user.email,
@@ -228,7 +243,7 @@ router.post('/face-login', loginLimiter, faceLoginUpload, async (req, res) => {
   }
 
   await sanitizeEmployeeLink(user);
-  if (await maybeStartTwoFactor(user, res)) return;
+  if (await maybeStartTwoFactor(user, res, req)) return;
   await recordLogin(user, req);
   await logAudit(req, {
     action: 'Face sign-in', subject: user.email, details: `Match confidence ${Math.round(match.confidence)}`,
@@ -407,6 +422,11 @@ router.post('/change-password', requireAuth, validate(changePasswordSchema), asy
   user.passwordHash = await bcrypt.hash(newPassword, 10);
   user.mustChangePassword = false;
   await user.save();
+
+  // requireAuth caches account state for a few seconds, and that state now
+  // carries mustChangePassword — without this the person would keep being
+  // refused for the rest of the TTL immediately after doing what was asked.
+  invalidateAccountStateCache(user._id);
 
   if (user.employeeId) {
     const emp = await Employee.findById(user.employeeId);

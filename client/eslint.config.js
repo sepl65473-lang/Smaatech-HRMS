@@ -28,4 +28,13 @@ export default [
       'react-refresh/only-export-components': 'off',
     },
   },
+  {
+    files: ['vite.config.js', 'playwright.config.js', 'e2e/**/*.{js,jsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.browser,
+      },
+    },
+  },
 ];

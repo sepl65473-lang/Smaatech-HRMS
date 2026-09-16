@@ -1,92 +1,63 @@
-import express from 'express';
-import cors from 'cors';
-import cookieParser from 'cookie-parser';
-import helmet from 'helmet';
-import mongoSanitize from 'express-mongo-sanitize';
+// Vercel serverless entry point.
+//
+// This file used to hand-rebuild a SECOND, divergent Express app: it declared
+// its own middleware stack and its own route list, and that list had silently
+// drifted from server/src/app.js. Missing from it were /face (biometric
+// enrollment + status + revoke), /device-punch (biometric terminal ingest),
+// /device-mappings, /health, /metrics and /ai — so every one of those endpoints
+// 404'd in the deployed product while working perfectly in local development
+// and in the test suite. It also applied `cors({ origin: true })`, which
+// reflects ANY origin back with credentials:true, and it carried no rate
+// limiting at all.
+//
+// The fix is to stop maintaining two route tables. There is now exactly one
+// app definition (server/src/app.js); this file adds only what is genuinely
+// serverless-specific: per-invocation config validation and DB connection.
 import { connectDB } from '../server/src/db.js';
+import app from '../server/src/app.js';
 
-import authRoutes from '../server/src/routes/auth.js';
-import employeesRoutes from '../server/src/routes/employees.js';
-import usersRoutes from '../server/src/routes/users.js';
-import attendanceRoutes from '../server/src/routes/attendance.js';
-import settingsRoutes from '../server/src/routes/settings.js';
-import filesRoutes from '../server/src/routes/files.js';
-import leaveRoutes from '../server/src/routes/leave.js';
-import payrollRoutes from '../server/src/routes/payroll.js';
-import holidaysRoutes from '../server/src/routes/holidays.js';
-import recruitmentRoutes from '../server/src/routes/recruitment.js';
-import reviewsRoutes from '../server/src/routes/reviews.js';
-import expensesRoutes from '../server/src/routes/expenses.js';
-import assetsRoutes from '../server/src/routes/assets.js';
-import jobsRoutes from '../server/src/routes/jobs.js';
-import celebrationsRoutes from '../server/src/routes/celebrations.js';
-import rolesRoutes from '../server/src/routes/roles.js';
-import masterDataRoutes from '../server/src/routes/masterData.js';
-import auditLogsRoutes from '../server/src/routes/auditLogs.js';
-import notificationsRoutes from '../server/src/routes/notifications.js';
-import documentsRoutes from '../server/src/routes/documents.js';
-import resignationsRoutes from '../server/src/routes/resignations.js';
-import attendanceCorrectionsRoutes from '../server/src/routes/attendanceCorrections.js';
+// Fail closed and loudly rather than booting a server that would sign tokens
+// with `undefined` or connect nowhere. Checked per-request because a
+// serverless instance can be created before the environment is fully applied.
+const REQUIRED_ENV = ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
 
-const app = express();
+let connectionPromise = null;
 
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(mongoSanitize());
-app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
-app.use(cookieParser());
+// Reuse one connection across warm invocations of the same instance; a new
+// connection per request exhausts an Atlas connection pool almost immediately.
+function ensureConnected() {
+  if (!connectionPromise) {
+    connectionPromise = connectDB().catch((err) => {
+      // Don't cache a failed connection — the next request should retry.
+      connectionPromise = null;
+      throw err;
+    });
+  }
+  return connectionPromise;
+}
 
-// Connect DB middleware for serverless execution — required secrets must
-// come from Vercel's own Environment Variables, never a hardcoded fallback
-// (a fallback here would mean anyone who can read this source file could
-// forge a valid login token or connect to the database directly).
-app.use(async (req, res, next) => {
-  const missing = ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']
-    .filter((key) => !process.env[key]);
+export default async function handler(req, res) {
+  const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
   if (missing.length) {
-    return res.status(500).json({
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({
       error: {
         code: 'MISSING_CONFIG',
         message: `Server misconfigured: missing ${missing.join(', ')}. Set these in Vercel's Environment Variables.`,
       },
-    });
+    }));
   }
+
   try {
-    await connectDB();
-    next();
+    await ensureConnected();
   } catch (err) {
-    next(err);
+    res.statusCode = 503;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({
+      error: { code: 'DB_UNAVAILABLE', message: 'Database unavailable, please retry.' },
+    }));
   }
-});
 
-// V1 API Routes
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/employees', employeesRoutes);
-app.use('/api/v1/users', usersRoutes);
-app.use('/api/v1/attendance', attendanceRoutes);
-app.use('/api/v1/settings', settingsRoutes);
-app.use('/api/v1/files', filesRoutes);
-app.use('/api/v1/leaves', leaveRoutes);
-app.use('/api/v1/payroll', payrollRoutes);
-app.use('/api/v1/holidays', holidaysRoutes);
-app.use('/api/v1/recruitment', recruitmentRoutes);
-app.use('/api/v1/reviews', reviewsRoutes);
-app.use('/api/v1/expenses', expensesRoutes);
-app.use('/api/v1/assets', assetsRoutes);
-app.use('/api/v1/jobs', jobsRoutes);
-app.use('/api/v1/celebrations', celebrationsRoutes);
-app.use('/api/v1/roles', rolesRoutes);
-app.use('/api/v1/master-data', masterDataRoutes);
-app.use('/api/v1/audit-logs', auditLogsRoutes);
-app.use('/api/v1/notifications', notificationsRoutes);
-app.use('/api/v1/documents', documentsRoutes);
-app.use('/api/v1/resignations', resignationsRoutes);
-app.use('/api/v1/attendance-corrections', attendanceCorrectionsRoutes);
-
-// Error Handler
-app.use((err, _req, res, _next) => {
-  console.error('[Serverless API Error]', err);
-  res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: err.message || 'Something went wrong.' } });
-});
-
-export default app;
+  return app(req, res);
+}

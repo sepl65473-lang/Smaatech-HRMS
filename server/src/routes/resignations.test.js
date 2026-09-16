@@ -19,6 +19,7 @@ const User = (await import('../models/User.js')).default;
 const Employee = (await import('../models/Employee.js')).default;
 const Settings = (await import('../models/Settings.js')).default;
 const Resignation = (await import('../models/Resignation.js')).default;
+const LifecycleEvent = (await import('../models/LifecycleEvent.js')).default;
 
 const PASSWORD = 'CorrectPass123';
 const COMPANY = 'ExitCo';
@@ -71,6 +72,155 @@ describe('POST /resignations', () => {
       .set('Authorization', `Bearer ${tokens.employee}`)
       .send({ employeeId: '507f1f77bcf86cd799439011', employeeName: 'Someone Else', resignationDate: '2026-07-01', requestedLastWorkingDay: '2026-08-01', reason: 'x' });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /resignations — guards on filing', () => {
+  const file = (token, body) => request(app)
+    .post('/api/v1/resignations').set('Authorization', `Bearer ${token}`).send(body);
+
+  it('refuses a SECOND open resignation for the same person', async () => {
+    const { employee, tokens } = await seedScenario();
+    const base = {
+      employeeId: employee._id, resignationDate: '2026-07-01',
+      requestedLastWorkingDay: '2026-08-01', reason: 'New opportunity',
+    };
+    expect((await file(tokens.employee, base)).status).toBe(201);
+
+    // Without this guard each duplicate spawned its own clearance checklist
+    // and its own payable F&F settlement for a single departure.
+    const second = await file(tokens.employee, { ...base, reason: 'Again' });
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe('RESIGNATION_ALREADY_OPEN');
+    expect(await Resignation.countDocuments({ employeeId: employee._id })).toBe(1);
+  });
+
+  it('takes the name from the employee record, not the request body', async () => {
+    const { employee, tokens } = await seedScenario();
+    const res = await file(tokens.employee, {
+      employeeId: employee._id,
+      employeeName: 'Someone Else Entirely',
+      resignationDate: '2026-07-01', requestedLastWorkingDay: '2026-08-01', reason: 'x',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.employeeName).toBe(employee.name);
+  });
+
+  it('refuses a last working day BEFORE the resignation date', async () => {
+    const { employee, tokens } = await seedScenario();
+    const res = await file(tokens.employee, {
+      employeeId: employee._id, resignationDate: '2026-08-01',
+      requestedLastWorkingDay: '2026-07-01', reason: 'x',
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_LAST_WORKING_DAY');
+  });
+
+  it('refuses a malformed date and a missing reason', async () => {
+    const { employee, tokens } = await seedScenario();
+    const bad = await file(tokens.employee, {
+      employeeId: employee._id, resignationDate: '2026-07-01',
+      requestedLastWorkingDay: 'next month', reason: 'x',
+    });
+    expect(bad.status).toBe(400);
+
+    const noReason = await file(tokens.employee, {
+      employeeId: employee._id, resignationDate: '2026-07-01',
+      requestedLastWorkingDay: '2026-08-01', reason: '   ',
+    });
+    expect(noReason.status).toBe(400);
+    expect(noReason.body.error.code).toBe('REASON_REQUIRED');
+  });
+
+  it('refuses a resignation for an employee in another company', async () => {
+    const { tokens } = await seedScenario();
+    const outsider = await Employee.create({
+      name: 'Outsider', role: 'Engineer', dept: 'Eng', loc: 'Remote', company: 'SomeOtherCo',
+    });
+    const res = await file(tokens.hrManager, {
+      employeeId: outsider._id, resignationDate: '2026-07-01',
+      requestedLastWorkingDay: '2026-08-01', reason: 'x',
+    });
+    expect(res.status).toBe(404);
+    expect(await Resignation.countDocuments({ employeeId: outsider._id })).toBe(0);
+  });
+});
+
+describe('POST /resignations — the notice period comes from company policy', () => {
+  const file = (token, body) => request(app)
+    .post('/api/v1/resignations').set('Authorization', `Bearer ${token}`).send(body);
+
+  it('resolves the notice period from configuration and stores it with the record', async () => {
+    const { employee, tokens } = await seedScenario();
+    await Settings.findByIdAndUpdate(COMPANY, {
+      $set: { employmentPolicy: { noticePeriodDays: 45, noticePeriodDaysOnProbation: 15, confirmedByHR: true } },
+    });
+    await Employee.updateOne({ _id: employee._id }, { employmentStage: 'Confirmed' });
+
+    const res = await file(tokens.employee, {
+      employeeId: employee._id,
+      resignationDate: '2026-07-01',
+      requestedLastWorkingDay: '2026-09-01',
+      reason: 'New opportunity',
+    });
+    expect(res.status).toBe(201);
+    // Frozen onto the record: a later policy change must not rewrite what this
+    // person was actually held to.
+    expect(res.body.noticePolicyDays).toBe(45);
+    expect(res.body.earliestCompliantLastWorkingDay).toBe('2026-08-15');
+    expect(res.body.noticeShortfallDays).toBe(0);
+  });
+
+  it('REPORTS a short notice period rather than silently accepting it', async () => {
+    const { employee, tokens } = await seedScenario();
+    await Settings.findByIdAndUpdate(COMPANY, {
+      $set: { employmentPolicy: { noticePeriodDays: 60, confirmedByHR: true } },
+    });
+    await Employee.updateOne({ _id: employee._id }, { employmentStage: 'Confirmed' });
+
+    const res = await file(tokens.employee, {
+      employeeId: employee._id,
+      resignationDate: '2026-07-01',
+      requestedLastWorkingDay: '2026-07-20',
+      reason: 'Personal',
+    });
+    // Filing still succeeds — waiving notice is an HR decision, not a
+    // validation error — but the shortfall is on the record.
+    expect(res.status).toBe(201);
+    expect(res.body.noticeShortfallDays).toBe(41);
+  });
+
+  it('applies the PROBATION notice period to someone still on probation', async () => {
+    const { employee, tokens } = await seedScenario();
+    await Settings.findByIdAndUpdate(COMPANY, {
+      $set: { employmentPolicy: { noticePeriodDays: 60, noticePeriodDaysOnProbation: 7, confirmedByHR: true } },
+    });
+    await Employee.updateOne({ _id: employee._id }, { employmentStage: 'Probation' });
+
+    const res = await file(tokens.employee, {
+      employeeId: employee._id,
+      resignationDate: '2026-07-01',
+      requestedLastWorkingDay: '2026-07-15',
+      reason: 'Not a fit',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.noticePolicyDays).toBe(7);
+    expect(res.body.noticeShortfallDays).toBe(0);
+  });
+
+  it('moves the employee to Notice Period and records the lifecycle event', async () => {
+    const { employee, tokens } = await seedScenario();
+    await file(tokens.employee, {
+      employeeId: employee._id,
+      resignationDate: '2026-07-01',
+      requestedLastWorkingDay: '2026-09-01',
+      reason: 'New opportunity',
+    });
+
+    expect((await Employee.findById(employee._id)).employmentStage).toBe('Notice Period');
+    const event = await LifecycleEvent.findOne({ empId: employee._id, type: 'notice-started' });
+    expect(event).toBeTruthy();
+    expect(event.effectiveDate).toBe('2026-07-01');
   });
 });
 
@@ -156,7 +306,10 @@ describe('POST /resignations/:id/fnf/pay — termination cascade', () => {
 
     const res = await request(app)
       .post(`/api/v1/resignations/${filed.body.id}/fnf/pay`)
-      .set('Authorization', `Bearer ${tokens.financeLead}`);
+      .set('Authorization', `Bearer ${tokens.financeLead}`)
+      // Clearances are still outstanding in this scenario; the explicit
+      // override is the audited way past that new guard.
+      .send({ overrideClearances: true });
     expect(res.status).toBe(200);
     expect(res.body.fnfSettlement.status).toBe('Paid');
     expect(res.body.status).toBe('Approved');
@@ -177,7 +330,8 @@ describe('POST /resignations/:id/fnf/pay — termination cascade', () => {
 
     const res = await request(app)
       .post(`/api/v1/resignations/${filed.body.id}/fnf/pay`)
-      .set('Authorization', `Bearer ${tokens.hrManager}`);
+      .set('Authorization', `Bearer ${tokens.hrManager}`)
+      .send({ overrideClearances: true });
     expect(res.status).toBe(403);
 
     const stillActive = await Employee.findById(employee._id);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import ProbationDueCard from '../components/ProbationDueCard';
 import { useNavigate } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
@@ -123,6 +124,8 @@ export default function Employees() {
           <div className="stat-label">Departments</div><div className="stat-value">{departments.length}</div><div className="stat-meta">org-wide</div>
         </div>
       </div>
+
+      <ProbationDueCard />
 
       <div className="card">
         <div className="card-head">

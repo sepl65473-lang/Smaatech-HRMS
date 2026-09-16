@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { isRated, averageRating, rankByRating } from '../lib/rating';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import Modal from '../components/Modal';
@@ -130,27 +131,25 @@ export default function Performance() {
     setCycleName('');
   };
 
-  const ranked = useMemo(
-    () => [...employees].sort((a, b) => b.rating - a.rating),
-    [employees],
-  );
-
-  const avg = employees.length
-    ? (employees.reduce((s, e) => s + e.rating, 0) / employees.length).toFixed(2)
-    : '0';
+  // Shared with the unit tests in src/lib/rating.js — an unrated employee is
+  // shown as unrated, never as 0.0.
+  const ranked = useMemo(() => rankByRating(employees), [employees]);
+  const ratedPeople = employees.filter(isRated);
+  const avg = averageRating(employees);
 
   const adjust = (e, delta) => {
-    const r = Math.min(5, Math.max(0, Math.round((e.rating + delta) * 10) / 10));
+    const current = isRated(e) ? e.rating : 0;
+    const r = Math.min(5, Math.max(0, Math.round((current + delta) * 10) / 10));
     updateEmployee(e.id, { rating: r });
   };
 
   return (
     <div className="page-wrap active">
       <div className="stats">
-        <div className="stat"><div className="stat-label">Avg. rating</div><div className="stat-value">{avg}</div><div className="stat-meta">across {employees.length} people</div></div>
-        <div className="stat"><div className="stat-label">Top rated</div><div className="stat-value">{ranked[0]?.rating ?? '—'}</div><div className="stat-meta">{ranked[0]?.name ?? ''}</div></div>
-        <div className="stat"><div className="stat-label">4.5+ performers</div><div className="stat-value">{employees.filter((e) => e.rating >= 4.5).length}</div><div className="stat-meta">high achievers</div></div>
-        <div className="stat"><div className="stat-label">Reviews due</div><div className="stat-value">{employees.filter((e) => e.rating < 4).length}</div><div className="stat-meta">below 4.0</div></div>
+        <div className="stat"><div className="stat-label">Avg. rating</div><div className="stat-value">{avg}</div><div className="stat-meta">across {ratedPeople.length} rated of {employees.length}</div></div>
+        <div className="stat"><div className="stat-label">Top rated</div><div className="stat-value">{isRated(ranked[0] || {}) ? ranked[0].rating : '—'}</div><div className="stat-meta">{isRated(ranked[0] || {}) ? ranked[0].name : 'no completed reviews yet'}</div></div>
+        <div className="stat"><div className="stat-label">4.5+ performers</div><div className="stat-value">{ratedPeople.filter((e) => e.rating >= 4.5).length}</div><div className="stat-meta">high achievers</div></div>
+        <div className="stat"><div className="stat-label">Not yet rated</div><div className="stat-value">{employees.length - ratedPeople.length}</div><div className="stat-meta">no completed review</div></div>
       </div>
 
       <div className="card" style={{ marginTop: 18 }}>
@@ -210,12 +209,14 @@ export default function Performance() {
                 <div className="b-name">{e.name}</div>
                 <div className="b-date">{e.dept} · {e.role}</div>
                 <div className="rating-bar" style={{ marginTop: 5 }}>
-                  <div className="rating-fill" style={{ width: `${(e.rating / 5) * 100}%` }} />
+                  <div className="rating-fill" style={{ width: `${(isRated(e) ? e.rating / 5 : 0) * 100}%` }} />
                 </div>
               </div>
               <div className="rating-control">
                 <button className="mini-btn" onClick={() => adjust(e, -0.1)}>–</button>
-                <span className="mono" style={{ fontWeight: 600, minWidth: 28, textAlign: 'center' }}>{e.rating.toFixed(1)}</span>
+                <span className="mono" style={{ fontWeight: 600, minWidth: 28, textAlign: 'center' }}>
+                  {isRated(e) ? e.rating.toFixed(1) : '—'}
+                </span>
                 <button className="mini-btn approve" onClick={() => adjust(e, +0.1)}>+</button>
               </div>
             </div>

@@ -1,5 +1,11 @@
-version: '3.8'
-
+# Local/self-hosted production-shaped stack.
+#
+# Secrets are NEVER baked in here. Copy server/.env.example to a .env file in
+# this directory, fill it in, and `docker compose` loads it automatically. The
+# ${VAR:?...} form makes compose refuse to start with a clear error instead of
+# silently booting with a missing secret — which is how the previous hardcoded
+# JWT_ACCESS_SECRET=production-jwt-secret-change-me would have shipped a
+# publicly-guessable token signing key.
 services:
   app:
     build:
@@ -8,36 +14,57 @@ services:
     ports:
       - "4000:4000"
     environment:
-      - NODE_ENV=production
-      - PORT=4000
-      - MONGO_URI=mongodb://mongo:27017/smaatech_hrms
-      - REDIS_URL=redis://redis:6379
-      - JWT_ACCESS_SECRET=production-jwt-secret-change-me
+      NODE_ENV: "production"
+      PORT: "4000"
+      # The app reads MONGODB_URI (server/src/db.js). The old MONGO_URI spelling
+      # here meant the container booted, never connected, and served errors.
+      MONGODB_URI: "${MONGODB_URI:-mongodb://mongo:27017/smaatech_hrms?replicaSet=rs0}"
+      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:?required - generate 48 random bytes hex}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:?required - must differ from JWT_ACCESS_SECRET}"
+      CLIENT_ORIGIN: "${CLIENT_ORIGIN:?required - the browser origin serving the client}"
+      # Transactional email (password-reset OTP, login 2FA, welcome mail).
+      BREVO_API_KEY: "${BREVO_API_KEY:-}"
+      SMTP_USER: "${SMTP_USER:-}"
+      # Durable file storage in the MongoDB below — no separate provider.
+      # 'local' keeps files on the app_uploads volume instead.
+      STORAGE_DRIVER: "${STORAGE_DRIVER:-gridfs}"
+      GRIDFS_BUCKET: "${GRIDFS_BUCKET:-hrmsfiles}"
+      # Guards /api/v1/metrics and /api/v1/ai/* — see server/src/routes/health.js.
+      METRICS_TOKEN: "${METRICS_TOKEN:-}"
+      # Exactly one process must own the cron schedulers. With a single app
+      # container that is this one; scale out and only the leader sets it true.
+      RUN_SCHEDULERS: "${RUN_SCHEDULERS:-true}"
+    volumes:
+      # Without this, every attendance selfie and uploaded document is lost the
+      # moment the container is replaced.
+      - app_uploads:/app/server/uploads
     depends_on:
       mongo:
         condition: service_healthy
-      redis:
-        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
 
   mongo:
+    # Single-node replica set, not standalone: multi-document transactions
+    # (lib/transactionHelper.js — leave->attendance sync, F&F payout) require
+    # one. On a standalone mongo those silently degrade to non-atomic writes.
     image: mongo:7.0
-    ports:
-      - "27017:27017"
+    command: ["--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - mongo_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "try { rs.status().ok } catch (e) { rs.initiate().ok }"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  redis:
-    image: redis:7.2-alpine
-    ports:
-      - "6379:6379"
+      timeout: 10s
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
 
 volumes:
   mongo_data:
+  app_uploads:

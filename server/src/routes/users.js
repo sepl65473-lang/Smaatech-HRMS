@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
@@ -8,6 +9,7 @@ import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from '../lib/passwordPolicy.js';
 import { sendWelcomeEmail } from '../lib/mailer.js';
+import { terminateAllAccess } from '../lib/sessionRevoker.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -153,10 +155,16 @@ router.post('/:id/resend-welcome', requireRole(), async (req, res) => {
   const target = await User.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!target) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
 
-  const tempPassword = req.body?.tempPassword || `Pass#${Math.floor(100000 + Math.random() * 900000)}`;
+  // crypto, not Math.random: a predictable temporary password is a takeover
+  // of the account it was generated for.
+  const tempPassword = req.body?.tempPassword
+    || `Tmp#${crypto.randomBytes(9).toString('base64url').replace(/[^A-Za-z0-9]/g, 'x')}`;
   target.passwordHash = await bcrypt.hash(tempPassword, 10);
   target.mustChangePassword = true;
   await target.save();
+  // Resetting the password invalidates the old one, so every session that was
+  // established with it must go too.
+  await terminateAllAccess(target._id, { reason: 'welcome email resent with a new temporary password' });
 
   const emailRes = await sendWelcomeEmail({
     toEmail: target.email,
@@ -219,17 +227,69 @@ router.patch('/:id', requireRole(), async (req, res) => {
   const before = await User.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
 
-  const updated = await User.findByIdAndUpdate(req.params.id, patch, { new: true });
+  // The last HR Director must not be able to lock everyone out of admin.
+  const losingDirector = before.role === 'HR Director'
+    && ((patch.role && patch.role !== 'HR Director') || patch.active === false);
+  if (losingDirector) {
+    const remaining = await User.countDocuments({
+      _id: { $ne: before._id }, role: 'HR Director', active: true, ...companyFilter(req),
+    });
+    if (remaining === 0) {
+      return res.status(409).json({
+        error: { code: 'LAST_ADMIN', message: 'This is the last active HR Director — promote another before changing this account.' },
+      });
+    }
+  }
+
+  const updated = await User.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, patch, { new: true });
+
+  // Any change to what this account may do must end its existing sessions.
+  // Previously none of these paths touched RefreshToken or tokenVersion, so a
+  // deactivated user kept a working 15-minute access token on every endpoint
+  // and a valid 30-day refresh token, and a demoted user kept their old role
+  // in an already-issued token.
+  const accessChanged = patch.active === false
+    || (patch.role && patch.role !== before.role)
+    || Boolean(patch.passwordHash);
+  if (accessChanged) {
+    const reasons = [
+      patch.active === false ? 'deactivated' : null,
+      patch.role && patch.role !== before.role ? `role ${before.role} -> ${patch.role}` : null,
+      patch.passwordHash ? 'password reset by admin' : null,
+    ].filter(Boolean).join('; ');
+    const revoked = await terminateAllAccess(updated._id, { reason: reasons });
+    await logAudit(req, {
+      action: 'Sessions terminated after account change',
+      subject: updated.name,
+      details: `${reasons} — ${revoked} session(s) revoked, outstanding access tokens invalidated.`,
+    });
+  }
+
   await logAudit(req, { action: 'Login updated', subject: updated.name, before, after: updated });
   res.json(updated);
 });
 
 router.delete('/:id', requireRole(), async (req, res) => {
   const before = await User.findOne({ _id: req.params.id, ...companyFilter(req) });
-  if (before) {
-    await User.findByIdAndDelete(req.params.id);
-    await logAudit(req, { action: 'Login removed', subject: before.name, before });
+  if (!before) return res.json({ id: req.params.id });
+
+  if (String(before._id) === String(req.auth.sub)) {
+    return res.status(400).json({ error: { code: 'CANNOT_DELETE_SELF', message: 'You cannot delete the account you are signed in with.' } });
   }
+  if (before.role === 'HR Director') {
+    const remaining = await User.countDocuments({
+      _id: { $ne: before._id }, role: 'HR Director', active: true, ...companyFilter(req),
+    });
+    if (remaining === 0) {
+      return res.status(409).json({ error: { code: 'LAST_ADMIN', message: 'This is the last active HR Director — promote another before deleting this account.' } });
+    }
+  }
+
+  // Revoke first, then delete: the refresh-token rows outlive the user row
+  // and would otherwise sit there until they expired.
+  await terminateAllAccess(before._id, { reason: 'login deleted' });
+  await User.findOneAndDelete({ _id: req.params.id, ...companyFilter(req) });
+  await logAudit(req, { action: 'Login removed', subject: before.name, before });
   res.json({ id: req.params.id });
 });
 

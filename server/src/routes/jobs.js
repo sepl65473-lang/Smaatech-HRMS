@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import Job from '../models/Job.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
+import { pickFields } from '../lib/patchGuard.js';
+
+const JOB_PATCH_FIELDS = ['title', 'dept', 'loc', 'type', 'status', 'openings', 'description', 'postedOn', 'closingOn'];
 
 import { logAudit } from '../lib/auditLogger.js';
 
@@ -27,7 +30,11 @@ router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
   const before = await Job.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!before) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Job posting not found.' } });
 
-  const updated = await Job.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
+  const updated = await Job.findOneAndUpdate(
+    { _id: req.params.id, ...companyFilter(req) },
+    pickFields(req.body, JOB_PATCH_FIELDS),
+    { new: true },
+  );
   const isStatusChanged = before.status !== updated.status;
   const actionName = isStatusChanged ? 'Job status updated' : 'Job posting updated';
   await logAudit(req, { action: actionName, subject: updated.title, before, after: updated });

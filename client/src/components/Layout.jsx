@@ -46,14 +46,24 @@ export default function Layout() {
       />
       <main>
         <Topbar onMenu={() => setSidebarOpen(true)} onAddEmployee={() => setAddOpen(true)} />
-        {mustChange && (
-          <div style={{ background: '#fffbe6', borderBottom: '1px solid #ffe58f', padding: '12px 24px', color: '#873800', fontWeight: 600, fontSize: '13px' }}>
-            ⚠️ <strong>Security Requirement:</strong> You logged in using a temporary password. You must change your password below to access HRMS.
+        {mustChange ? (
+          /* The server refuses every ordinary endpoint until this is done, so
+             rendering the app behind the modal only showed empty screens and a
+             "failed to load" message. Say what is actually required instead. */
+          <div className="page-wrap active">
+            <div className="card" style={{ maxWidth: 560, margin: '48px auto', textAlign: 'center' }}>
+              <div className="card-title">Choose a new password</div>
+              <div className="card-sub" style={{ marginTop: 8 }}>
+                You signed in with a temporary password. Set your own password to finish
+                signing in — the rest of the workspace opens as soon as you do.
+              </div>
+            </div>
           </div>
+        ) : (
+          loading
+            ? <div className="page-wrap active"><div className="loading"><div className="spinner" /><span>Loading workspace…</span></div></div>
+            : <Outlet />
         )}
-        {loading
-          ? <div className="page-wrap active"><div className="loading"><div className="spinner" /><span>Loading workspace…</span></div></div>
-          : <Outlet />}
       </main>
 
       {mustChange && (

@@ -1,46 +1,101 @@
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { formatINR } from './helpers';
 
 const STATUS_LABEL = { ready: 'Ready', processing: 'Processing', paid: 'Paid' };
 
+/**
+ * Generates a real PDF payslip.
+ *
+ * The previous implementation built an HTML string, wrapped it in a
+ * `text/html` Blob and saved it as `<name>-<cycle>.html`. Nothing about it was
+ * a PDF: an employee who forwarded it to a bank or a landlord sent a web page,
+ * and any "payslip PDF" claim about this product was simply untrue. jsPDF and
+ * jspdf-autotable were already dependencies (lib/exportPdf.js uses them) and
+ * already in the bundle, so this costs nothing extra to ship.
+ */
 export const downloadPayslip = (slip) => {
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const left = 40;
+
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Payslip', left, 50);
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(String(slip.name || ''), left, 72);
+  doc.setTextColor(107, 122, 144);
+  doc.text([slip.dept, slip.cycle].filter(Boolean).join('  |  '), left, 88);
+  doc.setTextColor(37, 32, 25);
+
+  doc.setDrawColor(221, 214, 200);
+  doc.line(left, 100, pageWidth - left, 100);
+
+  const earnings = slip.components?.earnings?.length
+    ? slip.components.earnings.map((e) => [e.name || 'Earning', formatINR(e.amount)])
+    : [['Gross salary', formatINR(slip.gross)]];
+
+  autoTable(doc, {
+    startY: 116,
+    head: [['Earnings', 'Amount']],
+    body: earnings,
+    theme: 'striped',
+    styles: { fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [184, 84, 31] },
+    columnStyles: { 1: { halign: 'right' } },
+    margin: { left, right: left },
+  });
+
   const deductionItems = slip.components?.deductions || [];
   const deductionRows = deductionItems.length
-    ? deductionItems.map((d) => `<div class="row"><span>${d.name || d.category}${d.category && d.category !== 'Other' ? ` <small>(${d.category})</small>` : ''}</span><strong>${formatINR(d.amount)}</strong></div>`).join('')
-    : `<div class="row"><span>Deductions</span><strong>${formatINR(slip.deductions)}</strong></div>`;
+    ? deductionItems.map((d) => [
+      d.category && d.category !== 'Other' ? `${d.name || d.category} (${d.category})` : (d.name || 'Deduction'),
+      formatINR(d.amount),
+    ])
+    : [['Deductions', formatINR(slip.deductions)]];
 
-  const html = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>${slip.name} payslip</title>
-    <style>
-      body { font-family: Arial, sans-serif; color: #252019; padding: 32px; }
-      h1 { margin-bottom: 8px; }
-      .meta { color: #6b7a90; margin-bottom: 24px; }
-      .row { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd6c8; padding: 12px 0; }
-      .row small { color: #6b7a90; }
-      .total { font-size: 20px; font-weight: 700; }
-      .section-label { margin-top: 20px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7a90; }
-    </style>
-  </head>
-  <body>
-    <h1>${slip.name} payslip</h1>
-    <div class="meta">${slip.dept} | ${slip.cycle}</div>
-    <div class="row"><span>Gross salary</span><strong>${formatINR(slip.gross)}</strong></div>
-    <div class="section-label">Deductions</div>
-    ${deductionRows}
-    ${slip.lopDays > 0 ? `<div class="row"><span>LOP (${slip.lopDays} days)</span><strong>${formatINR(slip.lopAmount || 0)}</strong></div>` : ''}
-    <div class="row total"><span>Net payout</span><strong>${formatINR(slip.net)}</strong></div>
-    <div class="row"><span>Status</span><strong>${STATUS_LABEL[slip.status] || slip.status}</strong></div>
-  </body>
-</html>`;
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${slip.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${slip.cycle || 'payslip'}.html`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  if (slip.lopDays > 0) {
+    deductionRows.push([`Loss of pay (${slip.lopDays} day${slip.lopDays === 1 ? '' : 's'})`, formatINR(slip.lopAmount || 0)]);
+  }
+
+  autoTable(doc, {
+    startY: doc.lastAutoTable.finalY + 20,
+    head: [['Deductions', 'Amount']],
+    body: deductionRows,
+    theme: 'striped',
+    styles: { fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [107, 122, 144] },
+    columnStyles: { 1: { halign: 'right' } },
+    margin: { left, right: left },
+  });
+
+  autoTable(doc, {
+    startY: doc.lastAutoTable.finalY + 20,
+    body: [
+      ['Net payout', formatINR(slip.net)],
+      ['Status', STATUS_LABEL[slip.status] || slip.status || ''],
+    ],
+    theme: 'plain',
+    styles: { fontSize: 12, cellPadding: 6, fontStyle: 'bold' },
+    columnStyles: { 1: { halign: 'right' } },
+    margin: { left, right: left },
+  });
+
+  // Statutory deductions here are computed by the server (server/src/lib/
+  // statutory.js). TDS in particular is a projection from salary income under
+  // the new regime, so the document says so rather than letting a reader treat
+  // it as a filed figure.
+  const hasTds = deductionItems.some((d) => d.category === 'TDS');
+  doc.setFontSize(8);
+  doc.setTextColor(107, 122, 144);
+  const noteY = doc.lastAutoTable.finalY + 28;
+  doc.text('Computer-generated payslip. PF, ESI and Professional Tax are computed from your salary structure and state.', left, noteY);
+  if (hasTds) {
+    doc.text('TDS shown is an estimate projected from salary income and excludes investment declarations and other income.', left, noteY + 12);
+  }
+
+  const safeName = String(slip.name || 'payslip').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  doc.save(`${safeName}-${slip.cycle || 'payslip'}.pdf`);
 };

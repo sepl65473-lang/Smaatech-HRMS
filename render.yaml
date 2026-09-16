@@ -3,8 +3,9 @@ services:
     name: smaatech-hrms-api
     runtime: node
     plan: free
-    buildCommand: npm --prefix server install
+    buildCommand: npm --prefix server ci --omit=dev
     startCommand: node server/src/index.js
+    healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -13,16 +14,46 @@ services:
       - key: MONGODB_URI
         sync: false
       - key: JWT_ACCESS_SECRET
-        sync: false
+        generateValue: true
       - key: JWT_REFRESH_SECRET
-        sync: false
+        generateValue: true
       # Real OTP emails go through Brevo's HTTP API, not SMTP — Render's free
       # tier blocks all outbound SMTP ports. See server/.env.example.
       - key: BREVO_API_KEY
         sync: false
       - key: SMTP_USER
         sync: false
-      # Set this to the deployed Vercel URL (e.g. https://smaatech-hrms.vercel.app)
-      # once the client is deployed — see README.md for the full order of steps.
+      # The deployed client origin(s), comma-separated. REQUIRED: this is the
+      # CORS allow-list, and startupChecks.js refuses to boot production
+      # without it because an empty list blocks the web client entirely.
       - key: CLIENT_ORIGIN
         sync: false
+      # This project's own Vercel URL prefix, so preview deployments pass CORS.
+      - key: VERCEL_PREVIEW_PREFIX
+        sync: false
+      # Render terminates TLS at its edge — one proxy hop. Without this, every
+      # request looks like it comes from the proxy, so per-IP rate limiting
+      # buckets all users together and audit logs record the wrong address.
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      # Guards /api/v1/metrics and /api/v1/ai/* for scrapers with no session.
+      - key: METRICS_TOKEN
+        generateValue: true
+      # Durable file storage using the MongoDB this service ALREADY uses.
+      # Render's disk is EPHEMERAL: with the default local driver every
+      # attendance selfie and uploaded document is lost on each deploy.
+      # 'gridfs' stores them in MongoDB instead — no new provider, no new
+      # credential, and they inherit the database's own backups.
+      - key: STORAGE_DRIVER
+        value: gridfs
+      - key: GRIDFS_BUCKET
+        value: hrmsfiles
+      # Face extraction is the most expensive request this service serves.
+      # Leave unset to size the pool from the host; set it to pin the value.
+      - key: FACE_WORKER_POOL_SIZE
+        sync: false
+      # Single instance owns the cron jobs. If this service is ever scaled to
+      # more than one instance, set RUN_SCHEDULERS=false on all but one, or
+      # every nightly job runs once per instance.
+      - key: RUN_SCHEDULERS
+        value: "true"

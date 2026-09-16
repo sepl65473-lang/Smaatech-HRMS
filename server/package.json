@@ -7,7 +7,13 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "seed": "node src/seed.js",
-    "test": "vitest run --maxWorkers=1"
+    "test": "vitest run --maxWorkers=1",
+    "smoke": "node scripts/smoke.js",
+    "loadprobe": "node scripts/loadprobe.js",
+    "concurrency": "node scripts/concurrency100.js",
+    "backup": "node scripts/backup.js",
+    "backup:verify": "node scripts/backup.js verify",
+    "backup:restore": "node scripts/backup.js restore"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",

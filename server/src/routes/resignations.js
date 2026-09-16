@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import Resignation from '../models/Resignation.js';
 import Employee from '../models/Employee.js';
 import User from '../models/User.js';
@@ -7,6 +8,10 @@ import { idempotency } from '../middleware/idempotency.js';
 import { runInTransaction } from '../lib/transactionHelper.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { sendNotification } from '../lib/notificationService.js';
+import { terminateAllAccess } from '../lib/sessionRevoker.js';
+import { todayISO } from '../lib/dateUtils.js';
+import LifecycleEvent from '../models/LifecycleEvent.js';
+import { employmentPolicy, addDays } from './lifecycle.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -47,14 +52,78 @@ router.get('/', async (req, res) => {
 });
 
 // Submit a new resignation
+const ISO_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+// A resignation is "live" until the exit is finished — these are the states in
+// which a second one must not be accepted.
+const OPEN_STATUSES = ['Submitted', 'Approved'];
+
 router.post('/', async (req, res) => {
-  const { employeeId, employeeName, resignationDate, requestedLastWorkingDay, reason } = req.body || {};
-  
+  const { employeeId, resignationDate, requestedLastWorkingDay, reason } = req.body || {};
+
   // Regular employees can only submit resignation for themselves
   const isHR = ['HR Director', 'HR Manager'].includes(req.auth.role);
   if (!isHR && String(employeeId) !== String(req.auth.employeeId)) {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'You can only file resignation for yourself.' } });
   }
+
+  if (!employeeId || !mongoose.Types.ObjectId.isValid(String(employeeId))) {
+    return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'employeeId is not a valid id.' } });
+  }
+  if (!String(reason || '').trim()) {
+    return res.status(400).json({ error: { code: 'REASON_REQUIRED', message: 'A reason for leaving is required.' } });
+  }
+
+  const filedOn = ISO_DATE.test(String(resignationDate || '')) ? String(resignationDate) : todayISO();
+  if (!ISO_DATE.test(String(requestedLastWorkingDay || ''))) {
+    return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'requestedLastWorkingDay must be a YYYY-MM-DD date.' } });
+  }
+  // A last working day BEFORE the resignation date would make the notice
+  // period negative and the exit timeline nonsensical.
+  if (String(requestedLastWorkingDay) < filedOn) {
+    return res.status(400).json({
+      error: { code: 'INVALID_LAST_WORKING_DAY', message: 'The last working day cannot be before the resignation date.' },
+    });
+  }
+
+  // Identity comes from the employee RECORD, never from the request body —
+  // otherwise a resignation can carry someone else's name into the exit
+  // cockpit, the HR notification and the audit trail.
+  const employee = await Employee.findOne({ _id: employeeId, ...companyFilter(req) });
+  if (!employee) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Employee not found.' } });
+
+  // One live exit per person. Without this an employee could file any number
+  // of resignations, each spawning its own clearance checklist and F&F
+  // settlement — several payable exits for one departure.
+  const existing = await Resignation.findOne({
+    employeeId,
+    company: req.auth.company,
+    status: { $in: OPEN_STATUSES },
+  });
+  if (existing) {
+    return res.status(409).json({
+      error: {
+        code: 'RESIGNATION_ALREADY_OPEN',
+        message: `An exit is already in progress for ${employee.name} (filed ${existing.resignationDate}).`,
+        existingId: String(existing._id),
+      },
+    });
+  }
+
+  // The notice period is company configuration (Settings.employmentPolicy),
+  // and it is shorter on probation at most companies — so which one applies
+  // depends on the employee's own stage. A shortfall is REPORTED, not blocked:
+  // whether to waive notice is an HR decision, and the exit record should say
+  // plainly that it was short rather than silently accepting it.
+  const policy = await employmentPolicy(req.auth.company);
+  const onProbation = employee.employmentStage === 'Probation';
+  const requiredNoticeDays = onProbation ? policy.noticePeriodDaysOnProbation : policy.noticePeriodDays;
+  const earliestCompliantLWD = addDays(filedOn, requiredNoticeDays);
+  const noticeShortfallDays = requiredNoticeDays > 0 && requestedLastWorkingDay < earliestCompliantLWD
+    ? Math.max(0, Math.round(
+      (Date.parse(`${earliestCompliantLWD}T00:00:00Z`) - Date.parse(`${requestedLastWorkingDay}T00:00:00Z`)) / 86400000,
+    ))
+    : 0;
 
   // Pre-load default clearances list
   const clearances = CLEARANCE_DEPTS.map(dept => ({
@@ -67,15 +136,42 @@ router.post('/', async (req, res) => {
 
   const created = await Resignation.create({
     employeeId,
-    employeeName,
-    resignationDate,
+    employeeName: employee.name,
+    resignationDate: filedOn,
     requestedLastWorkingDay,
-    reason,
+    reason: String(reason).slice(0, 2000),
     clearances,
+    noticePolicyDays: requiredNoticeDays,
+    earliestCompliantLastWorkingDay: earliestCompliantLWD,
+    noticeShortfallDays,
     company: req.auth.company
   });
 
-  await logAudit(req, { action: 'Resignation filed', subject: employeeName, after: created });
+  // Moving to notice period is a lifecycle event like any other, so the
+  // employment history shows the whole arc rather than stopping at hire.
+  await LifecycleEvent.create({
+    company: req.auth.company,
+    empId: employee._id,
+    employeeName: employee.name,
+    type: 'notice-started',
+    effectiveDate: filedOn,
+    changes: {
+      employmentStage: { from: employee.employmentStage || null, to: 'Notice Period' },
+    },
+    reason: String(reason).slice(0, 500),
+    note: noticeShortfallDays
+      ? `Requested last working day is ${noticeShortfallDays} day(s) short of the ${requiredNoticeDays}-day notice period`
+      : `${requiredNoticeDays}-day notice period`,
+    dedupeKey: `notice-started:${created._id}`,
+    actor: { id: req.auth.sub, name: req.auth.name, role: req.auth.role },
+  }).catch(() => { /* history must not fail the resignation itself */ });
+
+  await Employee.updateOne(
+    { _id: employee._id, company: req.auth.company },
+    { employmentStage: 'Notice Period' },
+  );
+
+  await logAudit(req, { action: 'Resignation filed', subject: employee.name, after: created });
 
   // Notify HR Managers of the resignation
   try {
@@ -84,7 +180,7 @@ router.post('/', async (req, res) => {
       await sendNotification({
         recipientId: hr._id,
         title: 'New Resignation Filed',
-        message: `${employeeName} has submitted resignation. Last working day requested: ${requestedLastWorkingDay}.`,
+        message: `${employee.name} has submitted resignation. Last working day requested: ${requestedLastWorkingDay}.`,
         type: 'system',
         actionUrl: '/resignations',
         channels: ['in-app', 'email'],
@@ -104,6 +200,11 @@ router.post('/:id/clearance', async (req, res) => {
   
   if (!CLEARANCE_DEPTS.includes(dept)) {
     return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Invalid clearance department.' } });
+  }
+  // `status` went straight onto the record unvalidated, so any string at all
+  // could be stored as a clearance outcome.
+  if (!['Pending', 'Approved', 'Rejected'].includes(status)) {
+    return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Clearance status must be Pending, Approved or Rejected.' } });
   }
 
   const resignation = await Resignation.findOne({ _id: req.params.id, ...companyFilter(req) });
@@ -188,6 +289,10 @@ router.post('/:id/fnf', async (req, res) => {
 });
 
 // Pay Full & Final (FnF) Settlement and terminate employee status
+// Idempotency-Key is honoured but not mandatory: the real double-payout guard
+// is the state machine below (a settlement must be 'Processed' to be paid, and
+// paying moves it to 'Paid'), which works across processes. The in-memory
+// idempotency store does not — it is per-worker.
 router.post('/:id/fnf/pay', idempotency(), async (req, res) => {
   const isFinance = req.auth.role === 'Finance Lead' || req.auth.role === 'HR Director';
   if (!isFinance) {
@@ -197,6 +302,25 @@ router.post('/:id/fnf/pay', idempotency(), async (req, res) => {
   const resignation = await Resignation.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!resignation) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Resignation record not found.' } });
+  }
+
+  // Guard rails the old handler had none of: paying out a settlement that was
+  // never calculated threw on `fnfSettlement.status` (undefined), paying twice
+  // was possible, and an employee could be exited with clearances outstanding.
+  if (!resignation.fnfSettlement || resignation.fnfSettlement.status !== 'Processed') {
+    return res.status(400).json({
+      error: { code: 'FNF_NOT_PROCESSED', message: 'Calculate the Full & Final settlement before paying it out.' },
+    });
+  }
+  const outstanding = (resignation.clearances || []).filter((c) => c.status !== 'Approved').map((c) => c.dept);
+  if (outstanding.length && req.body?.overrideClearances !== true) {
+    return res.status(409).json({
+      error: {
+        code: 'CLEARANCES_PENDING',
+        message: `Clearance is still outstanding from: ${outstanding.join(', ')}. Complete them, or resend with overrideClearances:true to proceed anyway.`,
+        outstanding,
+      },
+    });
   }
 
   const before = JSON.parse(JSON.stringify(resignation));
@@ -211,9 +335,26 @@ router.post('/:id/fnf/pay', idempotency(), async (req, res) => {
     await resignation.save(opts);
 
     // Lifecycle automation: mark employee as exited, and disable credentials
-    await Employee.findByIdAndUpdate(resignation.employeeId, { status: 'exited' }, opts);
-    await User.findOneAndUpdate({ employeeId: resignation.employeeId }, { active: false }, opts);
+    await Employee.findByIdAndUpdate(
+      resignation.employeeId,
+      { status: 'exited', employmentStage: 'Exited' },
+      opts,
+    );
+    await User.findOneAndUpdate({ employeeId: resignation.employeeId }, { active: false, status: 'Inactive' }, opts);
   });
+
+  // Deactivating the User row alone left the exited employee holding a valid
+  // 15-minute access token (usable on every endpoint) and a 30-day refresh
+  // token. Both classes are killed here.
+  const exitedUser = await User.findOne({ employeeId: resignation.employeeId });
+  if (exitedUser) {
+    const revoked = await terminateAllAccess(exitedUser._id, { reason: 'F&F paid, employee exited' });
+    await logAudit(req, {
+      action: 'Exited employee access terminated',
+      subject: resignation.employeeName,
+      details: `${revoked} session(s) revoked and outstanding access tokens invalidated.`,
+    });
+  }
 
   await logAudit(req, { action: 'FnF Paid & Employee Terminated', subject: resignation.employeeName, before, after: resignation });
 
@@ -250,7 +391,20 @@ router.patch('/:id', async (req, res) => {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Resignation record not found.' } });
   }
 
-  const updated = await Resignation.findByIdAndUpdate(req.params.id, req.body || {}, { new: true });
+  // Allow-list: the old handler passed req.body straight through, so an HR
+  // Manager could set fnfSettlement.status to 'Paid' (skipping the payout
+  // route's guards, the employee exit and the notification) or move the
+  // record to another company.
+  const PATCHABLE = ['approvedLastWorkingDay', 'requestedLastWorkingDay', 'reason', 'status', 'exitInterviewNotes'];
+  const patch = {};
+  for (const field of PATCHABLE) {
+    if (req.body?.[field] !== undefined) patch[field] = req.body[field];
+  }
+  if (patch.status && !['Pending', 'Approved', 'Rejected', 'Withdrawn'].includes(patch.status)) {
+    return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Unrecognised resignation status.' } });
+  }
+
+  const updated = await Resignation.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, patch, { new: true });
   await logAudit(req, { action: 'Resignation updated', subject: updated.employeeName, before, after: updated });
 
   // If approved LWD, let employee know

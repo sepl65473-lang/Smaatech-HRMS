@@ -6,6 +6,11 @@ export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const REFRESH_COOKIE_NAME = 'sepl_refresh';
 
 export function signAccessToken(user) {
+  if (!process.env.JWT_ACCESS_SECRET) {
+    // jwt.sign() with an undefined secret throws a confusing error deep in the
+    // library; fail with the actual cause instead.
+    throw new Error('JWT_ACCESS_SECRET is not set — cannot issue access tokens.');
+  }
   return jwt.sign(
     {
       sub: String(user._id),
@@ -14,6 +19,9 @@ export function signAccessToken(user) {
       email: user.email,
       employeeId: user.employeeId ? String(user.employeeId) : null,
       company: user.company || 'Smaatech',
+      // Token-version claim — see models/User.js. Lets requireAuth reject an
+      // outstanding access token the moment the account is disabled.
+      tv: user.tokenVersion || 0,
     },
     process.env.JWT_ACCESS_SECRET,
     { expiresIn: ACCESS_TOKEN_TTL },
