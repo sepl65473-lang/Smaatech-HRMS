@@ -398,6 +398,13 @@
     grid-template-columns: 2fr 1fr;
     gap:16px;
     margin-bottom:16px;
+    /* Cards size to their own content instead of being stretched to match the
+       tallest card in the row. Grid's default is `stretch`, which is why a
+       short card next to a chart ended up with a large blank area under its
+       content - measured at 153px under "Employees by department" and 103px
+       under "Employee Status". A card that genuinely needs to fill the row
+       opts in with `.card.row-fill`, which sets align-self:stretch. */
+    align-items:start;
   }
   .grid > *, .grid-2 > *{min-width:0}
   .card{
@@ -795,6 +802,9 @@
     grid-template-columns: 1fr 1fr 1fr;
     gap:16px;
     margin-bottom:16px;
+    /* Same reason as .grid above: content-sized cards, opt in to stretching
+       with .card.row-fill where a card should fill the row. */
+    align-items:start;
   }
   .announcement{
     background:linear-gradient(135deg, var(--ink) 0%, #262E44 100%);
