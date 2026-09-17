@@ -2167,6 +2167,50 @@
     box-shadow:none;
   }
 
+  /* ------------------------------------------------------------------ */
+  /* ATTENDANCE: laptop-height compaction.                                */
+  /*                                                                      */
+  /* MEASURED at 1366x768 before any change: the first employee row began  */
+  /* 454px down the page - 59% of the viewport spent before a single       */
+  /* attendance record. At 1024x768 it was 742px and only ONE row was      */
+  /* visible. The breakdown:                                              */
+  /*                                                                      */
+  /*   .stats KPI row   138px   four cards showing one number each, with   */
+  /*                            the icon stacked ABOVE the label so each   */
+  /*                            card spent a whole row on a 28px chip      */
+  /*   tbody td         14px top + 14px bottom -> 59px rows for a 30px     */
+  /*                            avatar                                     */
+  /*                                                                      */
+  /* Scoped to this page rather than applied to .stat and tbody td         */
+  /* globally, which would silently restyle the dashboard and every other  */
+  /* table in the product. Nothing is hidden or removed here - every       */
+  /* column, photo, status, time and location stays exactly as it was.     */
+  /* ------------------------------------------------------------------ */
+
+  /* Icon moves beside the text instead of sitting on its own line. */
+  .attendance-page .stat{
+    display:grid;
+    grid-template-columns:auto 1fr;
+    column-gap:12px;
+    align-items:center;
+    padding:12px 14px;
+  }
+  .attendance-page .stat-icon{
+    grid-row:1 / -1;
+    margin-bottom:0;
+    width:30px; height:30px;
+  }
+  .attendance-page .stat-label{margin-bottom:2px}
+  .attendance-page .stats{gap:12px; margin-bottom:14px}
+
+  /* Rows: comfortable for a 30px avatar without the extra 8px of air. */
+  .attendance-page tbody td{padding:10px 24px}
+  .attendance-page thead th{padding:10px 24px}
+
+  /* The toolbar and card head sat on separate lines with full gaps. */
+  .attendance-page .card-head{margin-bottom:10px}
+  .attendance-page .list-toolbar{margin-bottom:10px}
+
   /* ---- RESPONSIVE: Login page ---- */
   @media (max-width:900px){
     .login-shell{

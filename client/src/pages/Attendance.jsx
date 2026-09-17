@@ -296,7 +296,7 @@ export default function Attendance() {
   }, [attendanceCorrections, isHR, currentUser.empId]);
 
   return (
-    <div className="page-wrap active">
+    <div className="page-wrap active attendance-page">
       <div className="list-toolbar" style={{ marginBottom: 4 }}>
         <div className="filter-chips">
           <button className={`chip ${tab === 'roster' ? 'active' : ''}`} onClick={() => setTab('roster')}>Today's roster</button>
