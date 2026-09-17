@@ -407,6 +407,27 @@
        the top over a dead gap. */
   }
   .grid > *, .grid-2 > *{min-width:0}
+  /* SETTINGS flows its cards in COLUMNS rather than grid rows.
+     These are independent configuration forms of very different lengths. As a
+     grid they behaved badly either way: aligned rows stretched the three-field
+     "Organisation" card to 1035px with 696px of dead space inside it, and
+     content-sized rows left an equally large void beneath it while the next
+     row waited for the 1035px policy card beside it to finish.
+     Column flow removes both - each card starts immediately below the one
+     above it in its column. Cards are kept whole with break-inside. */
+  .grid.settings-cards{
+    display:block;
+    column-count:2;
+    column-gap:16px;
+  }
+  .grid.settings-cards > *{
+    break-inside:avoid;
+    -webkit-column-break-inside:avoid;
+    margin-bottom:16px;
+  }
+  @media (max-width: 1024px){
+    .grid.settings-cards{column-count:1}
+  }
   .card{
     background:var(--paper);
     border:1px solid var(--line);
@@ -419,6 +440,12 @@
     display:flex;
     flex-direction:column;
   }
+  /* Making .card a flex column had a side effect: a flex item will not shrink
+     below its content width, so a wide table stopped scrolling inside
+     .table-scroll and pushed the whole page sideways at narrow widths -
+     measured as a 780px table forcing 732px of scroll on a 640px viewport.
+     min-width:0 lets children shrink so their own overflow handling works. */
+  .card > *{min-width:0}
   /* An empty state inside a card CENTRES in the leftover room but keeps its
      own height. Stretching it instead (flex:1) blew the dashed box up to
      257px on the HR dashboard - a bigger eyesore than the gap it replaced. */

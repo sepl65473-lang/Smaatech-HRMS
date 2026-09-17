@@ -248,7 +248,7 @@ export default function Settings() {
 
   return (
     <div className="page-wrap active">
-      <div className="grid">
+      <div className="grid settings-cards">
         <div className="card">
           <div className="card-head"><div><div className="card-title">Organisation</div><div className="card-sub">Basic workspace details</div></div></div>
           <div className="form-grid">
@@ -256,7 +256,7 @@ export default function Settings() {
               <span className="field-label">Organisation name</span>
               <input className="input" value={orgName} onChange={(e) => setOrgName(e.target.value)} />
             </label>
-            <label className="field field-full">
+            <label className="field">
               <span className="field-label">Work week</span>
               <select className="input" value={workWeek} onChange={(e) => setWorkWeek(e.target.value)}>
                 <option value="5-day">5-day (Mon–Fri)</option>
@@ -264,7 +264,7 @@ export default function Settings() {
                 <option value="6-day">6-day</option>
               </select>
             </label>
-            <label className="field field-full">
+            <label className="field">
               <span className="field-label">Annual leave allowance</span>
               <input
                 type="number"
@@ -349,7 +349,7 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="grid" style={{ marginTop: 18 }}>
+      <div className="grid settings-cards" style={{ marginTop: 18 }}>
         {/* GPS Geofencing Settings */}
         <div className="card">
           <div className="card-head">
@@ -564,7 +564,7 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="grid" style={{ marginTop: 18 }}>
+      <div className="grid settings-cards" style={{ marginTop: 18 }}>
         <ChipManager
           label="Departments"
           sub="Used across employee profiles & filters"

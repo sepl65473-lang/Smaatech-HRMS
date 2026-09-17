@@ -73,7 +73,35 @@ async function noHorizontalOverflow(page) {
   expect(o.scrollW, 'page must not scroll horizontally').toBeLessThanOrEqual(o.clientW + 1);
 }
 
-async function checkPage(page, label, maxCard = 700) {
+/** Dead space between a card's last child and its bottom padding. */
+async function cardSlack(page) {
+  return page.evaluate(() => [...document.querySelectorAll('.card')].map((c) => {
+    const r = c.getBoundingClientRect();
+    if (!r.height) return null;
+    const pad = parseFloat(getComputedStyle(c).paddingBottom) || 0;
+    const kids = [...c.children].filter((k) => k.getBoundingClientRect().height > 0);
+    if (!kids.length) return null;
+    const last = Math.max(...kids.map((k) => k.getBoundingClientRect().bottom));
+    return {
+      title: c.querySelector('.card-title')?.textContent?.trim() || '(untitled)',
+      slack: Math.round(r.bottom - last - pad),
+    };
+  }).filter(Boolean));
+}
+
+/**
+ * `mode` picks the rule that actually applies to the page.
+ *
+ *   'aligned' - the DASHBOARD. Widgets sit in grid rows and look composed when
+ *               they line up, so alignment is asserted and in-card slack is
+ *               expected.
+ *   'content' - SETTINGS. Independent configuration forms flow in columns and
+ *               are sized to their content, so slack is asserted instead and
+ *               differing heights side by side are the intent.
+ *
+ * One rule applied to both pages would be wrong for one of them.
+ */
+async function checkPage(page, label, { maxCard = 700, mode = 'aligned' } = {}) {
   const rows = await rowAlignment(page);
   const empties = await emptyStates(page);
   const tallest = await tallestCard(page);
@@ -83,10 +111,20 @@ async function checkPage(page, label, maxCard = 700) {
     console.log(`[layout]   empty states: ${empties.map((e) => `${e.height}px (pad ${e.padTop}) "${e.label}"`).join(' | ')}`);
   }
 
-  // 1. Cards in a row line up. A ragged row is the disconnected look.
-  for (const heights of rows) {
-    const spread = Math.max(...heights) - Math.min(...heights);
-    expect(spread, `cards in a row should align, got heights ${heights.join('/')}`).toBeLessThanOrEqual(2);
+  if (mode === 'aligned') {
+    // Cards in a row line up. A ragged row is the disconnected look.
+    for (const heights of rows) {
+      const spread = Math.max(...heights) - Math.min(...heights);
+      expect(spread, `cards in a row should align, got heights ${heights.join('/')}`).toBeLessThanOrEqual(2);
+    }
+  } else {
+    // Content-sized: a card must end shortly after its content. This is what
+    // caught "Organisation" sitting at 1035px with 696px of nothing under it.
+    const slacks = await cardSlack(page);
+    console.log(`[layout]   card slack: ${slacks.map((c) => `${c.slack}px ${c.title}`).join(' | ')}`);
+    for (const c of slacks) {
+      expect(c.slack, `"${c.title}" has ${c.slack}px of empty space below its content`).toBeLessThanOrEqual(24);
+    }
   }
 
   // 2. Guard the actual regression: .empty carried 60px of padding top AND
@@ -122,7 +160,7 @@ test('settings layout density', async ({ page }) => {
   await page.waitForTimeout(1500);
   // Settings forms are legitimately long, so the towering-card guard is
   // relaxed here; the row-alignment and empty-state checks still apply.
-  await checkPage(page, 'settings', 1400);
+  await checkPage(page, 'settings', { maxCard: 1400, mode: 'content' });
 });
 
 test('an empty chart does not reserve its full height', async ({ page }) => {

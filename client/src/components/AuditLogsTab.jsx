@@ -189,7 +189,12 @@ export default function AuditLogsTab() {
 
       {/* Logs Table */}
       <div className="bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* `overflow-x-auto` is a Tailwind class and this project has no
+            Tailwind, so it never did anything: the table simply overflowed and
+            pushed Settings sideways at narrow widths (measured 732px of scroll
+            on a 640px viewport). `table-scroll` is this codebase's own rule and
+            actually applies. */}
+        <div className="overflow-x-auto table-scroll">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-950/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
               <tr>
