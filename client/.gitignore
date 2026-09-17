@@ -1,2 +1,5 @@
 test-results/
 playwright-report/
+
+# Screenshots produced by the layout inspection spec
+layout-shots/

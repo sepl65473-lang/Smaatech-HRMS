@@ -314,7 +314,7 @@ export default function Settings() {
             <button className="btn btn-ghost" onClick={handleRevokeOthers}>Sign out other sessions</button>
           )}
         </div>
-        <div className="settings-rows">
+        <div className="settings-rows settings-rows-scroll">
           {sessions.length === 0 && <div className="empty">No active sessions.</div>}
           {sessions.map((s) => (
             <div className="settings-row" key={s.id}>
@@ -605,7 +605,7 @@ export default function Settings() {
           </div>
           <button className="btn" onClick={openAddUser}><IconPlus width="14" height="14" /> Add user</button>
         </div>
-        <div className="table-scroll">
+        <div className="table-scroll table-scroll-cap">
           <table className="table">
             <thead>
               <tr><th>Name</th><th>Status</th><th>Role</th><th>Email</th><th>Scope</th><th>Last login</th><th style={{ textAlign: 'right' }}>Action</th></tr>

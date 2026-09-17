@@ -398,13 +398,13 @@
     grid-template-columns: 2fr 1fr;
     gap:16px;
     margin-bottom:16px;
-    /* Cards size to their own content instead of being stretched to match the
-       tallest card in the row. Grid's default is `stretch`, which is why a
-       short card next to a chart ended up with a large blank area under its
-       content - measured at 153px under "Employees by department" and 103px
-       under "Employee Status". A card that genuinely needs to fill the row
-       opts in with `.card.row-fill`, which sets align-self:stretch. */
-    align-items:start;
+    /* Rows align. Letting cards size to their own content removed the blank
+       area INSIDE short cards but replaced it with transparent holes in the
+       row, which reads as disconnected sections. Cards stay aligned, and the
+       height disparity is attacked at its source instead: oversized empty
+       states and chart boxes below, plus .card being a flex column so a
+       stretched card distributes its content rather than stacking it all at
+       the top over a dead gap. */
   }
   .grid > *, .grid-2 > *{min-width:0}
   .card{
@@ -413,7 +413,16 @@
     border-radius:14px;
     padding:16px 18px;
     box-shadow:var(--shadow);
+    /* A column, so a card that is taller than its content (because a sibling
+       in the row is taller) can centre its empty state instead of leaving a
+       dead block under a top-aligned stack. */
+    display:flex;
+    flex-direction:column;
   }
+  /* An empty state inside a card CENTRES in the leftover room but keeps its
+     own height. Stretching it instead (flex:1) blew the dashed box up to
+     257px on the HR dashboard - a bigger eyesore than the gap it replaced. */
+  .card > .empty{margin-block:auto}
   /* Opt-in modifier for a card sharing a grid row with a taller sibling
      (e.g. EmployeeProfile's Leave history next to Attendance history) —
      stretches to match the row height and centers its empty state instead
@@ -462,7 +471,9 @@
 
   /* ATTENDANCE CHART */
   .chart{
-    height:165px;
+    /* Trimmed from 165px. Still comfortably readable, and it is the box that
+       sets the height of the tallest card in the first dashboard row. */
+    height:150px;
     position:relative;
     padding:0 4px;
   }
@@ -802,9 +813,6 @@
     grid-template-columns: 1fr 1fr 1fr;
     gap:16px;
     margin-bottom:16px;
-    /* Same reason as .grid above: content-sized cards, opt in to stretching
-       with .card.row-fill where a card should fill the row. */
-    align-items:start;
   }
   .announcement{
     background:linear-gradient(135deg, var(--ink) 0%, #262E44 100%);
@@ -1739,6 +1747,11 @@
 
   /* ---- Tables: horizontal scroll wrapper ---- */
   .table-scroll{overflow-x:auto}
+  /* Opt-in vertical ceiling for a table that lives INSIDE a card and grows
+     with the data. Applied per table rather than to .table-scroll globally,
+     because a full-page table (Employees, Attendance) should scroll with the
+     page, not inside a box. Nothing is hidden - the list scrolls. */
+  .table-scroll-cap{max-height:460px; overflow-y:auto}
 
   /* ---- Chip count badge ---- */
   .chip-count{
@@ -1779,6 +1792,10 @@
 
   /* ---- Settings rows ---- */
   .settings-rows{display:flex; flex-direction:column}
+  /* A list that grows with the data needs a ceiling, or the card grows with
+     it - an account with many signed-in devices produced a card thousands of
+     pixels tall. Nothing is hidden: the list scrolls. */
+  .settings-rows-scroll{max-height:420px; overflow-y:auto}
   .settings-row{
     display:flex; align-items:center; justify-content:space-between;
     padding:16px 0; border-bottom:1px solid var(--line); gap:20px;
@@ -1812,7 +1829,10 @@
 
   /* ---- Empty / loading states ---- */
   .empty{
-    text-align:center; padding:60px 20px; color:var(--muted);
+    /* Was 60px top and bottom - 120px of vertical padding, which is what made
+       "No pending requests" taller than several real cards. Comfortable, not
+       cramped, and it centres inside a card via the rule above. */
+    text-align:center; padding:28px 20px; color:var(--muted);
     border:1px dashed var(--line-2); border-radius:14px; background:var(--paper);
   }
   .empty-title{font-family:'Geist', sans-serif; font-size:18px; color:var(--ink-2); margin-bottom:6px}

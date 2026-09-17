@@ -714,6 +714,16 @@ const formatCompactINR = (n) => {
 };
 
 function PayrollChart({ data }) {
+  // With nothing to plot, the grid lines and axis labels rendered anyway and
+  // reserved the chart's full height as a blank box - which then set the
+  // height of its whole dashboard row, so every card beside it was stretched
+  // to match an empty chart. A compact message says the same thing honestly
+  // and takes the space it actually needs.
+  const hasValues = data.some((d) => d.total > 0);
+  if (!data.length || !hasValues) {
+    return <div className="empty">No payroll data for this period yet</div>;
+  }
+
   const maxTotal = Math.max(1, ...data.map((d) => d.total));
   const base = 190;
   const scale = 135 / maxTotal;
