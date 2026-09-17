@@ -33,7 +33,7 @@ export default function Employees() {
 
   // Server-side paginated/searched/sorted directory table — independent of
   // the `employees` array above, which stays a full unpaginated fetch used
-  // everywhere else (manager pickers, CSV export/import, org chart, stats).
+  // everywhere else (manager pickers, CSV export/import, stats).
   const [dirRows, setDirRows] = useState([]);
   const [dirTotal, setDirTotal] = useState(0);
 

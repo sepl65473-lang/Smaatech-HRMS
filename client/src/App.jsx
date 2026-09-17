@@ -9,7 +9,6 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const MyDashboard = lazy(() => import('./pages/MyDashboard'));
 const Employees = lazy(() => import('./pages/Employees'));
 const EmployeeProfile = lazy(() => import('./pages/EmployeeProfile'));
-const OrgChart = lazy(() => import('./pages/OrgChart'));
 const Attendance = lazy(() => import('./pages/Attendance'));
 const Leave = lazy(() => import('./pages/Leave'));
 const Holidays = lazy(() => import('./pages/Holidays'));
@@ -79,7 +78,6 @@ export default function App() {
           <Route path="ess" element={<Guard path="/ess"><MyDashboard /></Guard>} />
           <Route path="employees" element={<Guard path="/employees"><Employees /></Guard>} />
           <Route path="employees/:id" element={<EmployeeProfileGuard><EmployeeProfile /></EmployeeProfileGuard>} />
-          <Route path="org-chart" element={<Guard path="/org-chart"><OrgChart /></Guard>} />
           <Route path="attendance" element={<Guard path="/attendance"><Attendance /></Guard>} />
           <Route path="leave" element={<Guard path="/leave"><Leave /></Guard>} />
           <Route path="holidays" element={<Guard path="/holidays"><Holidays /></Guard>} />

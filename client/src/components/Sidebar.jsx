@@ -38,7 +38,6 @@ export default function Sidebar({ onNavigate }) {
       <div className="nav-section">
         <div className="nav-label">Workspace</div>
         <Item to="/employees" icon={IconEmployees} label="Employees" role={currentUser.role} badge={employees.length} onNavigate={onNavigate} />
-        <Item to="/org-chart" icon={IconEmployees} label="Org chart" role={currentUser.role} onNavigate={onNavigate} />
         <Item to="/attendance" icon={IconCalendar} label="Attendance" role={currentUser.role} onNavigate={onNavigate} />
         <Item to="/leave" icon={IconLeave} label="Leave" role={currentUser.role} badge={pendingLeaves.length || null} badgeTone="gold" onNavigate={onNavigate} />
         <Item to="/holidays" icon={IconCalendar} label="Holidays" role={currentUser.role} onNavigate={onNavigate} />

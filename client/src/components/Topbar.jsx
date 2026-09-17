@@ -14,7 +14,6 @@ const TITLES = {
   '/': null, // special-cased to greeting
   '/ess': ['My dashboard', 'Employee self-service'],
   '/employees': ['People directory', 'All employees'],
-  '/org-chart': ['Org chart', 'Reporting structure'],
   '/attendance': ['Attendance', 'Today across the org'],
   '/leave': ['Leave management', 'Requests & balances'],
   '/holidays': ['Holidays', 'Company calendar'],
