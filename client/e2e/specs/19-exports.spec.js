@@ -64,7 +64,6 @@ test('a multi-month attendance history is created through the real API', async (
   for (let m = 1; m <= MONTHS; m += 1) {
     for (let d = 1; d <= DAYS_PER_MONTH; d += 1) {
       const date = historicDate(m, d);
-      // eslint-disable-next-line no-await-in-loop
       const res = await apiAs(page, 'POST', '/attendance', {
         empId: target.id,
         date,
@@ -109,7 +108,6 @@ async function download(page, buttonName) {
   const file = await pending;
   const stream = await file.createReadStream();
   const chunks = [];
-  // eslint-disable-next-line no-restricted-syntax
   for await (const chunk of stream) chunks.push(chunk);
   return { buffer: Buffer.concat(chunks), name: file.suggestedFilename() };
 }

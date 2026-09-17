@@ -29,7 +29,7 @@ export default [
     },
   },
   {
-    files: ['vite.config.js', 'playwright.config.js', 'e2e/**/*.{js,jsx}'],
+    files: ['vite.config.js', 'playwright.config.js', 'playwright.prod.config.js', 'e2e/**/*.{js,jsx}'],
     languageOptions: {
       globals: {
         ...globals.node,

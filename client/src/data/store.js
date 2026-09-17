@@ -495,7 +495,11 @@ export async function loadAll(role) {
     expensesApi.list().catch(() => []),
     may('/assets') ? assetsApi.list().catch(() => []) : skip(),
     may('/recruitment') ? jobsApi.list().catch(() => []) : skip(),
-    settingsApi.get(),
+    // Guarded like every other collection. This was the ONE unguarded call in
+    // the hydrate, so a single failed /settings request rejected the whole
+    // Promise.all and stranded the user on "Loading workspace…". An empty
+    // object matches what callers expect to read fields off.
+    settingsApi.get().catch(() => ({})),
     isAdmin ? rolesApi.list().catch(() => []) : skip(),
     masterCategoriesApi.list().catch(() => []),
     masterValuesApi.list().catch(() => []),

@@ -156,9 +156,15 @@ export function HRMSProvider({ children }) {
   const loadAuthenticatedData = useCallback(async (userId, role) => {
     setLoading(true);
     try {
-      const [all, faceStatus] = await Promise.all([loadAll(role), faceApi.status(userId)]);
+      // Face status is guarded: it is a convenience flag for the UI, and the
+      // server independently enforces enrolment on every punch, so failing to
+      // read it must never cost the user their whole workspace.
+      const [all, faceStatus] = await Promise.all([
+        loadAll(role),
+        faceApi.status(userId).catch(() => null),
+      ]);
       hydrate(all);
-      setFaceEnrolled(faceStatus.enrolled);
+      if (faceStatus) setFaceEnrolled(faceStatus.enrolled);
     } finally {
       // Always clear the loading gate — even on failure — so a flaky request
       // can't leave Layout.jsx stuck on "Loading workspace…" forever.
@@ -299,15 +305,31 @@ export function HRMSProvider({ children }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const user = await authApi.bootstrap();
-      if (!alive) return;
-      if (user) {
-        setAuthUser(user);
-        await loadAuthenticatedData(user.id, user.role);
-      } else {
+      // `booting` gates the ENTIRE application in Layout.jsx, so it must be
+      // cleared on every path. It previously sat after an unguarded await:
+      // one rejected request during hydration skipped it and left the user on
+      // "Loading workspace…" for good, with no error and no way out but a
+      // hard reload. On Render's free tier a cold start answers 503 for the
+      // first ~35 seconds, so this was reachable in normal use.
+      //
+      // The failure is surfaced rather than swallowed: the person lands in the
+      // app and is told what went wrong, instead of watching a spinner.
+      try {
+        const user = await authApi.bootstrap();
+        if (!alive) return;
+        if (user) {
+          setAuthUser(user);
+          await loadAuthenticatedData(user.id, user.role);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        if (!alive) return;
         setLoading(false);
+        toast('error', err?.message || 'Some of your workspace could not be loaded. Refresh to try again.');
+      } finally {
+        if (alive) setBooting(false);
       }
-      if (alive) setBooting(false);
     })();
     return () => { alive = false; };
     // Intentionally runs once on mount only — loadAuthenticatedData is stable
