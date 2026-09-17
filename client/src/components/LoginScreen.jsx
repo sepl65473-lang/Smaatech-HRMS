@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import { DEFAULT_LOGIN_PROFILES } from '../lib/permissions';
-import FaceLogin from './FaceLogin';
 import ForgotPasswordModal from './ForgotPasswordModal';
 
 export default function LoginScreen() {
@@ -13,7 +12,6 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [faceOpen, setFaceOpen] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -310,41 +308,9 @@ export default function LoginScreen() {
               Sign in
             </button>
 
-            {/* Divider */}
-            <div className="login-divider">
-              <span className="login-divider-line"></span>
-              <span className="login-divider-text">or</span>
-              <span className="login-divider-line"></span>
-            </div>
-
-            {/* Sign in with face */}
-            <button className="login-face-btn" onClick={() => setFaceOpen(true)}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="3"/>
-                <circle cx="9" cy="10" r="1.2" fill="currentColor" stroke="none"/>
-                <circle cx="15" cy="10" r="1.2" fill="currentColor" stroke="none"/>
-                <path d="M9 15c.83.67 2 1 3 1s2.17-.33 3-1"/>
-              </svg>
-              <span>Sign in with face</span>
-            </button>
           </div>
         )}
       </div>
-
-      <FaceLogin
-        open={faceOpen}
-        profiles={profiles}
-        onClose={() => setFaceOpen(false)}
-        onMatch={async (profile, photoBlob) => {
-          setFaceOpen(false);
-          try {
-            setAuthMethod('face');
-            await proceedAfterAuth(await loginWithFace(profile.email, photoBlob));
-          } catch (err) {
-            toast('error', err.message || 'Face sign-in failed.');
-          }
-        }}
-      />
 
       <ForgotPasswordModal
         open={forgotOpen}

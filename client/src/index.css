@@ -2120,55 +2120,6 @@
     box-shadow:none;
   }
 
-  /* Divider */
-  .login-divider{
-    display:flex;
-    align-items:center;
-    gap:16px;
-    margin:24px 0;
-  }
-  .login-divider-line{
-    flex:1;
-    height:1px;
-    background:#d4dbe6;
-  }
-  .login-divider-text{
-    font-size:13px;
-    color:#94a3b8;
-    font-weight:400;
-  }
-
-  /* Face login button */
-  .login-face-btn{
-    width:100%;
-    padding:13px 24px;
-    background:#ffffff;
-    color:#0d2d6b;
-    border:1.5px solid #0d2d6b;
-    border-radius:10px;
-    font-family:inherit;
-    font-size:14px;
-    font-weight:600;
-    cursor:pointer;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    gap:10px;
-    transition:all .2s;
-    letter-spacing:0.01em;
-  }
-  .login-face-btn:hover{
-    background:#f0f4ff;
-    border-color:#3b7ddd;
-    color:#3b7ddd;
-    transform:translateY(-1px);
-    box-shadow:0 4px 12px -4px rgba(13,45,107,0.15);
-  }
-  .login-face-btn:active{
-    transform:translateY(0);
-    box-shadow:none;
-  }
-
   /* ---- RESPONSIVE: Login page ---- */
   @media (max-width:900px){
     .login-shell{
