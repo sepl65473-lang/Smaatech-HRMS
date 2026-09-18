@@ -235,7 +235,7 @@ router.get('/qr-token', requireRole('HR Manager'), async (req, res) => {
 // proves who they are. Deliberately doesn't also require a face photo (that
 // would just reduce to the existing face check-in flow with an extra QR
 // step) — this is a distinct, lower-friction channel, same trade-off this
-// codebase already documents for face-login vs password+2FA.
+// codebase already documents for face-login vs password sign-in.
 router.post('/qr-checkin', async (req, res) => {
   const { token } = req.body || {};
   if (!token || !(await consumeQrToken(token, req.auth.company))) {

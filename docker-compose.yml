@@ -22,7 +22,7 @@ services:
       JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:?required - generate 48 random bytes hex}"
       JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:?required - must differ from JWT_ACCESS_SECRET}"
       CLIENT_ORIGIN: "${CLIENT_ORIGIN:?required - the browser origin serving the client}"
-      # Transactional email (password-reset OTP, login 2FA, welcome mail).
+      # Transactional email (password-reset OTP, welcome mail).
       BREVO_API_KEY: "${BREVO_API_KEY:-}"
       SMTP_USER: "${SMTP_USER:-}"
       # Durable file storage in the MongoDB below — no separate provider.

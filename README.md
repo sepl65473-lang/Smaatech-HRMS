@@ -51,7 +51,7 @@ Smaatech HRMS is a multi-tenant-capable People Operations system (one company, `
 
 | Module | What it actually does in this codebase |
 |---|---|
-| **Authentication** | Email + password login, optional per-company email-OTP 2FA, face sign-in, JWT access tokens (15 min) + rotating httpOnly refresh cookies (30 days), account lockout after 5 failed attempts, self-service password change, OTP password reset, active-session listing/revocation |
+| **Authentication** | Email + password login (no second factor), face sign-in, JWT access tokens (15 min) + rotating httpOnly refresh cookies (30 days), account lockout after 5 failed attempts, self-service password change, OTP password reset, active-session listing/revocation |
 | **Authorization** | 4 built-in roles (`HR Director`, `HR Manager`, `Finance Lead`, `Employee`) with a DB-backed `Role.allowedActions` list checked per route, plus a client-side route access map |
 | **Employees** | Full CRUD, bulk update, soft-delete (`?soft=true`), 8-stage onboarding lifecycle, manager hierarchy, statutory identity fields (PAN/UAN/ESI/tax regime), education/experience/family sub-documents, CSV import |
 | **Attendance** | Four independent punch channels — self-service (face + geofence), QR code, HR manual override, and biometric-device HTTP ingest — plus shift/lateness/half-day/early-exit derivation, a nightly row-creation cron, and a correction request/approval workflow |
@@ -294,7 +294,7 @@ erDiagram
         boolean mustChangePassword
         string company "indexed"
         string otpHash "password reset, bcrypt"
-        string loginOtpHash "2FA, separate from reset"
+        string loginOtpHash "legacy, unused (login 2FA removed)"
         number failedLoginAttempts
         date lockedUntil
         date lastLoginAt
@@ -390,7 +390,6 @@ erDiagram
         number geofenceRadius
         mixed shifts
         mixed roster
-        boolean twoFactor
         string biometricDeviceApiKey "never returned by GET /settings"
         mixed notificationTemplates
         mixed notifyChannels
@@ -543,16 +542,6 @@ sequenceDiagram
     S->>D: reset failedLoginAttempts and lockedUntil
     S->>D: sanitizeEmployeeLink — drop a dangling employeeId
 
-    alt Settings.twoFactor enabled for this company
-        S->>D: store bcrypt(OTP) + 10 min expiry
-        S->>BR: send 6-digit code
-        BR-->>U: email
-        S-->>U: 200 { requiresTwoFactor: true, email }
-        U->>S: POST /auth/verify-2fa { email, otp }
-        S->>S: bcrypt.compare(otp, loginOtpHash)
-        Note over S,D: A wrong OTP increments the SAME<br/>failedLoginAttempts counter as a wrong password
-    end
-
     S->>D: recordLogin — lastLoginAt, lastLoginIp
     S->>D: advance onboardingStatus to "Activated" if applicable
     S->>D: RefreshToken.create { tokenHash, userAgent, ip }
@@ -562,7 +551,7 @@ sequenceDiagram
 
 ### Lockout policy
 
-`LOCK_THRESHOLD = 5`, `LOCK_DURATION_MS = 15 minutes`. The same `failedLoginAttempts` / `lockedUntil` pair is incremented by a wrong **password**, a wrong **login 2FA code**, and a wrong **password-reset OTP** — closing the gap where an IP-rotating attacker could brute-force a 6-digit code past the IP rate limiter.
+`LOCK_THRESHOLD = 5`, `LOCK_DURATION_MS = 15 minutes`. The same `failedLoginAttempts` / `lockedUntil` pair is incremented by a wrong **password** and a wrong **password-reset OTP** — closing the gap where an IP-rotating attacker could brute-force a 6-digit code past the IP rate limiter.
 
 ### Refresh rotation
 
@@ -829,9 +818,8 @@ flowchart LR
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/login` | public | Rate-limited 10/15 min. Returns `{ accessToken, user }` or `{ requiresTwoFactor: true, email }` |
+| POST | `/login` | public | Rate-limited 10/15 min. Returns `{ accessToken, user }` |
 | POST | `/face-login` | public | `multipart/form-data`: `email` + `photo`. Server re-verifies the face itself |
-| POST | `/verify-2fa` | public | `{ email, otp }` — 6 digits, 10-minute TTL |
 | POST | `/refresh` | cookie | Rotates the refresh token; revokes the old row |
 | POST | `/logout` | cookie | Revokes the row and clears the cookie |
 | GET | `/me` | ✅ | Current user |
@@ -912,7 +900,7 @@ flowchart LR
 
 | Service | Purpose | Implementation | Status |
 |---|---|---|---|
-| **Brevo** (`api.brevo.com/v3/smtp/email`) | All transactional email — OTP, 2FA, welcome, notifications | Direct `fetch()` to the HTTPS API. **SMTP is deliberately not used** — Render's free tier blocks ports 25/465/587, so an SMTP connection can never leave the host | ✅ Production |
+| **Brevo** (`api.brevo.com/v3/smtp/email`) | All transactional email — password-reset OTP, welcome, notifications | Direct `fetch()` to the HTTPS API. **SMTP is deliberately not used** — Render's free tier blocks ports 25/465/587, so an SMTP connection can never leave the host | ✅ Production |
 | **OpenStreetMap Nominatim** | Reverse-geocodes check-in coordinates into an address | `fetch()` with an identifying `User-Agent` and a 5-second `AbortController` timeout. Best-effort: a failure yields a `null` address and **never blocks a check-in** | ✅ Production |
 | **MongoDB** | Primary datastore | Mongoose 8 | ✅ Production |
 | **face-api.js / TensorFlow.js** | Face detection + 128-float descriptors | Browser (`face-api.js`) for UX; server (`@vladmandic/face-api` on the WASM backend) as the verification authority | ✅ Production |
@@ -1011,7 +999,6 @@ sequenceDiagram
         S->>D: AuditLog "Failed face sign-in attempt" + confidence
         S-->>C: 401 FACE_NOT_MATCHED
     else match
-        S->>S: 2FA still applies if the company has it enabled
         S->>D: recordLogin + RefreshToken.create
         S-->>C: { accessToken, user } + refresh cookie
     end
@@ -1101,9 +1088,7 @@ Only controls that exist in the code are listed.
 | Access tokens | HS256 JWT, **15-minute** TTL, memory-only on the client |
 | Refresh tokens | Opaque 48-byte random, **SHA-256 hashed at rest**, rotated on every use, individually revocable |
 | Cookie hardening | `httpOnly`, `secure` + `sameSite=None` in production, scoped to `path=/api/v1/auth` |
-| 2FA | Per-company toggle; 6-digit OTP, **bcrypt-hashed**, 10-minute TTL, delivered only by email |
-| Separate OTP namespaces | `loginOtpHash` (2FA) and `otpHash` (password reset) are distinct fields, so a shoulder-surfed login code can't reset a password |
-| Brute-force lockout | 5 failed attempts → 15-minute lock, shared across password, 2FA and reset-OTP failures |
+| Brute-force lockout | 5 failed attempts → 15-minute lock, shared across password and reset-OTP failures |
 | User enumeration | `/forgot-password` returns `{ ok: true }` whether or not the account exists |
 | Response hygiene | `User.toJSON` deletes `passwordHash`, both OTP hashes/expiries, `failedLoginAttempts`, `lockedUntil` |
 | Forced rotation | Admin-created logins get `mustChangePassword: true` |
@@ -1131,8 +1116,8 @@ Only controls that exist in the code are listed.
 | Limiter | Scope | Budget |
 |---|---|---|
 | `apiLimiter` | all `/api/*` | 300 / 15 min |
-| `authLimiter` | `/auth/login`, `/auth/verify-2fa`, `/auth/forgot-password`, `/auth/reset-password` | 15 / 15 min |
-| `loginLimiter` | `/auth/login`, `/auth/face-login`, `/auth/verify-2fa`, `/auth/forgot-password`, `/auth/reset-password` | 10 / 15 min |
+| `authLimiter` | `/auth/login`, `/auth/forgot-password`, `/auth/reset-password` | 15 / 15 min |
+| `loginLimiter` | `/auth/login`, `/auth/face-login`, `/auth/forgot-password`, `/auth/reset-password` | 10 / 15 min |
 | `financialLimiter` | `/resignations/:id/fnf/pay` | 30 / 15 min |
 
 `apiLimiter`, `authLimiter` and `financialLimiter` are fully **skipped** when `NODE_ENV=test`. `loginLimiter` is not skipped — instead its cap is raised from 10 to **1000** per 15 minutes in test mode, so integration tests don't trip it under normal load.
@@ -1140,7 +1125,7 @@ Only controls that exist in the code are listed.
 ### Injection & input
 
 - **NoSQL injection** — `express-mongo-sanitize` strips `$`/`.` keys; all queries go through Mongoose with typed schemas and `strictQuery: true`. There is no SQL and no raw query concatenation anywhere.
-- **Input validation** — Joi schemas with `stripUnknown: true` and `abortEarly: false` on login, 2FA, forgot/reset/change password, employee create/patch, leave filing, expense filing and payroll creation.
+- **Input validation** — Joi schemas with `stripUnknown: true` and `abortEarly: false` on login, forgot/reset/change password, employee create/patch, leave filing, expense filing and payroll creation.
 - **ReDoS / regex injection** — the audit-log `search` parameter is escaped (`replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`) before being used as a `RegExp`.
 - **XSS** — React escapes interpolated content by default. `xlsx` is used **write-only**; the source documents that `XLSX.read()` is never called on user-supplied files, so the parser-side CVEs are unreachable.
 - **CSRF** — the API is token-authenticated with a `Bearer` header, not cookie-authenticated, so a cross-site form post carries no credentials. The refresh cookie is `SameSite=None` and path-scoped to `/api/v1/auth`; `/auth/refresh` is the only route it reaches.
@@ -1154,7 +1139,7 @@ Only controls that exist in the code are listed.
 
 ### Audit logging
 
-`logAudit()` writes an `AuditLog` on every mutating route with actor `{ id, name, role }`, action, subject, IP, user agent, and a computed field-level `diff`. `createdAt`, `updatedAt`, `__v`, `id`, `_id`, **`password` and `tokens`** are excluded from the diff. Security events specifically audited: sign-in, sign-out, blocked-because-locked, failed sign-in, failed 2FA, failed face sign-in, failed face verification during a punch, password reset requested/completed, session revoked by admin, biometric template enrolled/revoked, device key regenerated.
+`logAudit()` writes an `AuditLog` on every mutating route with actor `{ id, name, role }`, action, subject, IP, user agent, and a computed field-level `diff`. `createdAt`, `updatedAt`, `__v`, `id`, `_id`, **`password` and `tokens`** are excluded from the diff. Security events specifically audited: sign-in, sign-out, blocked-because-locked, failed sign-in, failed face sign-in, failed face verification during a punch, password reset requested/completed, session revoked by admin, biometric template enrolled/revoked, device key regenerated.
 
 ---
 
@@ -1256,7 +1241,7 @@ Copy `server/.env.example` → `server/.env` and `client/.env.example` → `clie
 | `JWT_ACCESS_SECRET` | ✅ | HS256 signing key for 15-minute access tokens |
 | `JWT_REFRESH_SECRET` | ⚠️ | Checked by `api/index.js` but **never read by any code path** — refresh tokens are opaque, not JWTs |
 | `CLIENT_ORIGIN` | ✅ prod | Frontend origin added to the CORS allowlist |
-| `BREVO_API_KEY` | ✅ email | Brevo transactional API key. Without it, email silently degrades to console scaffolding (OTP/2FA routes return `502 EMAIL_FAILED`) |
+| `BREVO_API_KEY` | ✅ email | Brevo transactional API key. Without it, email silently degrades to console scaffolding (password-reset OTP returns `502 EMAIL_FAILED`) |
 | `SMTP_USER` | ✅ email | The **verified Brevo sender address** — used as the `from`, not for SMTP |
 | `NODE_ENV` | — | `production` enables `secure`/`sameSite=None` cookies; `test` relaxes rate limits and bypasses the face worker |
 | `LOG_LEVEL` | — | winston level (default `info`) |
@@ -1347,7 +1332,7 @@ npm --prefix client test  # client only
 
 | Test file | Focus |
 |---|---|
-| `routes/auth.test.js` (11) | Login, lockout, 2FA, refresh rotation, password reset |
+| `routes/auth.test.js` (14) | Login, lockout, no-2FA guarantee, session lifecycle, password reset |
 | `routes/leave.test.js` (9) | Multi-stage approval, attendance marking, withdrawal |
 | `routes/resignations.test.js` (8) | Clearances, FnF calculation, idempotent payout, exit automation |
 | `routes/payroll.test.js` (6) | Scoping, LOP computation, role gates |
@@ -1563,7 +1548,7 @@ Ordered to match the limitations above.
 
 - **Node.js 20+** (CI pins 20.x; the Docker image is `node:20-alpine`)
 - **MongoDB** — Atlas or local. Transactions need a replica set; `runInTransaction()` degrades gracefully on standalone
-- A **Brevo** account (free tier) if you want real OTP/2FA/welcome emails
+- A **Brevo** account (free tier) if you want real password-reset/welcome emails
 
 ### Install
 
@@ -1670,7 +1655,7 @@ The deployment this repository is configured for is **static client on Vercel + 
 | `LOW_QUALITY` / `LOW_RESOLUTION` on every capture | PAD gates: below 120×120, or luminance variance < 20 | Improve lighting; face the camera directly |
 | `OUTSIDE_GEOFENCE` / `LOW_ACCURACY` | Geofence enabled and the fix is poor or far | Check `geofenceLat/Lng/Radius` in Settings; accuracy must be ≤ 100 m and the fix ≤ 30 s old |
 | `INVALID_QR_TOKEN` immediately | 12-second single-use TTL, or clustering split the store | Rescan. Disable cluster mode (Limitations #4) |
-| `423 ACCOUNT_LOCKED` | 5 failed password/2FA/reset attempts | Wait 15 minutes, or clear `lockedUntil` in the database |
+| `423 ACCOUNT_LOCKED` | 5 failed password/reset attempts | Wait 15 minutes, or clear `lockedUntil` in the database |
 | `403 FORBIDDEN` for a role that should pass | `Role.allowedActions` is missing the mapped action | Check the `Role` document; re-seed or edit under Settings → Roles |
 | Photos/documents vanish after a redeploy | Ephemeral container storage | See Limitations #7 — a durable store is required |
 | Multipart upload fails with a boundary error | A manual `Content-Type` was set on `FormData` | `apiClient.js` already strips it; don't re-add it |
