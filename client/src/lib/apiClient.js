@@ -80,8 +80,13 @@ const WAKE_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000, 10000, 10000, 10000, 10000
 
 function isServerWaking(error) {
   const status = error.response?.status;
-  if (status === 502 || status === 503) return true;
-  if (error.response) return false;
+  if (error.response) {
+    // Only Render's proxy answers a sleeping service, and its 502/503 is not
+    // our JSON envelope. A 503 that IS our envelope came from the running API
+    // itself (e.g. a failing dependency): it is awake, so retrying just holds
+    // the user on a spinner for a minute before showing the same error.
+    return (status === 502 || status === 503) && !error.response.data?.error;
+  }
   // Offline or deliberately cancelled: retrying won't help.
   if (error.code === 'ERR_CANCELED') return false;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;

@@ -141,6 +141,29 @@ describe('sleeping server: retried instead of surfaced', () => {
     }
   });
 
+  it('replays a proxy 503 (no API envelope) from a server that is still booting', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = onError({
+        config: { url: '/employees', method: 'get' },
+        response: { status: 503, data: '<html>Service Unavailable</html>', headers: {} },
+      });
+      await vi.runAllTimersAsync();
+      await expect(pending).resolves.toEqual({ data: {} });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces a 503 from the running API at once instead of retrying for a minute', async () => {
+    const err = await reject({
+      config: { url: '/settings', method: 'get' },
+      response: { status: 503, data: { error: { code: 'UNAVAILABLE', message: 'Service temporarily unavailable.' } }, headers: {} },
+    });
+    expect(err.status).toBe(503);
+    expect(err.code).toBe('UNAVAILABLE');
+  });
+
   it('does not replay a timed-out POST, which the server may have already processed', async () => {
     const err = await reject({ config: { url: '/employees', method: 'post' }, code: 'ECONNABORTED', message: 'timeout' });
     expect(err.code).toBe('TIMEOUT');
