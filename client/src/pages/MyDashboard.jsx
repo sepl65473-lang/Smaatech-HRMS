@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
@@ -14,6 +14,7 @@ import { ATTENDANCE_STATUS } from '../lib/attendanceStatus';
 import Modal from '../components/Modal';
 import { downloadPayslip } from '../lib/payslip';
 import { apiFetchBlob } from '../lib/apiClient';
+import { loadFaceModels } from '../lib/faceAuth';
 
 function AttendancePhotoPreview({ attendanceId, which }) {
   const [url, setUrl] = useState(null);
@@ -101,7 +102,9 @@ export default function MyDashboard() {
   const [faceModalOpen, setFaceModalOpen] = useState(false);
   const [faceAction, setFaceAction] = useState('in'); // in | out
   const [pendingRowId, setPendingRowId] = useState(null);
-  const [pendingLoc, setPendingLoc] = useState(null);
+  // The in-flight GPS lookup for the current check-in/out attempt, or null
+  // once it is finished, rejected or cancelled.
+  const locationRef = useRef(null);
   const [faceEnrollOpen, setFaceEnrollOpen] = useState(false);
   // A check-in/out the user started before enrolling their face; resumed
   // automatically once enrollment succeeds so they don't have to click again.
@@ -166,30 +169,30 @@ export default function MyDashboard() {
       setFaceEnrollOpen(true);
       return;
     }
-    setGpsLoading(true);
     setGpsStatus(null);
-    try {
-      let loc = null;
-      try {
-        loc = await resolveLocation();
-        setGpsStatus(loc);
-        if (settings.gpsCheckInEnabled && !loc.isInside) {
-          toast('error', `Location check failed: You're ${loc.distance.toFixed(0)}m from the office — outside the allowed ${settings.geofenceRadius ?? 25}m radius.`);
-          return;
-        }
-      } catch (err) {
-        if (settings.gpsCheckInEnabled) {
-          setGpsStatus({ error: err.message });
-          toast('error', err.message);
-          return;
-        }
-      }
-      setPendingLoc(loc);
-      setPendingRowId(rowId);
-      setFaceAction(action);
-      setFaceModalOpen(true);
-    } finally {
-      setGpsLoading(false);
+    setPendingRowId(rowId);
+    setFaceAction(action);
+    // GPS and the camera start together. Getting a location fix first and only
+    // then opening the camera made the user wait for both, one after the other.
+    setFaceModalOpen(true);
+    setGpsLoading(true);
+    const attempt = resolveLocation().then((loc) => ({ loc }), (err) => ({ error: err.message }));
+    locationRef.current = attempt;
+    const { loc, error } = await attempt;
+    if (locationRef.current !== attempt) return; // cancelled or superseded
+    setGpsLoading(false);
+    setGpsStatus(loc || { error });
+    if (!settings.gpsCheckInEnabled) return;
+    const rejection = error
+      || (!loc.isInside
+        ? `Location check failed: You're ${loc.distance.toFixed(0)}m from the office — outside the allowed ${settings.geofenceRadius ?? 25}m radius.`
+        : null);
+    if (rejection) {
+      // Stop the face scan straight away rather than after it finishes.
+      locationRef.current = null;
+      setFaceModalOpen(false);
+      setPendingRowId(null);
+      toast('error', rejection);
     }
   };
 
@@ -200,17 +203,24 @@ export default function MyDashboard() {
   // and matches it against the enrolled descriptor; this call doesn't know
   // yet whether it'll actually pass.
   const handleFaceVerified = async (photo) => {
-    setFaceModalOpen(false);
-    const locationData = { ...(pendingLoc || {}), photo };
+    const attempt = locationRef.current;
+    if (!attempt) return;
+    // The face scan usually finishes after GPS; if not, wait for the fix.
+    const { loc = null } = await attempt;
+    // A geofence rejection (already reported) or a cancel happened meanwhile.
+    if (locationRef.current !== attempt) return;
+    const locationData = { ...(loc || {}), photo };
+    // The modal stays open showing "verifying with the server" until the
+    // answer arrives, instead of closing to a screen where nothing happens.
     try {
       if (faceAction === 'in') {
         await checkIn(pendingRowId, locationData);
-        toast('success', pendingLoc
-          ? `Checked in — face + location verified (${pendingLoc.distance.toFixed(1)}m from office).`
+        toast('success', loc
+          ? `Checked in — face + location verified (${loc.distance.toFixed(1)}m from office).`
           : 'Checked in — face verified.');
       } else {
         await checkOut(pendingRowId, locationData);
-        toast('info', pendingLoc
+        toast('info', loc
           ? 'Checked out — face + location verified.'
           : 'Checked out — face verified.');
       }
@@ -218,8 +228,9 @@ export default function MyDashboard() {
       // The server already surfaced the rejection reason (e.g. outside the
       // geofence, or the face didn't match) via a toast — nothing more to do here.
     } finally {
+      locationRef.current = null;
+      setFaceModalOpen(false);
       setPendingRowId(null);
-      setPendingLoc(null);
     }
   };
 
@@ -240,9 +251,10 @@ export default function MyDashboard() {
   };
 
   const handleFaceModalClose = () => {
+    locationRef.current = null;
     setFaceModalOpen(false);
+    setGpsLoading(false);
     setPendingRowId(null);
-    setPendingLoc(null);
   };
 
   const handleSaveMyFace = async (photoBlob) => {
@@ -289,6 +301,16 @@ export default function MyDashboard() {
   // GET /attendance sorts by createdAt ascending, so [0] used to be the
   // OLDEST row, not today's — find it explicitly instead.
   const todayRow = myAttendance.find((a) => a.date === todayISO());
+  const punchPending = Boolean(todayRow && !todayRow.checkOut);
+
+  // Download the face models in the background while a check-in/out is still
+  // due, so the camera is ready the moment the button is pressed rather than
+  // waiting on a multi-megabyte download first.
+  useEffect(() => {
+    if (!punchPending) return undefined;
+    const timer = setTimeout(() => { loadFaceModels().catch(() => {}); }, 1500);
+    return () => clearTimeout(timer);
+  }, [punchPending]);
   const recentAttendance = myAttendance.slice(0, 7);
 
   const myPayroll = useMemo(

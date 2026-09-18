@@ -40,6 +40,11 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
   const [hasStream, setHasStream] = useState(false);
   const [awaitingBlink, setAwaitingBlink] = useState(false);
   const [sawFace, setSawFace] = useState(false);
+  // The parent now keeps this modal open while the server verifies the photo,
+  // and re-renders meanwhile. Reading the callback through a ref keeps a new
+  // function identity from restarting the camera effect mid-verification.
+  const onVerifiedRef = useRef(onVerified);
+  useEffect(() => { onVerifiedRef.current = onVerified; }, [onVerified]);
 
   const stopResources = useCallback(() => {
     clearTimeout(timerRef.current);
@@ -72,7 +77,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
     stopResources();
     if (photo) {
       setStatus('verifying');
-      onVerified(photo);
+      onVerifiedRef.current(photo);
     } else {
       setError('Could not capture frame from camera.');
       setStatus('error');
@@ -115,7 +120,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
               if (cancelled) return;
               stopResources();
               setStatus('verifying');
-              onVerified(photo);
+              onVerifiedRef.current(photo);
               return;
             }
           }
@@ -158,7 +163,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
       cancelled = true;
       stopResources();
     };
-  }, [open, retryToken, onVerified, stopResources, captureFrame]);
+  }, [open, retryToken, stopResources, captureFrame]);
 
   const tryAgain = () => setRetryToken((t) => t + 1);
 
