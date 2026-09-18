@@ -130,8 +130,10 @@ export default function Dashboard() {
   const {
     employees, attendance, pendingLeaves, celebrations, jobs,
     leaves, holidays, recruitment, auditLog, payroll,
-    approveLeave, declineLeave, sendWish, toast, audit, getAttendanceSummary,
+    approveLeave, declineLeave, sendWish, toast, audit, getAttendanceSummary, currentUser,
   } = useHRMS();
+  // The HR Director is the workspace admin; everyone else here is HR staff.
+  const dashboardTitle = currentUser?.role === 'HR Director' ? 'Admin Dashboard' : 'HR Dashboard';
   const navigate = useNavigate();
   const [chartRange, setChartRange] = useState('Month');
   const [customRange, setCustomRange] = useState(null); // { from, to } | null — overrides chartRange when set
@@ -267,9 +269,9 @@ export default function Dashboard() {
             <IconDashboard width="13" height="13" />
             <span>Dashboard</span>
             <IconChevronRight width="12" height="12" />
-            <span className="breadcrumb-current">HR Dashboard</span>
+            <span className="breadcrumb-current">{dashboardTitle}</span>
           </div>
-          <h1 className="page-header-title">HR Dashboard</h1>
+          <h1 className="page-header-title">{dashboardTitle}</h1>
         </div>
         <div className="page-header-actions">
           <button className="btn btn-ghost dropdown-btn" onClick={handleExport}>
