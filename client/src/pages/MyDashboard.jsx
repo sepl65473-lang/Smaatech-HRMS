@@ -103,6 +103,9 @@ export default function MyDashboard() {
   const [pendingRowId, setPendingRowId] = useState(null);
   const [pendingLoc, setPendingLoc] = useState(null);
   const [faceEnrollOpen, setFaceEnrollOpen] = useState(false);
+  // A check-in/out the user started before enrolling their face; resumed
+  // automatically once enrollment succeeds so they don't have to click again.
+  const [afterEnroll, setAfterEnroll] = useState(null);
   const [selfieModalRow, setSelfieModalRow] = useState(null);
 
   // Haversine distance calculation in meters
@@ -153,9 +156,14 @@ export default function MyDashboard() {
     [employees, currentUser.empId],
   );
 
-  const startAttendance = async (rowId, action) => {
-    if (!faceEnrolled) {
-      toast('error', `Enroll your face below before you can check ${action === 'in' ? 'in' : 'out'}.`);
+  // `enrolled` lets the post-enrollment resume skip the check: the context's
+  // faceEnrolled flag is only visible on the next render.
+  const startAttendance = async (rowId, action, enrolled = faceEnrolled) => {
+    if (!enrolled) {
+      // Face check-in needs a reference face first. Enroll now, then carry on
+      // with this same check-in; the server still matches every selfie.
+      setAfterEnroll({ rowId, action });
+      setFaceEnrollOpen(true);
       return;
     }
     setGpsLoading(true);
@@ -243,8 +251,19 @@ export default function MyDashboard() {
       setFaceEnrollOpen(false);
       return;
     }
+    // Throws (and toasts) on failure, leaving the modal open to retry.
     await enrollFace(photoBlob);
     setFaceEnrollOpen(false);
+    if (afterEnroll) {
+      const { rowId, action } = afterEnroll;
+      setAfterEnroll(null);
+      startAttendance(rowId, action, true);
+    }
+  };
+
+  const handleFaceEnrollClose = () => {
+    setFaceEnrollOpen(false);
+    setAfterEnroll(null);
   };
 
   const myLeaves = useMemo(
@@ -451,13 +470,15 @@ export default function MyDashboard() {
                 {/* Check In Action Button */}
                 {!todayRow.checkIn && (
                   <>
-                    {faceEnrolled ? (
-                      <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckIn(todayRow.id)}>
-                        {gpsLoading ? 'Checking location…' : 'Check In (Face + GPS)'}
-                      </button>
-                    ) : (
-                      <span className="muted-text">Enroll your face above for Face + GPS check-in</span>
-                    )}
+                    <button
+                      type="button"
+                      className="mini-btn approve"
+                      disabled={gpsLoading}
+                      title={faceEnrolled ? undefined : 'You will be asked to enroll your face first'}
+                      onClick={() => handleCheckIn(todayRow.id)}
+                    >
+                      {gpsLoading ? 'Checking location…' : 'Check In (Face + GPS)'}
+                    </button>
                     <button type="button" className="mini-btn" onClick={() => setQrModalOpen(true)}>
                       Scan office QR
                     </button>
@@ -467,13 +488,15 @@ export default function MyDashboard() {
                 {/* Check Out Action Button */}
                 {todayRow.checkIn && !todayRow.checkOut && (
                   <>
-                    {faceEnrolled ? (
-                      <button type="button" className="mini-btn approve" disabled={gpsLoading} onClick={() => handleCheckOut(todayRow.id)}>
-                        {gpsLoading ? 'Checking location…' : 'Check Out (Face + GPS)'}
-                      </button>
-                    ) : (
-                      <span className="muted-text">Enroll your face above for Face + GPS check-out</span>
-                    )}
+                    <button
+                      type="button"
+                      className="mini-btn approve"
+                      disabled={gpsLoading}
+                      title={faceEnrolled ? undefined : 'You will be asked to enroll your face first'}
+                      onClick={() => handleCheckOut(todayRow.id)}
+                    >
+                      {gpsLoading ? 'Checking location…' : 'Check Out (Face + GPS)'}
+                    </button>
                     <button type="button" className="mini-btn" onClick={() => setQrModalOpen(true)}>
                       Scan office QR
                     </button>
@@ -686,7 +709,7 @@ export default function MyDashboard() {
       <FaceEnrollModal
         open={faceEnrollOpen}
         user={me}
-        onClose={() => setFaceEnrollOpen(false)}
+        onClose={handleFaceEnrollClose}
         onSave={handleSaveMyFace}
       />
       <QrCheckInModal
