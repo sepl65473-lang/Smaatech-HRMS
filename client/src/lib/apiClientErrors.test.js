@@ -127,3 +127,22 @@ describe('no response: transport failures are told apart', () => {
     expect(err.code).toBe('CANCELLED');
   });
 });
+
+describe('sleeping server: retried instead of surfaced', () => {
+  it('replays a request that could not reach a waking server', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = onError({ config: { url: '/employees', method: 'post' }, code: 'ERR_NETWORK', message: 'Network Error' });
+      await vi.runAllTimersAsync();
+      // The mocked instance resolves, so the replay's result is returned.
+      await expect(pending).resolves.toEqual({ data: {} });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not replay a timed-out POST, which the server may have already processed', async () => {
+    const err = await reject({ config: { url: '/employees', method: 'post' }, code: 'ECONNABORTED', message: 'timeout' });
+    expect(err.code).toBe('TIMEOUT');
+  });
+});

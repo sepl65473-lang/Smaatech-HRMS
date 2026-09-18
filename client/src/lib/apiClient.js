@@ -71,11 +71,54 @@ async function refreshAccessToken() {
   return refreshingPromise;
 }
 
+// The API runs on Render's free tier, which puts the service to sleep after
+// 15 idle minutes. The first request after that fails (connection refused, or
+// a 502/503 from Render's proxy) for the ~30-60s the server takes to boot.
+// Instead of showing the user "the server may be starting up, try again",
+// wait and retry for them until it is awake.
+const WAKE_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000, 10000, 10000, 10000, 10000];
+
+function isServerWaking(error) {
+  const status = error.response?.status;
+  if (status === 502 || status === 503) return true;
+  if (error.response) return false;
+  // Offline or deliberately cancelled: retrying won't help.
+  if (error.code === 'ERR_CANCELED') return false;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  // A timeout may mean the server DID receive the request and is still working
+  // on it, so only retry it where repeating is harmless.
+  if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+    const method = (error.config?.method || 'get').toLowerCase();
+    return method === 'get' || method === 'head';
+  }
+  return true;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Fire-and-forget request that starts waking the server as soon as the app
+// loads, so by the time the user clicks something it is usually already up.
+export function warmUpServer() {
+  axiosInstance.get('/health', { skipAuth: true, skipWakeRetry: true }).catch(() => {});
+}
+
 // Response Interceptor: handle 401 & retry
 axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+
+    // Real axios requests always carry a method; a bare config (or none) is
+    // not something we can safely replay.
+    if (originalRequest?.method && !originalRequest.skipWakeRetry && isServerWaking(error)) {
+      const attempt = originalRequest._wakeAttempt || 0;
+      if (attempt < WAKE_RETRY_DELAYS_MS.length) {
+        originalRequest._wakeAttempt = attempt + 1;
+        await sleep(WAKE_RETRY_DELAYS_MS[attempt]);
+        return axiosInstance(originalRequest);
+      }
+    }
+
     const isAuthRoute = originalRequest.url && originalRequest.url.startsWith('/auth/');
     
     if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.skipAuth && !isAuthRoute) {
