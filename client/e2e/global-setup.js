@@ -45,12 +45,8 @@ async function seed(uri) {
   const { DEFAULT_LEAVE_TYPES } = await import(pathToFileURL(path.join(SERVER_DIR, 'src/models/LeaveType.js')).href);
   const { todayISO } = await import(pathToFileURL(path.join(SERVER_DIR, 'src/lib/dateUtils.js')).href);
 
-  // 2FA stays ON for this tenant — the E2E path proves the isolated bypass
-  // works WITH 2FA configured, rather than proving anything about a tenant
-  // that has it switched off.
   await Settings.create({
     _id: COMPANY,
-    twoFactor: true,
     gpsCheckInEnabled: false,
     livenessRequired: false,
     workWeek: '5-day',

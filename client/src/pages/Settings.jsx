@@ -298,8 +298,6 @@ export default function Settings() {
               on={settings.notifyPayroll} onToggle={() => toggleSetting('notifyPayroll')} />
             <Row label="Birthday nudges" sub="Daily celebration digest"
               on={settings.notifyBirthday} onToggle={() => toggleSetting('notifyBirthday')} />
-            <Row label="Two-factor authentication" sub="Extra security on sign-in"
-              on={settings.twoFactor} onToggle={() => toggleSetting('twoFactor')} />
           </div>
         </div>
       </div>

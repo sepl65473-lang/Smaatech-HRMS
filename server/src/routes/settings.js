@@ -10,7 +10,7 @@ const router = Router();
 const SERVER_OWNED_KEYS = [
   'gpsCheckInEnabled', 'livenessRequired', 'geofenceLat', 'geofenceLng', 'geofenceRadius',
   'shifts', 'roster', 'employeeShifts', 'approvalWorkflows',
-  'orgName', 'workWeek', 'notifyLeave', 'notifyPayroll', 'notifyBirthday', 'twoFactor',
+  'orgName', 'workWeek', 'notifyLeave', 'notifyPayroll', 'notifyBirthday',
   'wishesSent', 'totalLeaveDays', 'leaveYearStartMonth', 'departments', 'designations',
   'gatewayTwilioSid', 'gatewayTwilioToken', 'gatewayTwilioFrom', 'gatewaySendgridKey',
   'gatewaySmtpHost', 'gatewaySmtpUser', 'gatewaySmtpPass',

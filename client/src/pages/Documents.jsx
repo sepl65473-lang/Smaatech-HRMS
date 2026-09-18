@@ -108,7 +108,7 @@ export default function Documents() {
     const policyDocs = [
       { id: 'pol_leave', folder: 'policies', title: 'Leave policy', owner: orgOwner, type: 'PDF', visibility: 'all', meta: `${leaves.length} requests tracked`, expiryDate: '' },
       { id: 'pol_payroll', folder: 'policies', title: 'Payroll handbook', owner: orgOwner, type: 'PDF', visibility: 'all', meta: `${payroll.length} salary slips linked`, expiryDate: '' },
-      { id: 'pol_security', folder: 'policies', title: 'Security checklist', owner: orgOwner, type: 'DOC', visibility: 'all', meta: settings.twoFactor ? '2FA enabled' : '2FA optional', expiryDate: '' },
+      { id: 'pol_security', folder: 'policies', title: 'Security checklist', owner: orgOwner, type: 'DOC', visibility: 'all', meta: 'Password sign-in with account lockout', expiryDate: '' },
     ];
 
     const payslips = payroll.map((p) => ({

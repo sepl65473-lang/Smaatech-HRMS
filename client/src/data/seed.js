@@ -17,7 +17,6 @@ export function buildSeed(employees) {
     notifyLeave: true,
     notifyPayroll: true,
     notifyBirthday: false,
-    twoFactor: true,
     wishesSent: 0,
     totalLeaveDays: 24,
     departments: [...DEPARTMENTS],

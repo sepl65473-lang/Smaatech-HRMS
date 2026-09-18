@@ -205,7 +205,6 @@ const loginPaths = ['/api/v1/auth/login', '/api/v1/auth/face-login'];
 for (const path of loginPaths) {
   app.use(path, loginIpLimiter, loginBurstLimiter, loginAccountLimiter);
 }
-app.use('/api/v1/auth/verify-2fa', loginIpLimiter, loginBurstLimiter, loginAccountLimiter);
 app.use('/api/v1/auth/forgot-password', loginIpLimiter, loginAccountLimiter);
 app.use('/api/v1/auth/reset-password', loginIpLimiter, loginAccountLimiter);
 

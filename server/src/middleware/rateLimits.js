@@ -129,7 +129,6 @@ export function identityKey(req) {
 export const SELF_LIMITED_PATHS = [
   '/api/v1/auth/login',
   '/api/v1/auth/face-login',
-  '/api/v1/auth/verify-2fa',
   '/api/v1/auth/forgot-password',
   '/api/v1/auth/reset-password',
 ];

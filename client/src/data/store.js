@@ -307,10 +307,7 @@ export const geofenceApi = {
 let bootstrapPromise = null;
 
 export const authApi = {
-  // Returns either { accessToken, user } (session issued immediately) or
-  // { requiresTwoFactor: true, email } (server emailed a real OTP and is
-  // waiting on verifyTwoFactor before any session exists) — the server
-  // decides which, based on that company's Settings > Two-factor toggle.
+  // Returns { accessToken, user }: a successful sign-in issues the session.
   login: (email, password) => apiFetch('/auth/login', { method: 'POST', body: { email, password }, skipAuth: true }),
   // Sends the captured photo alongside the matched email so the server can
   // re-verify the face itself (see server/src/routes/auth.js) — the client's
@@ -321,7 +318,6 @@ export const authApi = {
     form.append('photo', photoBlob, 'face-login.jpg');
     return apiFetch('/auth/face-login', { method: 'POST', body: form, skipAuth: true });
   },
-  verifyTwoFactor: (email, otp) => apiFetch('/auth/verify-2fa', { method: 'POST', body: { email, otp }, skipAuth: true }),
   async me() {
     try {
       const { user } = await apiFetch('/auth/me');
@@ -530,7 +526,6 @@ export async function resetDB() {
     notifyLeave: true,
     notifyPayroll: true,
     notifyBirthday: false,
-    twoFactor: true,
     wishesSent: 0,
     totalLeaveDays: 24,
     departments: ['Engineering', 'Design', 'Sales', 'Marketing', 'HR'],

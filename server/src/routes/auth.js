@@ -10,13 +10,11 @@ import {
 } from '../lib/tokens.js';
 import { requireAuth, invalidateAccountStateCache } from '../middleware/auth.js';
 import { validate } from '../middleware/validation.js';
-import { loginSchema, forgotPasswordSchema, resetPasswordSchema, verifyTwoFactorSchema, changePasswordSchema } from '../validations/authValidation.js';
+import { loginSchema, forgotPasswordSchema, resetPasswordSchema, changePasswordSchema } from '../validations/authValidation.js';
 import { sendOtpEmail } from '../lib/mailer.js';
-import { getSettingsDoc } from './settings.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { extractDescriptor, matchDescriptor, faceFailureMessage } from '../lib/faceEngine.js';
 import { imageUploadMiddleware } from '../lib/photoStorage.js';
-import { hasValidE2EHeader } from '../lib/e2eGuard.js';
 
 const router = Router();
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -62,8 +60,7 @@ function loginActor(user) {
   return { id: String(user._id), name: user.name, role: user.role };
 }
 
-// Marks the moment a human actually completes a sign-in (password or face,
-// after any 2FA step) — deliberately never called from /refresh, which is a
+// Marks the moment a human actually completes a sign-in (password or face) — deliberately never called from /refresh, which is a
 // silent token renewal, not a fresh login.
 async function recordLogin(user, req) {
   user.lastLoginAt = new Date();
@@ -76,40 +73,6 @@ async function recordLogin(user, req) {
       await emp.save();
     }
   }
-}
-
-// Returns true if a 2FA challenge was sent and the caller must stop (a
-// response was already written); false if the caller should proceed to
-// issue a real session immediately. Real second factor: the code is
-// generated and hashed server-side and only ever leaves via email — unlike
-// the old client-simulated version, nothing usable is returned here.
-async function maybeStartTwoFactor(user, res, req = null) {
-  const settingsDoc = await getSettingsDoc(user.company);
-  if (!settingsDoc.twoFactor) return false;
-
-  // Isolated browser-E2E mode only. Gated on NODE_ENV !== 'production', an
-  // explicit E2E_TEST_MODE flag AND a 32+ char shared secret presented on the
-  // request — see lib/e2eGuard.js. Production 2FA is untouched: on Render
-  // NODE_ENV is 'production', which makes this unreachable.
-  if (req && hasValidE2EHeader(req)) {
-    console.warn('[e2e] 2FA step skipped for %s under isolated E2E test mode', user.email);
-    return false;
-  }
-
-  const otp = String(Math.floor(100000 + Math.random() * 900000));
-  user.loginOtpHash = await hashPassword(otp, 10);
-  user.loginOtpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
-  await user.save();
-
-  try {
-    await sendOtpEmail(user.email, otp, 'sign-in verification');
-  } catch (err) {
-    console.error('[auth] failed to send 2FA OTP email:', err.message);
-    res.status(502).json({ error: { code: 'EMAIL_FAILED', message: 'Could not send the verification email. Try again shortly.' } });
-    return true;
-  }
-  res.json({ requiresTwoFactor: true, email: user.email });
-  return true;
 }
 
 /**
@@ -133,7 +96,7 @@ async function maybeStartTwoFactor(user, res, req = null) {
  *                 type: string
  *     responses:
  *       200:
- *         description: Login successful or 2FA required
+ *         description: Login successful; returns the access token and user
  *       401:
  *         description: Invalid credentials
  *       423:
@@ -177,7 +140,6 @@ router.post('/login', validate(loginSchema), async (req, res) => {
     await user.save();
   }
   await sanitizeEmployeeLink(user);
-  if (await maybeStartTwoFactor(user, res, req)) return;
   await recordLogin(user, req);
   await logAudit(req, {
     action: 'User signed in', subject: user.email,
@@ -230,56 +192,9 @@ router.post('/face-login', faceLoginUpload, async (req, res) => {
   }
 
   await sanitizeEmployeeLink(user);
-  if (await maybeStartTwoFactor(user, res, req)) return;
   await recordLogin(user, req);
   await logAudit(req, {
     action: 'Face sign-in', subject: user.email, details: `Match confidence ${Math.round(match.confidence)}`,
-    actor: loginActor(user), company: user.company,
-  });
-  const accessToken = await issueSession(res, user, req);
-  res.json({ accessToken, user });
-});
-
-// Completes the 2FA handshake started by /login or /face-login. A wrong
-// code counts toward the same failedLoginAttempts/lockedUntil lockout as a
-// wrong password — closes the gap where an IP-rotating attacker could
-// otherwise keep guessing the 6-digit code past what loginLimiter alone stops.
-router.post('/verify-2fa', validate(verifyTwoFactorSchema), async (req, res) => {
-  const { email, otp } = req.body || {};
-  const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
-  if (!user || !user.loginOtpHash || !user.loginOtpExpiresAt || user.loginOtpExpiresAt < new Date()) {
-    return res.status(400).json({ error: { code: 'INVALID_OTP', message: 'Code expired or not requested — sign in again to get a new code.' } });
-  }
-  if (user.active === false) {
-    return res.status(403).json({ error: { code: 'ACCOUNT_DISABLED', message: 'This account has been deactivated.' } });
-  }
-  const otpValid = await comparePassword(String(otp || ''), user.loginOtpHash);
-  if (!otpValid) {
-    user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
-    if (user.failedLoginAttempts >= LOCK_THRESHOLD) {
-      user.lockedUntil = new Date(Date.now() + LOCK_DURATION_MS);
-      user.failedLoginAttempts = 0;
-    }
-    await user.save();
-    await logAudit(req, {
-      action: 'Failed 2FA attempt', subject: user.email,
-      actor: loginActor(user), company: user.company,
-    });
-    return res.status(400).json({ error: { code: 'INVALID_OTP', message: 'Incorrect verification code.' } });
-  }
-
-  user.loginOtpHash = null;
-  user.loginOtpExpiresAt = null;
-  if (user.failedLoginAttempts || user.lockedUntil) {
-    user.failedLoginAttempts = 0;
-    user.lockedUntil = null;
-  }
-  user.lastLoginAt = new Date();
-  user.lastLoginIp = req.ip;
-  await user.save();
-  await sanitizeEmployeeLink(user);
-  await logAudit(req, {
-    action: 'User signed in', subject: user.email,
     actor: loginActor(user), company: user.company,
   });
   const accessToken = await issueSession(res, user, req);
@@ -469,9 +384,9 @@ router.post('/forgot-password', validate(forgotPasswordSchema), async (req, res)
 });
 
 // A wrong code counts toward the same failedLoginAttempts/lockedUntil
-// lockout as a wrong password/2FA guess — closes the gap where an
+// lockout as a wrong password guess — closes the gap where an
 // IP-rotating attacker could otherwise keep guessing the 6-digit code past
-// what loginLimiter alone stops (mirrors /verify-2fa).
+// what loginLimiter alone stops.
 router.post('/reset-password', validate(resetPasswordSchema), async (req, res) => {
   const { email, otp, newPassword } = req.body || {};
   const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });

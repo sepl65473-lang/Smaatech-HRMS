@@ -23,9 +23,7 @@ export async function login(page, who) {
   await page.locator('.login-field', { hasText: 'Password' }).locator('input').fill(PASSWORD);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
-  // The isolated E2E mode skips the OTP step, so a successful sign-in lands
-  // straight on the app shell. If 2FA had NOT been bypassed we would still be
-  // on the login screen with a code prompt — which is itself a useful signal.
+  // A successful password sign-in lands straight on the app shell.
   await expect(page.locator('input[type="email"]')).toBeHidden({ timeout: 20_000 });
   return user;
 }

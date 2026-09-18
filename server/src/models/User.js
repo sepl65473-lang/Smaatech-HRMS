@@ -15,16 +15,15 @@ const userSchema = new mongoose.Schema({
   // the real address — replaces the old client-simulated toast.
   otpHash: { type: String, default: null },
   otpExpiresAt: { type: Date, default: null },
-  // Login 2FA code — deliberately separate from otpHash (password reset):
-  // a leaked/shoulder-surfed login code must never double as a
-  // password-reset credential.
+  // LEGACY: held the emailed login 2FA code, which has been removed. Nothing
+  // writes these any more; kept so existing documents stay valid, and still
+  // stripped from JSON below so a stale hash can never be returned.
   loginOtpHash: { type: String, default: null },
   loginOtpExpiresAt: { type: Date, default: null },
   // Per-account brute-force lockout — reset to 0/null on any successful login.
   failedLoginAttempts: { type: Number, default: 0 },
   lockedUntil: { type: Date, default: null },
-  // Set only on a genuine human-completed login (password or face, after any
-  // 2FA step) — never on a silent /auth/refresh token renewal.
+  // Set only on a genuine human-completed login (password or face) — never on a silent /auth/refresh token renewal.
   lastLoginAt: { type: Date, default: null },
   lastLoginIp: { type: String, default: null },
 

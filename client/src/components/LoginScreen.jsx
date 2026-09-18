@@ -5,7 +5,7 @@ import ForgotPasswordModal from './ForgotPasswordModal';
 
 export default function LoginScreen() {
   const {
-    login, loginWithFace, verifyTwoFactor, finishLogin, forgotPassword: requestPasswordResetOtp,
+    login, finishLogin, forgotPassword: requestPasswordResetOtp,
     resetPassword: resetPasswordOnServer, settings, toast,
   } = useHRMS();
   const profiles = settings.loginProfiles?.length ? settings.loginProfiles : DEFAULT_LOGIN_PROFILES;
@@ -15,66 +15,16 @@ export default function LoginScreen() {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Two-Factor Authentication state. The server decides whether 2FA is
-  // required (per-company Settings.twoFactor) and, if so, emails a real
-  // code and withholds any session until /verify-2fa confirms it — no
-  // token exists client-side until that succeeds, unlike the old flow.
-  const [pendingEmail, setPendingEmail] = useState('');
-  const [authMethod, setAuthMethod] = useState('password'); // 'password' | 'face', for Resend
-  const [otpMode, setOtpMode] = useState(false);
-  const [otpCode, setOtpCode] = useState('');
-  const [otpError, setOtpError] = useState('');
-
-  const proceedAfterAuth = async (result) => {
-    if (result.requiresTwoFactor) {
-      setPendingEmail(result.email);
-      setOtpCode('');
-      setOtpError('');
-      setOtpMode(true);
-      toast('info', `We've emailed a 6-digit verification code to <strong>${result.email}</strong>.`);
-    } else {
-      await finishLogin(result.accessToken, result.user);
-    }
-  };
-
+  // Password sign-in is the whole flow: the server either rejects the
+  // credentials or issues the session in the same response. (There used to be
+  // an emailed 2FA code step here; it has been removed.)
   const submit = async () => {
     try {
-      setAuthMethod('password');
-      const result = await login(email.trim(), password);
+      const { accessToken, user } = await login(email.trim(), password);
       setError('');
-      await proceedAfterAuth(result);
-    } catch (err) {
-      setError(err.message || 'Invalid email or password.');
-    }
-  };
-
-  const verifyOtp = async () => {
-    try {
-      const { accessToken, user } = await verifyTwoFactor(pendingEmail, otpCode.trim());
-      setOtpMode(false);
-      setPendingEmail('');
-      setOtpCode('');
       await finishLogin(accessToken, user);
     } catch (err) {
-      setOtpError(err.message || 'Incorrect or expired code.');
-    }
-  };
-
-  const resendCode = async () => {
-    try {
-      const result = authMethod === 'face' ? await loginWithFace(pendingEmail) : await login(email.trim(), password);
-      if (result.requiresTwoFactor) {
-        setPendingEmail(result.email);
-        setOtpCode('');
-        setOtpError('');
-        toast('info', `New code sent to <strong>${result.email}</strong>.`);
-      } else {
-        // 2FA got turned off server-side mid-flow — just finish signing in.
-        setOtpMode(false);
-        await finishLogin(result.accessToken, result.user);
-      }
-    } catch (err) {
-      setOtpError(err.message || 'Could not resend the code.');
+      setError(err.message || 'Invalid email or password.');
     }
   };
 
@@ -156,67 +106,6 @@ export default function LoginScreen() {
 
       {/* Right side - Login form card */}
       <div className="login-right">
-        {otpMode ? (
-          <div className="login-card">
-            {/* 2FA Shield badge */}
-            <div className="login-secure-badge" style={{ backgroundColor: 'rgba(59,125,221,0.1)', color: '#3b7ddd' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-              </svg>
-              <span>Security checkpoint</span>
-            </div>
-
-            {/* Title */}
-            <h1 className="login-title">Two-Factor Authentication</h1>
-            <p className="login-description">
-              We've emailed a 6-digit verification code to {pendingEmail || 'your inbox'}.<br />
-              Enter the code below to complete sign in.
-            </p>
-
-            {/* OTP Input field */}
-            <div className="login-field">
-              <label className="login-label">Verification Code</label>
-              <div className="login-input-wrap">
-                <input
-                  className="login-input mono"
-                  type="text"
-                  maxLength="6"
-                  value={otpCode}
-                  onChange={(e) => { setOtpCode(e.target.value.replace(/[^0-9]/g, '')); setOtpError(''); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') verifyOtp(); }}
-                  placeholder="000000"
-                  style={{ textAlign: 'center', letterSpacing: '4px', fontSize: '20px' }}
-                  autoFocus
-                />
-              </div>
-              {otpError && <span className="login-error" style={{ textAlign: 'center', display: 'block', marginTop: 8 }}>{otpError}</span>}
-            </div>
-
-            {/* Resend and back links */}
-            <div className="login-forgot-row" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginTop: 8 }}>
-              <button
-                type="button"
-                className="login-forgot-btn"
-                onClick={resendCode}
-              >
-                Resend Code
-              </button>
-              <button
-                type="button"
-                className="login-forgot-btn"
-                onClick={() => { setOtpMode(false); setPendingEmail(''); setOtpCode(''); setOtpError(''); }}
-              >
-                Back to Login
-              </button>
-            </div>
-
-            {/* Verify button */}
-            <button type="button" className="login-submit-btn" onClick={verifyOtp} style={{ marginTop: 24 }}>
-              Verify & Sign in
-            </button>
-          </div>
-        ) : (
           <div className="login-card">
             {/* Secure access badge */}
             <div className="login-secure-badge">
@@ -309,7 +198,6 @@ export default function LoginScreen() {
             </button>
 
           </div>
-        )}
       </div>
 
       <ForgotPasswordModal

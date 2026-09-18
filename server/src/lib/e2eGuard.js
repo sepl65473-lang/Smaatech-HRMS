@@ -3,11 +3,9 @@ import logger from './logger.js';
 /**
  * Isolated end-to-end test mode.
  *
- * Browser E2E has to get past two things that exist for good reasons and must
- * NOT be weakened in production:
- *
- *   1. login 2FA — a real email OTP nobody can read from a test runner;
- *   2. face verification — a real camera and a real enrolled face.
+ * Browser E2E has to get past face verification — a real camera and a real
+ * enrolled face — which exists for good reasons and must NOT be weakened in
+ * production.
  *
  * The answer is an isolated mode, not a weakened production path. It is
  * gated by THREE independent conditions that cannot all hold on a real
@@ -50,6 +48,6 @@ export function hasValidE2EHeader(req) {
 
 export function warnIfE2EEnabled() {
   if (process.env.E2E_TEST_MODE === 'enabled' && process.env.NODE_ENV !== 'production') {
-    logger.warn('[e2e] E2E TEST MODE IS ON — 2FA and face capture have test-only paths. Never enable this on a real deployment.');
+    logger.warn('[e2e] E2E TEST MODE IS ON — face capture has a test-only path. Never enable this on a real deployment.');
   }
 }

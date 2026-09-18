@@ -45,7 +45,7 @@ export function runStartupChecks({ env = process.env, strict = env.NODE_ENV === 
 
   // E2E test mode must be impossible on a real deployment.
   if (strict && env.E2E_TEST_MODE === 'enabled') {
-    errors.push('E2E_TEST_MODE=enabled in production. That mode bypasses the 2FA step and accepts a test face stand-in — it must never be set on a real deployment.');
+    errors.push('E2E_TEST_MODE=enabled in production. That mode accepts a test face stand-in — it must never be set on a real deployment.');
   }
 
   if (env.JWT_ACCESS_SECRET && env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {
@@ -59,8 +59,8 @@ export function runStartupChecks({ env = process.env, strict = env.NODE_ENV === 
   }
 
   if (strict && !env.BREVO_API_KEY) {
-    // Not fatal, but password reset and login 2FA both depend on it.
-    warnings.push('BREVO_API_KEY is not set — password-reset and 2FA emails will not be delivered.');
+    // Not fatal, but password-reset and welcome emails depend on it.
+    warnings.push('BREVO_API_KEY is not set — password-reset and welcome emails will not be delivered.');
   }
 
   if (strict && env.ENABLE_CLUSTER === 'true' && env.RUN_SCHEDULERS !== 'false' && !env.SCHEDULER_WORKER_ID) {

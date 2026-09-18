@@ -7,9 +7,9 @@ process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'test-access-se
 process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'test-refresh-secret';
 
 // Real email delivery is out of scope for an automated test — mock the one
-// function that would otherwise open a real SMTP connection, so the 2FA
-// flow can be exercised end-to-end (including reading the code it "sends")
-// without any network dependency.
+// function that would otherwise open a real SMTP connection, so the
+// password-reset flow can be exercised end-to-end (including reading the
+// code it "sends") without any network dependency.
 vi.mock('../lib/mailer.js', () => ({
   sendOtpEmail: vi.fn(async () => {}),
 }));
@@ -65,9 +65,8 @@ describe('POST /auth/login', () => {
     expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
   });
 
-  it('issues a real session (token + cookie) when 2FA is off', async () => {
+  it('issues a real session (token + cookie) on a correct password', async () => {
     await seedUser();
-    await Settings.create({ _id: COMPANY, twoFactor: false });
     const res = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
     expect(res.status).toBe(200);
     expect(res.body.accessToken).toBeTruthy();
@@ -110,27 +109,76 @@ describe('POST /auth/login', () => {
     expect(res.body.error.code).toBe('ACCOUNT_LOCKED');
   });
 
-  it('withholds the session and emails a code when 2FA is on, then issues a session on correct verification', async () => {
+  it('never asks for a second factor, even where a legacy twoFactor: true is still stored', async () => {
     await seedUser();
-    await Settings.create({ _id: COMPANY, twoFactor: true });
+    // Written past the schema on purpose: production Settings documents still
+    // carry the old flag, and it must no longer change anything.
+    await Settings.collection.insertOne({ _id: COMPANY, twoFactor: true });
 
     const loginRes = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
     expect(loginRes.status).toBe(200);
-    expect(loginRes.body.requiresTwoFactor).toBe(true);
-    expect(loginRes.body.accessToken).toBeUndefined();
-    expect(loginRes.headers['set-cookie']).toBeUndefined();
-    expect(sendOtpEmail).toHaveBeenCalledTimes(1);
+    expect(loginRes.body.requiresTwoFactor).toBeUndefined();
+    expect(loginRes.body.accessToken).toBeTruthy();
+    expect(loginRes.headers['set-cookie']?.[0]).toMatch(/sepl_refresh=/);
+    expect(sendOtpEmail).not.toHaveBeenCalled();
 
-    const [, sentOtp] = sendOtpEmail.mock.calls[0];
+    const verifyRes = await request(app).post('/api/v1/auth/verify-2fa').send({ email: EMAIL, otp: '123456' });
+    expect(verifyRes.status).toBe(404);
+  });
+});
 
-    const wrongOtpRes = await request(app).post('/api/v1/auth/verify-2fa').send({ email: EMAIL, otp: '000000' });
-    expect(wrongOtpRes.status).toBe(400);
-    expect(wrongOtpRes.body.error.code).toBe('INVALID_OTP');
+describe('session lifecycle after a password sign-in', () => {
+  const cookieOf = (res) => res.headers['set-cookie'].find((c) => c.startsWith('sepl_refresh=')).split(';')[0];
 
-    const verifyRes = await request(app).post('/api/v1/auth/verify-2fa').send({ email: EMAIL, otp: sentOtp });
-    expect(verifyRes.status).toBe(200);
-    expect(verifyRes.body.accessToken).toBeTruthy();
-    expect(verifyRes.headers['set-cookie']?.[0]).toMatch(/sepl_refresh=/);
+  it('restores the session on refresh, serves protected routes, and stops after logout', async () => {
+    await seedUser();
+    const loginRes = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
+    const firstCookie = cookieOf(loginRes);
+
+    // What a browser reload does: no access token in memory, only the cookie.
+    const refreshRes = await request(app).post('/api/v1/auth/refresh').set('Cookie', firstCookie);
+    expect(refreshRes.status).toBe(200);
+    expect(refreshRes.body.accessToken).toBeTruthy();
+    expect(refreshRes.body.requiresTwoFactor).toBeUndefined();
+    const rotatedCookie = cookieOf(refreshRes);
+
+    const meRes = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${refreshRes.body.accessToken}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.user.email).toBe(EMAIL);
+
+    // Rotation: the cookie a refresh consumed cannot be replayed.
+    const replayRes = await request(app).post('/api/v1/auth/refresh').set('Cookie', firstCookie);
+    expect(replayRes.status).toBe(401);
+
+    const logoutRes = await request(app).post('/api/v1/auth/logout').set('Cookie', rotatedCookie);
+    expect(logoutRes.status).toBe(200);
+    const afterLogout = await request(app).post('/api/v1/auth/refresh').set('Cookie', rotatedCookie);
+    expect(afterLogout.status).toBe(401);
+  });
+
+  it('refuses an expired refresh session', async () => {
+    await seedUser();
+    const loginRes = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
+    const RefreshToken = (await import('../models/RefreshToken.js')).default;
+    await RefreshToken.updateMany({}, { expiresAt: new Date(Date.now() - 1000) });
+
+    const res = await request(app).post('/api/v1/auth/refresh').set('Cookie', cookieOf(loginRes));
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('INVALID_REFRESH');
+  });
+
+  it('refuses sign-in and refresh for a deactivated account', async () => {
+    const user = await seedUser();
+    const loginRes = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
+    await User.updateOne({ _id: user._id }, { active: false });
+
+    const refreshRes = await request(app).post('/api/v1/auth/refresh').set('Cookie', cookieOf(loginRes));
+    expect(refreshRes.status).toBe(403);
+    expect(refreshRes.body.error.code).toBe('ACCOUNT_DISABLED');
+
+    const relogin = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
+    expect(relogin.status).toBe(403);
+    expect(relogin.body.error.code).toBe('ACCOUNT_DISABLED');
   });
 });
 
@@ -174,7 +222,7 @@ describe('POST /auth/forgot-password + /auth/reset-password', () => {
     expect(sendOtpEmail).not.toHaveBeenCalled();
   });
 
-  it('locks the account after 5 wrong reset codes, same as a wrong password/2FA guess', async () => {
+  it('locks the account after 5 wrong reset codes, same as a wrong password', async () => {
     await seedUser();
     await request(app).post('/api/v1/auth/forgot-password').send({ email: EMAIL });
     expect(sendOtpEmail).toHaveBeenCalledTimes(1);

@@ -174,16 +174,11 @@ export function HRMSProvider({ children }) {
 
   // Auth is a real server session (JWT access token in memory + httpOnly
   // refresh cookie — see src/lib/apiClient.js) rather than a plain object
-  // trusted from localStorage. The server — not this client — decides
-  // whether 2FA applies (per-company Settings.twoFactor): `login`/
-  // `loginWithFace` just forward whatever shape it returns, either
-  // {accessToken, user} (session issued) or {requiresTwoFactor, email}
-  // (a real OTP was just emailed, no session exists yet).
+  // trusted from localStorage. `login`/`loginWithFace` resolve to
+  // {accessToken, user}: a successful sign-in issues the session directly.
   const login = useCallback((email, password) => authApi.login(email, password), []);
 
   const loginWithFace = useCallback((email, photoBlob) => authApi.faceLogin(email, photoBlob), []);
-
-  const verifyTwoFactor = useCallback((email, otp) => authApi.verifyTwoFactor(email, otp), []);
 
   const finishLogin = useCallback(async (accessToken, user) => {
     setAccessToken(accessToken);
@@ -1678,7 +1673,7 @@ export function HRMSProvider({ children }) {
   const pendingLeaves = leaves.filter((l) => l.status === 'pending');
 
   const value = {
-    isAuthenticated: Boolean(authUser), login, loginWithFace, verifyTwoFactor, finishLogin, logout, forgotPassword, resetPassword, changePassword,
+    isAuthenticated: Boolean(authUser), login, loginWithFace, finishLogin, logout, forgotPassword, resetPassword, changePassword,
     loadSessions, revokeSession, revokeOtherSessions, loadUserSessions, revokeUserSession, searchAuditLog, searchEmployees,
     getAttendanceSummary, refreshAttendance,
     booting, loading, lastSyncedAt,

@@ -20,7 +20,6 @@ const settingsSchema = new mongoose.Schema({
   notifyLeave: { type: Boolean, default: true },
   notifyPayroll: { type: Boolean, default: true },
   notifyBirthday: { type: Boolean, default: false },
-  twoFactor: { type: Boolean, default: true },
   wishesSent: { type: Number, default: 0 },
   totalLeaveDays: { type: Number, default: 24 },
   // 1 = calendar year, 4 = April-March financial year. Indian companies split
