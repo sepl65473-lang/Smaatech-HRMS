@@ -283,7 +283,7 @@ router.post('/qr-checkin', async (req, res) => {
         status: isLate(time, shift) ? 'late' : 'present',
         checkInLoc: hasGpsCoords ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
         checkInAddress: address,
-        checkInDetails: `QR Check-in${hasGpsCoords ? ' + GPS Verified' : ''}`,
+        checkInDetails: `QR Check-in${hasGpsCoords ? (gpsResult ? ' + GPS Verified' : ' + GPS Recorded') : ''}`,
         checkInIp: ip,
         checkInDevice: device,
       }
@@ -294,7 +294,7 @@ router.post('/qr-checkin', async (req, res) => {
           : isEarlyExit(time, shift) ? 'early-exit' : row.status,
         checkOutLoc: hasGpsCoords ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
         checkOutAddress: address,
-        checkOutDetails: `QR Check-out${hasGpsCoords ? ' + GPS Verified' : ''}`,
+        checkOutDetails: `QR Check-out${hasGpsCoords ? (gpsResult ? ' + GPS Verified' : ' + GPS Recorded') : ''}`,
         checkOutIp: ip,
         checkOutDevice: device,
       };
@@ -724,11 +724,15 @@ async function handlePunch(req, res, direction) {
   const geo = await geoPromise;
   const time = nowTimeIST();
   const hasGpsCoords = lat != null && lng != null;
+  // "GPS Verified" only when the geofence was actually evaluated and passed.
+  // With geofencing off, coordinates are just recorded; calling that
+  // "verified" told HR a location check happened that never did.
+  const gpsChecked = Boolean(gpsResult);
   const details = faceResult
     ? (livenessResult
-      ? (hasGpsCoords ? 'Face + Liveness + GPS Verified' : 'Face + Liveness Verified')
-      : (hasGpsCoords ? 'Face + GPS Verified' : 'Face Verified'))
-    : (isHrOverride ? 'HR Manual Punch' : (hasGpsCoords ? 'GPS Verified' : 'Manual Punch'));
+      ? (hasGpsCoords ? (gpsChecked ? 'Face + Liveness + GPS Verified' : 'Face + Liveness Verified + GPS Recorded') : 'Face + Liveness Verified')
+      : (hasGpsCoords ? (gpsChecked ? 'Face + GPS Verified' : 'Face Verified + GPS Recorded') : 'Face Verified'))
+    : (isHrOverride ? 'HR Manual Punch' : (hasGpsCoords ? (gpsChecked ? 'GPS Verified' : 'GPS Recorded') : 'Manual Punch'));
 
   const verification = {
     face: faceResult ? { matched: true, confidence: Math.round(faceResult.confidence), distance: faceResult.distance } : null,
@@ -738,7 +742,13 @@ async function handlePunch(req, res, direction) {
     liveness: livenessResult
       ? { verified: true, ...livenessResult }
       : { verified: false, reason: isHrOverride ? 'hr-override' : (settings.livenessRequired ? 'not-performed' : 'not-required-by-policy') },
-    gps: gpsResult || (hasGpsCoords ? { inside: true, distance: 0 } : null),
+    // Same rule as liveness: never record a geofence verdict the server did
+    // not reach. This used to store { inside: true, distance: 0 } whenever
+    // geofencing was off, i.e. evidence of a check that never ran.
+    gps: gpsResult
+      || (hasGpsCoords
+        ? { evaluated: false, reason: isHrOverride ? 'hr-override' : 'geofence-disabled' }
+        : null),
     verifiedAt: new Date().toISOString(),
   };
 

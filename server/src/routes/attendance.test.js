@@ -272,6 +272,22 @@ describe('self-service verification applies to EVERY role', () => {
     expect(res.body.checkInDetails).toBe('Face Verified');
   });
 
+  it('records GPS as unevaluated rather than claiming a geofence pass when geofencing is off', async () => {
+    const { token, emp } = await seedPerson('Employee');
+    const row = await rowFor(emp);
+    const res = await checkIn(row.id, token)
+      .field('lat', '12.97160')
+      .field('lng', '77.59460')
+      .field('accuracy', '10')
+      .field('timestamp', String(Date.now()));
+
+    expect(res.status).toBe(200);
+    // Previously { inside: true, distance: 0 }: evidence of a check that never ran.
+    expect(res.body.checkInVerification.gps).toEqual({ evaluated: false, reason: 'geofence-disabled' });
+    expect(res.body.checkInDetails).toBe('Face Verified + GPS Recorded');
+    expect(res.body.checkInLoc).toBe('12.97160, 77.59460');
+  });
+
   it('blocks punching another employee row as a plain Employee', async () => {
     const { token } = await seedPerson('Employee');
     const { emp: victim } = await seedPerson('Employee');
