@@ -101,12 +101,6 @@ function isServerWaking(error) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Fire-and-forget request that starts waking the server as soon as the app
-// loads, so by the time the user clicks something it is usually already up.
-export function warmUpServer() {
-  axiosInstance.get('/health', { skipAuth: true, skipWakeRetry: true }).catch(() => {});
-}
-
 // Response Interceptor: handle 401 & retry
 axiosInstance.interceptors.response.use(
   (response) => response,
@@ -115,7 +109,7 @@ axiosInstance.interceptors.response.use(
 
     // Real axios requests always carry a method; a bare config (or none) is
     // not something we can safely replay.
-    if (originalRequest?.method && !originalRequest.skipWakeRetry && isServerWaking(error)) {
+    if (originalRequest?.method && isServerWaking(error)) {
       const attempt = originalRequest._wakeAttempt || 0;
       if (attempt < WAKE_RETRY_DELAYS_MS.length) {
         originalRequest._wakeAttempt = attempt + 1;
