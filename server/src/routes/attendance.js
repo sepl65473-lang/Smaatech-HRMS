@@ -579,7 +579,12 @@ async function handlePunch(req, res, direction) {
   // Resolved up-front so a REJECTED attempt records where it happened too —
   // "wrong face, and it was 40km from the office" is the useful fact, and it
   // was previously lost because geocoding only ran on the success path.
-  const geo = (lat != null && lng != null) ? await reverseGeocode(lat, lng, { accuracy }) : null;
+  // Started now but NOT awaited: it is a network call to Nominatim (up to 5s),
+  // and awaiting it here made every punch wait for it before face matching
+  // even began. It runs alongside the face check instead.
+  const geoPromise = (lat != null && lng != null)
+    ? reverseGeocode(lat, lng, { accuracy }).catch(() => null)
+    : Promise.resolve(null);
 
   let faceResult = null;
   let livenessResult = null;
@@ -589,7 +594,7 @@ async function handlePunch(req, res, direction) {
     if (!frameFiles.length) {
       await recordFailedAttempt(req, {
         row, direction, stage: 'photo', reasonCode: 'NO_PHOTO',
-        reasonMessage: faceFailureMessage('NO_PHOTO'), geo, gpsResult, deviceId,
+        reasonMessage: faceFailureMessage('NO_PHOTO'), geo: await geoPromise, gpsResult, deviceId,
       });
       return res.status(400).json({ error: { code: 'NO_PHOTO', message: faceFailureMessage('NO_PHOTO') } });
     }
@@ -598,12 +603,17 @@ async function handlePunch(req, res, direction) {
     // Repeated rejections in a short window are what a spoofing or
     // buddy-punching attempt looks like. Slowed down rather than locked out,
     // so nobody is shut out of their own attendance by a bad camera.
-    const recentFailures = await recentFailureCount({ company: req.auth.company, userId: req.auth.sub });
+    // Independent lookups (the enrolled face is used further down): fetched
+    // together rather than one after the other.
+    const [recentFailures, enrolled] = await Promise.all([
+      recentFailureCount({ company: req.auth.company, userId: req.auth.sub }),
+      FaceDescriptor.findOne({ userId: req.auth.sub }),
+    ]);
     if (recentFailures >= MAX_FAILED_ATTEMPTS_PER_WINDOW) {
       await recordFailedAttempt(req, {
         row, direction, stage: 'face', reasonCode: 'TOO_MANY_FAILED_ATTEMPTS',
         reasonMessage: 'Too many failed verification attempts.',
-        photoBuffer, geo, gpsResult, deviceId,
+        photoBuffer, geo: await geoPromise, gpsResult, deviceId,
       });
       return res.status(429).json({
         error: {
@@ -616,8 +626,8 @@ async function handlePunch(req, res, direction) {
     // THE identity check: the capture is compared against the enrolled face of
     // THE SIGNED-IN ACCOUNT (req.auth.sub), never against the roster at large.
     // So valid credentials plus somebody else's face fails here, which is the
-    // buddy-punching case this whole path exists to stop.
-    const enrolled = await FaceDescriptor.findOne({ userId: req.auth.sub });
+    // buddy-punching case this whole path exists to stop. (`enrolled` is
+    // fetched above, alongside the failure count.)
 
     // Isolated browser-E2E mode: a headless browser has no camera and no real
     // face. The IDENTITY RULE IS STILL ENFORCED — the request must name which
@@ -632,7 +642,7 @@ async function handlePunch(req, res, direction) {
         await recordFailedAttempt(req, {
           row, direction, stage: 'face', reasonCode: 'FACE_NOT_MATCHED',
           reasonMessage: faceFailureMessage('FACE_NOT_MATCHED'),
-          photoBuffer, geo, gpsResult, deviceId, faceDistance: 1.0, faceConfidence: 0,
+          photoBuffer, geo: await geoPromise, gpsResult, deviceId, faceDistance: 1.0, faceConfidence: 0,
         });
         return res.status(400).json({ error: { code: 'FACE_NOT_MATCHED', message: faceFailureMessage('FACE_NOT_MATCHED') } });
       }
@@ -641,7 +651,7 @@ async function handlePunch(req, res, direction) {
     if (!enrolled) {
       await recordFailedAttempt(req, {
         row, direction, stage: 'enrollment', reasonCode: 'NOT_ENROLLED',
-        reasonMessage: faceFailureMessage('NOT_ENROLLED'), photoBuffer, geo, gpsResult, deviceId,
+        reasonMessage: faceFailureMessage('NOT_ENROLLED'), photoBuffer, geo: await geoPromise, gpsResult, deviceId,
       });
       return res.status(400).json({ error: { code: 'NOT_ENROLLED', message: faceFailureMessage('NOT_ENROLLED') } });
     }
@@ -664,7 +674,7 @@ async function handlePunch(req, res, direction) {
         await recordFailedAttempt(req, {
           row, direction, stage: 'liveness', reasonCode: verdict.reason,
           reasonMessage: livenessFailureMessage(verdict.reason),
-          photoBuffer, geo, gpsResult, deviceId,
+          photoBuffer, geo: await geoPromise, gpsResult, deviceId,
         });
         await logAudit(req, {
           action: 'Failed liveness check',
@@ -685,7 +695,7 @@ async function handlePunch(req, res, direction) {
         await recordFailedAttempt(req, {
           row, direction, stage: 'face', reasonCode: extraction.error,
           reasonMessage: faceFailureMessage(extraction.error),
-          photoBuffer, geo, gpsResult, deviceId,
+          photoBuffer, geo: await geoPromise, gpsResult, deviceId,
         });
         return res.status(400).json({ error: { code: extraction.error, message: faceFailureMessage(extraction.error) } });
       }
@@ -696,7 +706,7 @@ async function handlePunch(req, res, direction) {
         await recordFailedAttempt(req, {
           row, direction, stage: 'face', reasonCode: 'FACE_NOT_MATCHED',
           reasonMessage: faceFailureMessage('FACE_NOT_MATCHED'),
-          photoBuffer, geo, gpsResult, deviceId,
+          photoBuffer, geo: await geoPromise, gpsResult, deviceId,
           faceDistance: match.distance,
           faceConfidence: Math.round(match.confidence),
         });
@@ -711,6 +721,7 @@ async function handlePunch(req, res, direction) {
     }
   }
 
+  const geo = await geoPromise;
   const time = nowTimeIST();
   const hasGpsCoords = lat != null && lng != null;
   const details = faceResult
@@ -740,16 +751,18 @@ async function handlePunch(req, res, direction) {
     area: geo.area, city: geo.city, district: geo.district, state: geo.state, country: geo.country,
     lat: geo.lat, lng: geo.lng, accuracy: geo.accuracy, source: geo.source, resolvedAt: geo.resolvedAt,
   } : undefined;
-  const sharedDeviceFlag = isSelfService
-    ? await findSharedDeviceFlag(effectiveDeviceId, row.empId, row._id, req.auth.company)
-    : null;
+  // Independent of each other, so done concurrently.
+  const [sharedDeviceFlag, photoRef] = await Promise.all([
+    isSelfService
+      ? findSharedDeviceFlag(effectiveDeviceId, row.empId, row._id, req.auth.company)
+      : null,
+    photoBuffer
+      ? savePhoto(`attendance/${row.empId}`, randomFilename('.jpg'), photoBuffer)
+      : null,
+  ]);
   const anomalyFlags = sharedDeviceFlag
     ? [...new Set([...(row.anomalyFlags || []), sharedDeviceFlag])]
     : row.anomalyFlags;
-
-  const photoRef = photoBuffer
-    ? await savePhoto(`attendance/${row.empId}`, randomFilename('.jpg'), photoBuffer)
-    : null;
 
   const shift = resolveShiftForToday(String(row.empId), settings);
   const patch = direction === 'in'

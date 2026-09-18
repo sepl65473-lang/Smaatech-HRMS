@@ -47,9 +47,25 @@ const HOST_PARALLELISM = os.availableParallelism?.() || os.cpus().length;
 const CLUSTER_WORKERS = Number(process.env.WEB_CONCURRENCY || 0)
   || (process.env.ENABLE_CLUSTER === 'true' ? HOST_PARALLELISM : 1);
 
+// MEMORY-AWARE. A container often reports the HOST's core count while being
+// given a small memory limit (Render's free tier: many visible cores, 512MB).
+// Sizing by cores alone there starts several TensorFlow instances that cannot
+// all fit, and the process is killed. The cgroup limit, when there is one,
+// caps the default: the main process (which holds its own model for the
+// in-process fallback) keeps a reserve, and each worker gets a budget.
+const MAIN_PROCESS_RESERVE_BYTES = 256 * 1024 * 1024;
+const PER_WORKER_BYTES = 200 * 1024 * 1024;
+const MEMORY_LIMIT = Number(process.constrainedMemory?.() || 0);
+const MEMORY_CAP = MEMORY_LIMIT > 0 && MEMORY_LIMIT < os.totalmem()
+  ? Math.max(1, Math.floor((MEMORY_LIMIT - MAIN_PROCESS_RESERVE_BYTES) / PER_WORKER_BYTES))
+  : Infinity;
+
 const POOL_SIZE = Math.max(1, Math.min(
   Number(process.env.FACE_WORKER_POOL_SIZE || 0)
-    || Math.max(1, Math.floor((HOST_PARALLELISM - 1) / Math.max(1, CLUSTER_WORKERS))),
+    || Math.min(
+      MEMORY_CAP,
+      Math.max(1, Math.floor((HOST_PARALLELISM - 1) / Math.max(1, CLUSTER_WORKERS))),
+    ),
   Number(process.env.FACE_WORKER_POOL_MAX || 8),
 ));
 
@@ -148,6 +164,15 @@ function getPool() {
     logger.info('[facePool] started %d face worker(s)', POOL_SIZE);
   }
   return pool;
+}
+
+/**
+ * Starts the workers (and so their model load) ahead of the first request.
+ * The pool is otherwise created lazily, which made the first face check-in
+ * after every server start wait for TensorFlow and three models to load.
+ */
+export function warmPool() {
+  getPool();
 }
 
 /**

@@ -38,6 +38,12 @@ setupCluster(() => {
       logger.warn('[face] engine init deferred: %s', err.message);
     });
 
+    if (process.env.DISABLE_FACE_WORKER !== 'true' && process.env.NODE_ENV !== 'test') {
+      import('./lib/faceWorkerPool.js')
+        .then(({ warmPool }) => warmPool())
+        .catch((err) => logger.warn('[facePool] warm-up deferred: %s', err.message));
+    }
+
     try {
       startSchedulers();
     } catch (err) {
