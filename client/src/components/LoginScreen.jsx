@@ -5,11 +5,15 @@ import ForgotPasswordModal from './ForgotPasswordModal';
 
 export default function LoginScreen() {
   const {
-    login, finishLogin, forgotPassword: requestPasswordResetOtp,
+    login, loginWithMobile, finishLogin, forgotPassword: requestPasswordResetOtp,
     resetPassword: resetPasswordOnServer, settings, toast,
   } = useHRMS();
   const profiles = settings.loginProfiles?.length ? settings.loginProfiles : DEFAULT_LOGIN_PROFILES;
   const [email, setEmail] = useState('');
+  const [mobile, setMobile] = useState('');
+  // Two ways into the SAME account: the workspace email, or the mobile number
+  // an admin stored on the employee record. Same password either way.
+  const [byMobile, setByMobile] = useState(false);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -20,11 +24,13 @@ export default function LoginScreen() {
   // an emailed 2FA code step here; it has been removed.)
   const submit = async () => {
     try {
-      const { accessToken, user } = await login(email.trim(), password);
+      const { accessToken, user } = byMobile
+        ? await loginWithMobile(mobile.trim(), password)
+        : await login(email.trim(), password);
       setError('');
       await finishLogin(accessToken, user);
     } catch (err) {
-      setError(err.message || 'Invalid email or password.');
+      setError(err.message || (byMobile ? 'Invalid mobile number or password.' : 'Invalid email or password.'));
     }
   };
 
@@ -119,18 +125,29 @@ export default function LoginScreen() {
             {/* Title */}
             <h1 className="login-title">Sign in to HRMS</h1>
             <p className="login-description">
-              Enter your workspace email and password.<br />
+              Enter your workspace {byMobile ? 'mobile number' : 'email'} and password.<br />
               This session is stored locally in this browser.
             </p>
 
-            {/* Email field */}
+            {/* Identifier field — workspace email, or the registered mobile number */}
             <div className="login-field">
-              <label className="login-label">Email</label>
+              <label className="login-label">{byMobile ? 'Mobile number' : 'Email'}</label>
               <div className="login-input-wrap">
                 <svg className="login-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                   <circle cx="12" cy="7" r="4"/>
                 </svg>
+                {byMobile ? (
+                  <input
+                    className="login-input"
+                    type="tel"
+                    value={mobile}
+                    onChange={(e) => { setMobile(e.target.value); setError(''); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+                    placeholder="+91 98765 43210"
+                    autoFocus
+                  />
+                ) : (
                 <input
                   className="login-input"
                   type="email"
@@ -140,7 +157,16 @@ export default function LoginScreen() {
                   placeholder="you@smaatech.co"
                   autoFocus
                 />
+                )}
               </div>
+              <button
+                type="button"
+                className="login-forgot-btn"
+                style={{ marginTop: 8 }}
+                onClick={() => { setByMobile((v) => !v); setError(''); }}
+              >
+                {byMobile ? 'Use email instead' : 'Use mobile number instead'}
+              </button>
             </div>
 
             {/* Password field */}

@@ -309,6 +309,9 @@ let bootstrapPromise = null;
 export const authApi = {
   // Returns { accessToken, user }: a successful sign-in issues the session.
   login: (email, password) => apiFetch('/auth/login', { method: 'POST', body: { email, password }, skipAuth: true }),
+  // Same account, same password, reached by the mobile number Employee
+  // Management stored on the employee record.
+  loginWithMobile: (mobile, password) => apiFetch('/auth/login-mobile', { method: 'POST', body: { mobile, password }, skipAuth: true }),
   // Sends the captured photo alongside the matched email so the server can
   // re-verify the face itself (see server/src/routes/auth.js) — the client's
   // own match (src/lib/faceAuth.js) only decides which account to attempt.

@@ -10,9 +10,10 @@ import {
 } from '../lib/tokens.js';
 import { requireAuth, invalidateAccountStateCache } from '../middleware/auth.js';
 import { validate } from '../middleware/validation.js';
-import { loginSchema, forgotPasswordSchema, resetPasswordSchema, changePasswordSchema } from '../validations/authValidation.js';
+import { loginSchema, loginMobileSchema, forgotPasswordSchema, resetPasswordSchema, changePasswordSchema } from '../validations/authValidation.js';
 import { sendOtpEmail } from '../lib/mailer.js';
 import { logAudit } from '../lib/auditLogger.js';
+import { mobileKey } from '../lib/phoneNumber.js';
 import { extractDescriptor, matchDescriptor, faceFailureMessage } from '../lib/faceEngine.js';
 import { imageUploadMiddleware } from '../lib/photoStorage.js';
 
@@ -102,10 +103,11 @@ async function recordLogin(user, req) {
  *       423:
  *         description: Account locked
  */
-router.post('/login', validate(loginSchema), async (req, res) => {
-  const { email, password } = req.body || {};
-  const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
-
+// Shared by both password sign-in routes. Identical behaviour whichever
+// identifier was used: the same lockout counter, the same audit entries, the
+// same session. `identifier` is only what gets recorded on a FAILED attempt,
+// where there may be no account to name.
+async function completePasswordLogin(req, res, { user, password, identifier, invalidMessage }) {
   if (user?.lockedUntil && user.lockedUntil > new Date()) {
     const minutes = Math.ceil((user.lockedUntil - new Date()) / 60000);
     await logAudit(req, {
@@ -126,10 +128,10 @@ router.post('/login', validate(loginSchema), async (req, res) => {
       await user.save();
     }
     await logAudit(req, {
-      action: 'Failed sign-in attempt', subject: String(email || ''), details: 'Invalid email or password',
+      action: 'Failed sign-in attempt', subject: String(identifier || ''), details: invalidMessage.replace(/\.$/, ''),
       actor: user ? loginActor(user) : { name: 'Unknown', role: 'Unknown' }, company: user?.company || 'Smaatech',
     });
-    return res.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' } });
+    return res.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: invalidMessage } });
   }
   if (user.active === false) {
     return res.status(403).json({ error: { code: 'ACCOUNT_DISABLED', message: 'This account has been deactivated.' } });
@@ -146,7 +148,66 @@ router.post('/login', validate(loginSchema), async (req, res) => {
     actor: loginActor(user), company: user.company,
   });
   const accessToken = await issueSession(res, user, req);
-  res.json({ accessToken, user });
+  return res.json({ accessToken, user });
+}
+
+router.post('/login', validate(loginSchema), async (req, res) => {
+  const { email, password } = req.body || {};
+  const user = email && await User.findOne({ email: String(email).toLowerCase().trim() });
+  return completePasswordLogin(req, res, {
+    user, password, identifier: email, invalidMessage: 'Invalid email or password.',
+  });
+});
+
+/**
+ * @openapi
+ * /api/v1/auth/login-mobile:
+ *   post:
+ *     summary: Authenticate with a registered mobile number and the same password
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [mobile, password]
+ *             properties:
+ *               mobile:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful; returns the access token and user
+ *       401:
+ *         description: Invalid credentials
+ *       423:
+ *         description: Account locked
+ */
+// Second identifier for the SAME account: the mobile number an admin stored on
+// the employee record (Employee.phone). It only ever selects which account to
+// attempt — the password check, lockout, audit trail, session and everything
+// after it are the email route's, unchanged. A number that matches no employee,
+// matches an employee with no login, or matches more than one employee (so it
+// names no single account) authenticates nobody, whatever the password.
+router.post('/login-mobile', validate(loginMobileSchema), async (req, res) => {
+  const { mobile, password } = req.body || {};
+  const key = mobileKey(mobile);
+  let user = null;
+  if (key) {
+    const candidates = await Employee.find(
+      { phone: { $nin: [null, ''] } },
+      { phone: 1 },
+    ).lean();
+    const matches = candidates.filter((e) => mobileKey(e.phone) === key);
+    if (matches.length === 1) {
+      user = await User.findOne({ employeeId: matches[0]._id });
+    }
+  }
+  return completePasswordLogin(req, res, {
+    user, password, identifier: mobile, invalidMessage: 'Invalid mobile number or password.',
+  });
 });
 
 // Face-based sign-in: the client pre-matches a live camera frame against

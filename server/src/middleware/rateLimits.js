@@ -1,6 +1,7 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { verifyAccessToken } from '../lib/tokens.js';
 import { isE2EModeEnabled } from '../lib/e2eGuard.js';
+import { mobileKey } from '../lib/phoneNumber.js';
 
 /**
  * LAYERED RATE LIMITING.
@@ -128,6 +129,7 @@ export function identityKey(req) {
  */
 export const SELF_LIMITED_PATHS = [
   '/api/v1/auth/login',
+  '/api/v1/auth/login-mobile',
   '/api/v1/auth/face-login',
   '/api/v1/auth/forgot-password',
   '/api/v1/auth/reset-password',
@@ -207,7 +209,11 @@ export const loginAccountLimiter = limiter({
   max: LIMITS.loginAccountMax,
   keyGenerator: (req) => {
     const email = String((req.body && req.body.email) || '').toLowerCase().trim();
-    return email ? `acct:${email}` : ipKey(req);
+    if (email) return `acct:${email}`;
+    // Mobile sign-in names the same account by a different identifier, so it
+    // needs its own per-account bucket rather than falling back to the IP one.
+    const mobile = mobileKey(req.body && req.body.mobile);
+    return mobile ? `acct:mobile:${mobile}` : ipKey(req);
   },
   code: 'TOO_MANY_ATTEMPTS',
   message: 'Too many sign-in attempts for this account. Please try again in a few minutes.',

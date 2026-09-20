@@ -178,6 +178,8 @@ export function HRMSProvider({ children }) {
   // {accessToken, user}: a successful sign-in issues the session directly.
   const login = useCallback((email, password) => authApi.login(email, password), []);
 
+  const loginWithMobile = useCallback((mobile, password) => authApi.loginWithMobile(mobile, password), []);
+
   const loginWithFace = useCallback((email, photoBlob) => authApi.faceLogin(email, photoBlob), []);
 
   const finishLogin = useCallback(async (accessToken, user) => {
@@ -1673,7 +1675,7 @@ export function HRMSProvider({ children }) {
   const pendingLeaves = leaves.filter((l) => l.status === 'pending');
 
   const value = {
-    isAuthenticated: Boolean(authUser), login, loginWithFace, finishLogin, logout, forgotPassword, resetPassword, changePassword,
+    isAuthenticated: Boolean(authUser), login, loginWithMobile, loginWithFace, finishLogin, logout, forgotPassword, resetPassword, changePassword,
     loadSessions, revokeSession, revokeOtherSessions, loadUserSessions, revokeUserSession, searchAuditLog, searchEmployees,
     getAttendanceSummary, refreshAttendance,
     booting, loading, lastSyncedAt,

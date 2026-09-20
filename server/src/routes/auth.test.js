@@ -19,6 +19,7 @@ const app = (await import('../app.js')).default;
 const User = (await import('../models/User.js')).default;
 const Settings = (await import('../models/Settings.js')).default;
 const AuditLog = (await import('../models/AuditLog.js')).default;
+const Employee = (await import('../models/Employee.js')).default;
 const { sendOtpEmail } = await import('../lib/mailer.js');
 
 const COMPANY = 'TestCo';
@@ -179,6 +180,106 @@ describe('session lifecycle after a password sign-in', () => {
     const relogin = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
     expect(relogin.status).toBe(403);
     expect(relogin.body.error.code).toBe('ACCOUNT_DISABLED');
+  });
+});
+
+describe('POST /auth/login-mobile', () => {
+  const MOBILE = '+91 98765 43210';
+
+  // An employee record with a phone, and the login linked to it: exactly what
+  // Employee Management creates.
+  async function seedEmployeeWithMobile(phone = MOBILE) {
+    const emp = await Employee.create({
+      name: 'Auth Test User', email: EMAIL, phone, company: COMPANY, role: 'Engineer', dept: 'Engineering',
+    });
+    const user = await seedUser({ employeeId: emp._id });
+    return { emp, user };
+  }
+
+  it('signs in with the registered mobile number and the SAME password', async () => {
+    const { user } = await seedEmployeeWithMobile();
+    const res = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: MOBILE, password: PASSWORD });
+
+    expect(res.status).toBe(200);
+    expect(res.body.accessToken).toBeTruthy();
+    expect(res.body.user.email).toBe(EMAIL);
+    expect(res.headers['set-cookie']?.[0]).toMatch(/sepl_refresh=/);
+
+    // The same account, not a parallel one.
+    expect(res.body.user.id).toBe(String(user._id));
+    const signedIn = await AuditLog.findOne({ action: 'User signed in', subject: EMAIL });
+    expect(signedIn).toBeTruthy();
+  });
+
+  it('accepts the number however it was typed, and the email login still works', async () => {
+    await seedEmployeeWithMobile();
+    for (const typed of ['9876543210', '09876543210', '+919876543210', '98765-43210']) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: typed, password: PASSWORD });
+      expect(res.status).toBe(200);
+    }
+    const emailRes = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
+    expect(emailRes.status).toBe(200);
+  });
+
+  it('refuses an unregistered number even with the correct password', async () => {
+    await seedEmployeeWithMobile();
+    const res = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: '9000000000', password: PASSWORD });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
+    expect(res.body.accessToken).toBeUndefined();
+  });
+
+  it('refuses the wrong password on a registered number', async () => {
+    await seedEmployeeWithMobile();
+    const res = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: MOBILE, password: 'WrongPassword1' });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
+  });
+
+  it('refuses an employee whose record has no login account', async () => {
+    await Employee.create({ name: 'No Login', email: 'no-login@example.com', phone: MOBILE, company: COMPANY, role: 'Engineer', dept: 'Engineering' });
+    const res = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: MOBILE, password: PASSWORD });
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses a number two employees share, since it names no single account', async () => {
+    await seedEmployeeWithMobile();
+    await Employee.create({ name: 'Same Number', email: 'same@example.com', phone: '09876543210', company: COMPANY, role: 'Engineer', dept: 'Engineering' });
+    const res = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: MOBILE, password: PASSWORD });
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses a deactivated account, and counts wrong tries toward the same lockout', async () => {
+    const { user } = await seedEmployeeWithMobile();
+    for (let i = 0; i < 5; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await request(app).post('/api/v1/auth/login-mobile').send({ mobile: MOBILE, password: 'WrongPassword1' });
+    }
+    // The lockout is the account's, so the EMAIL route is locked too.
+    const emailRes = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
+    expect(emailRes.status).toBe(423);
+
+    await User.updateOne({ _id: user._id }, { failedLoginAttempts: 0, lockedUntil: null, active: false });
+    const disabled = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: MOBILE, password: PASSWORD });
+    expect(disabled.status).toBe(403);
+    expect(disabled.body.error.code).toBe('ACCOUNT_DISABLED');
+  });
+
+  it('works with the new password after an email password reset, and so does email', async () => {
+    await seedEmployeeWithMobile();
+    await request(app).post('/api/v1/auth/forgot-password').send({ email: EMAIL });
+    const [, sentOtp] = sendOtpEmail.mock.calls[0];
+    const reset = await request(app).post('/api/v1/auth/reset-password').send({ email: EMAIL, otp: sentOtp, newPassword: 'NewPass456' });
+    expect(reset.status).toBe(200);
+
+    const byMobile = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: MOBILE, password: 'NewPass456' });
+    expect(byMobile.status).toBe(200);
+    const byEmail = await request(app).post('/api/v1/auth/login').send({ email: EMAIL, password: 'NewPass456' });
+    expect(byEmail.status).toBe(200);
+
+    const oldPassword = await request(app).post('/api/v1/auth/login-mobile').send({ mobile: MOBILE, password: PASSWORD });
+    expect(oldPassword.status).toBe(401);
   });
 });
 

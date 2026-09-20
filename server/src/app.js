@@ -201,7 +201,7 @@ app.use(cookieParser());
 // Login: three independent layers - sustained per-network volume, a short
 // per-network burst, and per-account attempts that no amount of IP rotation
 // can dilute.
-const loginPaths = ['/api/v1/auth/login', '/api/v1/auth/face-login'];
+const loginPaths = ['/api/v1/auth/login', '/api/v1/auth/login-mobile', '/api/v1/auth/face-login'];
 for (const path of loginPaths) {
   app.use(path, loginIpLimiter, loginBurstLimiter, loginAccountLimiter);
 }
