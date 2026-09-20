@@ -63,6 +63,14 @@ export function runStartupChecks({ env = process.env, strict = env.NODE_ENV === 
     warnings.push('BREVO_API_KEY is not set — password-reset and welcome emails will not be delivered.');
   }
 
+  if (strict && !env.METRICS_TOKEN) {
+    // The external daily-attendance trigger authenticates with this token.
+    // Without it that fallback cannot run, and the in-process scheduler is
+    // then the only thing creating daily rows — which it cannot do while the
+    // service is asleep.
+    warnings.push('METRICS_TOKEN is not set — /metrics is unreadable by monitoring and the external daily-attendance trigger cannot authenticate.');
+  }
+
   if (strict && env.ENABLE_CLUSTER === 'true' && env.RUN_SCHEDULERS !== 'false' && !env.SCHEDULER_WORKER_ID) {
     warnings.push('Clustering is on without SCHEDULER_WORKER_ID; scheduled jobs default to worker 1 only.');
   }

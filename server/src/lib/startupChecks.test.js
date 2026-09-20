@@ -126,6 +126,14 @@ describe('deployment-shape checks', () => {
     expect(result.warnings.join(' ')).not.toMatch(/lost on redeploy/);
   });
 
+  it('warns when METRICS_TOKEN is missing, since the fallback job trigger needs it', () => {
+    const env = validEnv();
+    delete env.METRICS_TOKEN;
+    const result = runStartupChecks({ env, strict: true });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.join(' ')).toMatch(/METRICS_TOKEN/);
+  });
+
   it('warns when clustering is on without a pinned scheduler worker', () => {
     const env = { ...validEnv(), ENABLE_CLUSTER: 'true' };
     const result = runStartupChecks({ env, strict: true });
