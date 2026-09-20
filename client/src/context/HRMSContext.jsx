@@ -37,6 +37,9 @@ export function HRMSProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [authUser, setAuthUser] = useState(null);
   const [faceEnrolled, setFaceEnrolled] = useState(false);
+  // Whether THIS account may (re-)enrol right now: always true before a first
+  // enrolment, and afterwards only while HR has granted access.
+  const [faceAccess, setFaceAccess] = useState({ enrolled: false, canEnrol: true, grant: null });
   const [employees, setEmployees] = useState([]);
   const [leaves, setLeaves] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -159,12 +162,14 @@ export function HRMSProvider({ children }) {
       // Face status is guarded: it is a convenience flag for the UI, and the
       // server independently enforces enrolment on every punch, so failing to
       // read it must never cost the user their whole workspace.
-      const [all, faceStatus] = await Promise.all([
+      const [all, faceStatus, access] = await Promise.all([
         loadAll(role),
         faceApi.status(userId).catch(() => null),
+        faceApi.myAccess().catch(() => null),
       ]);
       hydrate(all);
       if (faceStatus) setFaceEnrolled(faceStatus.enrolled);
+      if (access) setFaceAccess(access);
     } finally {
       // Always clear the loading gate — even on failure — so a flaky request
       // can't leave Layout.jsx stuck on "Loading workspace…" forever.
@@ -841,10 +846,27 @@ export function HRMSProvider({ children }) {
       toast('error', err.message || 'Face enrollment failed.');
       throw err;
     }
-    if (!targetUserId || targetUserId === currentUser.id) setFaceEnrolled(true);
+    if (!targetUserId || targetUserId === currentUser.id) {
+      setFaceEnrolled(true);
+      // A grant is spent by a successful enrolment, so the option closes again.
+      const refreshed = await faceApi.myAccess().catch(() => null);
+      if (refreshed) setFaceAccess(refreshed);
+    }
     toast('success', `Face enrolled for <strong>${result.enrolledFor}</strong>`);
     return result;
   };
+
+  // Employee Management: HR grants/revokes one employee's temporary access.
+  const refreshMyFaceAccess = useCallback(async () => {
+    const access = await faceApi.myAccess().catch(() => null);
+    if (access) setFaceAccess(access);
+    return access;
+  }, []);
+  const listFaceAccess = useCallback((userId) => faceApi.listAccess(userId), []);
+  // The server writes the audit entry for both of these, so nothing is
+  // recorded twice here.
+  const grantFaceAccess = useCallback((payload) => faceApi.grantAccess(payload), []);
+  const revokeFaceAccess = useCallback((id) => faceApi.revokeAccess(id), []);
 
   // Used by the biometric-device reconciliation flow (Integrations page):
   // applies a punch time to today's attendance row for an employee.
@@ -1704,6 +1726,7 @@ export function HRMSProvider({ children }) {
     addLeave, approveLeave, declineLeave, deleteLeave, withdrawLeave, bulkApproveLeave, bulkDeclineLeave,
     // attendance
     checkIn, checkOut, setAttendanceStatus, recordPunch, enrollFace, faceEnrolled, getQrToken, qrCheckIn,
+    faceAccess, refreshMyFaceAccess, listFaceAccess, grantFaceAccess, revokeFaceAccess,
     loadDeviceMappings, linkDeviceUser, regenerateDeviceKey,
     // payroll
     processPayroll, markPaid, updatePayrollStructure,

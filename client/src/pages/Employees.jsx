@@ -6,6 +6,7 @@ import Avatar from '../components/Avatar';
 import EmployeeForm from '../components/EmployeeForm';
 import ConfirmDialog from '../components/ConfirmDialog';
 import CsvImportModal from '../components/CsvImportModal';
+import FaceAccessModal from '../components/FaceAccessModal';
 import { downloadCSV } from '../lib/csv';
 import {
   IconEdit, IconTrash, IconPlus, IconWorkforce, IconPresent, IconLeave, IconAnalytics,
@@ -18,8 +19,11 @@ const PAGE_SIZE = 6;
 export default function Employees() {
   const {
     employees, search, addEmployee, updateEmployee, deleteEmployee, importEmployees,
-    addUserAccount, toast, getMasterValues, searchEmployees,
+    addUserAccount, toast, getMasterValues, searchEmployees, currentUser,
   } = useHRMS();
+  // HR/Admin-only control for one employee's temporary face re-verification.
+  const [faceAccessFor, setFaceAccessFor] = useState(null);
+  const canManageFaceAccess = ['HR Director', 'HR Manager'].includes(currentUser?.role);
   const navigate = useNavigate();
   const departments = getMasterValues('departments');
   const locations = getMasterValues('locations');
@@ -192,6 +196,15 @@ export default function Employees() {
                     <button className="icon-btn sm" title="Edit" onClick={() => openEdit(e)}>
                       <IconEdit width="14" height="14" />
                     </button>
+                    {canManageFaceAccess && (
+                      <button
+                        className="icon-btn sm"
+                        title="Face re-verification access"
+                        onClick={() => setFaceAccessFor(e)}
+                      >
+                        🙂
+                      </button>
+                    )}
                     <button className="icon-btn sm danger" title="Delete" onClick={() => setConfirm(e)}>
                       <IconTrash width="14" height="14" />
                     </button>
@@ -212,6 +225,12 @@ export default function Employees() {
       </div>
 
       <EmployeeForm open={formOpen} employee={editing} onClose={() => setFormOpen(false)} onSave={handleSave} />
+
+      <FaceAccessModal
+        open={Boolean(faceAccessFor)}
+        employee={faceAccessFor}
+        onClose={() => setFaceAccessFor(null)}
+      />
 
       <CsvImportModal
         open={importOpen}

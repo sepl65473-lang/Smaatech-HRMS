@@ -45,6 +45,7 @@ import attendanceCorrectionsRoutes from './routes/attendanceCorrections.js';
 import deviceIngestRoutes from './routes/deviceIngest.js';
 import deviceMappingsRoutes from './routes/deviceMappings.js';
 import healthRoutes from './routes/health.js';
+import scheduledJobRoutes from './routes/scheduledJobs.js';
 import aiPredictorRoutes from './routes/aiPredictorRoutes.js';
 import analyticsRoutes from './routes/analytics.js';
 import lifecycleRoutes from './routes/lifecycle.js';
@@ -245,6 +246,8 @@ app.use('/api/v1/attendance-corrections', attendanceCorrectionsRoutes);
 app.use('/api/v1/device-punch', deviceIngestRoutes);
 app.use('/api/v1/device-mappings', deviceMappingsRoutes);
 app.use('/api/v1', healthRoutes);
+// Redundant external trigger for the existing daily attendance jobs.
+app.use('/api/v1/internal/jobs', scheduledJobRoutes);
 app.use('/api/v1/ai', aiPredictorRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/lifecycle', lifecycleRoutes);

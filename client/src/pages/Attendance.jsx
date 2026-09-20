@@ -7,9 +7,10 @@ import RosterPlanner from '../components/RosterPlanner';
 import {
   IconInfo, IconPresent, IconCalendar, IconX, IconLeave,
 } from '../components/Icons';
-import { todayISO } from '../lib/helpers';
+import { todayISO, leaveTagLabel } from '../lib/helpers';
 import { resolveShiftForToday } from '../lib/shifts';
 import { downloadCSV } from '../lib/exportCsv';
+import { formatWorkedMinutes } from '../lib/workingHours';
 import { ATTENDANCE_STATUS as STATUS } from '../lib/attendanceStatus';
 import { apiFetchBlob } from '../lib/apiClient';
 import { attendanceApi } from '../data/store';
@@ -92,7 +93,9 @@ const EXPORT_COLUMNS = [
   { key: 'shift', label: 'Shift' },
   { key: 'checkIn', label: 'Check-in' },
   { key: 'checkOut', label: 'Check-out' },
+  { key: 'workedHours', label: 'Working Hours' },
   { key: 'status', label: 'Status' },
+  { key: 'leaveType', label: 'Leave Type' },
   { key: 'location', label: 'Location' },
 ];
 
@@ -122,7 +125,7 @@ function LiveIndicator({ lastSyncedAt }) {
 
 export default function Attendance() {
   const {
-    attendance, settings, checkIn, checkOut, setAttendanceStatus, refreshAttendance,
+    attendance, leaves, settings, checkIn, checkOut, setAttendanceStatus, refreshAttendance,
     attendanceCorrections, requestCorrection, approveCorrection, rejectCorrection, currentUser, employees, toast,
     getMasterValues, getQrToken,
   } = useHRMS();
@@ -142,6 +145,15 @@ export default function Attendance() {
   const departments = getMasterValues('departments');
   const [dept, setDept] = useState('All');
   const [status, setStatus] = useState('all');
+  // Historical reporting. Empty = today's roster exactly as before; set a
+  // date and the page reads that period from the server's paged endpoint
+  // instead of the (capped) hydrated list.
+  const [range, setRange] = useState({ from: '', to: '' });
+  const [periodRows, setPeriodRows] = useState(null); // null = use the live list
+  const [periodTotal, setPeriodTotal] = useState(0);
+  const [periodPage, setPeriodPage] = useState(0);
+  const [periodLoading, setPeriodLoading] = useState(false);
+  const [periodError, setPeriodError] = useState('');
   const [tab, setTab] = useState('roster');
   const [detailsRow, setDetailsRow] = useState(null);
 
@@ -179,11 +191,60 @@ export default function Attendance() {
     return () => clearInterval(id);
   }, [qrData]);
 
-  const filtered = useMemo(() => attendance.filter((a) => {
+  const rangeActive = Boolean(range.from || range.to);
+  const PERIOD_PAGE_SIZE = 200;
+
+  const loadPeriodPage = useCallback(async (page) => {
+    setPeriodLoading(true);
+    setPeriodError('');
+    try {
+      const { rows, total } = await attendanceApi.page({
+        from: range.from || undefined,
+        to: range.to || undefined,
+        page,
+        limit: PERIOD_PAGE_SIZE,
+      });
+      setPeriodRows((prev) => (page === 1 ? rows : [...(prev || []), ...rows]));
+      setPeriodTotal(total);
+      setPeriodPage(page);
+    } catch (err) {
+      setPeriodError(err?.message || 'Could not load that period.');
+    } finally {
+      setPeriodLoading(false);
+    }
+  }, [range.from, range.to]);
+
+  useEffect(() => {
+    if (!rangeActive) {
+      setPeriodRows(null);
+      setPeriodTotal(0);
+      setPeriodPage(0);
+      setPeriodError('');
+      return;
+    }
+    loadPeriodPage(1);
+  }, [rangeActive, loadPeriodPage]);
+
+  // Everything below reads this one list, so filters, counts, the table and
+  // the exports all stay in step whichever source is in use.
+  const sourceRows = periodRows ?? attendance;
+  const hasMorePeriodRows = Boolean(periodRows) && periodRows.length < periodTotal;
+
+  // Leave type for a row that is on leave, from the leave records already
+  // loaded — nothing new is fetched and no leave data is changed.
+  const leaveTypeFor = useCallback((row) => {
+    if (row.status !== 'leave') return '';
+    const match = (leaves || []).find((l) => String(l.empId) === String(row.empId)
+      && l.status === 'approved'
+      && String(l.start) <= row.date && String(l.end) >= row.date);
+    return match ? leaveTagLabel(match.type) : '';
+  }, [leaves]);
+
+  const filtered = useMemo(() => sourceRows.filter((a) => {
     const deptMatch = dept === 'All' || a.dept === dept;
     const statusMatch = status === 'all' || a.status === status;
     return deptMatch && statusMatch;
-  }), [attendance, dept, status]);
+  }), [sourceRows, dept, status]);
 
   const counts = useMemo(() => {
     const c = { present: 0, late: 0, absent: 0, leave: 0 };
@@ -201,6 +262,8 @@ export default function Attendance() {
 
   const exportRows = useMemo(
     () => filtered.map((a) => ({
+      workedHours: formatWorkedMinutes(a.workedMinutes),
+      leaveType: leaveTypeFor(a),
       date: a.date,
       name: a.name,
       dept: a.dept,
@@ -210,7 +273,7 @@ export default function Attendance() {
       status: STATUS[a.status]?.label || a.status,
       location: cleanLocationText(a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc),
     })),
-    [filtered, shiftNameFor],
+    [filtered, shiftNameFor, leaveTypeFor],
   );
 
   const [exporting, setExporting] = useState(false);
@@ -222,7 +285,12 @@ export default function Attendance() {
   // Nothing is trimmed quietly any more: if the safety valve is ever reached
   // the user is told.
   const collectExportRows = useCallback(async () => {
-    const { rows, truncated } = await attendanceApi.listAll();
+    // The export asks the server for exactly the selected period, so an old
+    // month can be downloaded without pulling the whole history.
+    const { rows, truncated } = await attendanceApi.listAll({
+      from: range.from || undefined,
+      to: range.to || undefined,
+    });
     if (truncated) {
       toast('error', 'This export is too large to build in the browser. Narrow the date range and try again.');
       return null;
@@ -233,6 +301,8 @@ export default function Attendance() {
       return deptMatch && statusMatch;
     });
     return scoped.map((a) => ({
+      workedHours: formatWorkedMinutes(a.workedMinutes),
+      leaveType: leaveTypeFor(a),
       date: a.date,
       name: a.name,
       dept: a.dept,
@@ -242,7 +312,7 @@ export default function Attendance() {
       status: STATUS[a.status]?.label || a.status,
       location: cleanLocationText(a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc),
     }));
-  }, [dept, status, shiftNameFor, toast]);
+  }, [dept, status, shiftNameFor, toast, leaveTypeFor, range.from, range.to]);
 
   const runExport = useCallback(async (build) => {
     if (exporting) return;
@@ -338,8 +408,12 @@ export default function Attendance() {
           <div className="card" style={{ marginTop: 18 }}>
             <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div>
-                <div className="card-title">Today’s roster</div>
-                <div className="card-sub">{filtered.length} of {attendance.length} people shown</div>
+                <div className="card-title">{rangeActive ? 'Attendance records' : 'Today’s roster'}</div>
+                <div className="card-sub">
+                  {rangeActive
+                    ? `${filtered.length} of ${periodTotal} record${periodTotal === 1 ? '' : 's'} loaded${range.from ? ` · from ${range.from}` : ''}${range.to ? ` · to ${range.to}` : ''}`
+                    : `${filtered.length} of ${attendance.length} people shown`}
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button type="button" className="btn btn-ghost" onClick={exportCsv}>Export CSV</button>
@@ -365,6 +439,32 @@ export default function Attendance() {
                 ))}
               </div>
               <label className="inline-select">
+                <span>From</span>
+                <input
+                  type="date"
+                  className="input"
+                  value={range.from}
+                  max={range.to || todayISO()}
+                  onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+                />
+              </label>
+              <label className="inline-select">
+                <span>To</span>
+                <input
+                  type="date"
+                  className="input"
+                  value={range.to}
+                  min={range.from || undefined}
+                  max={todayISO()}
+                  onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+                />
+              </label>
+              {rangeActive && (
+                <button type="button" className="btn btn-ghost" onClick={() => setRange({ from: '', to: '' })}>
+                  Clear dates
+                </button>
+              )}
+              <label className="inline-select">
                 <span>Status</span>
                 <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
                   <option value="all">All</option>
@@ -382,11 +482,13 @@ export default function Attendance() {
               <table className="table">
                 <thead>
                   <tr>
+                    {rangeActive && <th style={{ whiteSpace: 'nowrap' }}>Date</th>}
                     <th style={{ whiteSpace: 'nowrap' }}>Employee</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Department</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Shift</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Check-in</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Check-out</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Hours</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Status</th>
                     <th style={{ whiteSpace: 'nowrap', maxWidth: 240 }}>Location</th>
                   </tr>
@@ -397,6 +499,7 @@ export default function Attendance() {
                     const locText = a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc;
                     return (
                       <tr key={a.id}>
+                        {rangeActive && <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.date}</td>}
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <div className="emp-cell" style={{ whiteSpace: 'nowrap' }}>
                             <Avatar name={a.name} size={30} />
@@ -433,6 +536,9 @@ export default function Attendance() {
                               📸
                             </button>
                           )}
+                        </td>
+                        <td className="mono" style={{ whiteSpace: 'nowrap' }}>
+                          {formatWorkedMinutes(a.workedMinutes) || '—'}
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           {isHR ? (
@@ -476,6 +582,23 @@ export default function Attendance() {
                 </tbody>
               </table>
             </div>
+
+            {(periodError || periodLoading || hasMorePeriodRows) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 4px 2px' }}>
+                {periodError && <span className="login-error">{periodError}</span>}
+                {!periodError && periodLoading && <span className="muted-text">Loading records…</span>}
+                {!periodError && !periodLoading && hasMorePeriodRows && (
+                  <>
+                    <button type="button" className="btn btn-ghost" onClick={() => loadPeriodPage(periodPage + 1)}>
+                      Load more
+                    </button>
+                    <span className="muted-text">
+                      {periodRows.length} of {periodTotal} loaded — exports always cover the whole period.
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

@@ -66,9 +66,10 @@ describe('Face Biometric Security & Revocation API', () => {
     expect(statusEnrolled.body.enrolled).toBe(true);
   });
 
-  it('revokes biometric template and logs audit event', async () => {
+  it('revokes a biometric template on an HR action, never on the employee request', async () => {
     const { user: userA, token: tokenA } = await seedUser('User A', 'usera@companya.com', 'Employee');
     const { token: tokenB } = await seedUser('User B', 'userb@companya.com', 'Employee');
+    const { token: hrToken } = await seedUser('HR Person', 'hr@companya.com', 'HR Manager');
 
     // Seed FaceDescriptor
     await FaceDescriptor.create({
@@ -82,10 +83,19 @@ describe('Face Biometric Security & Revocation API', () => {
       .set('Authorization', `Bearer ${tokenB}`);
     expect(forbiddenDelete.status).toBe(403);
 
-    // User A revokes own biometric template
-    const deleteRes = await request(app)
+    // Nor can User A delete their OWN: removing your template and enrolling
+    // again "for the first time" is re-verification without permission, which
+    // is exactly what the HR-granted access now controls.
+    const selfDelete = await request(app)
       .delete(`/api/v1/face/${userA._id}`)
       .set('Authorization', `Bearer ${tokenA}`);
+    expect(selfDelete.status).toBe(403);
+    expect(await FaceDescriptor.findOne({ userId: userA._id })).not.toBeNull();
+
+    // HR revokes it
+    const deleteRes = await request(app)
+      .delete(`/api/v1/face/${userA._id}`)
+      .set('Authorization', `Bearer ${hrToken}`);
     expect(deleteRes.status).toBe(200);
     expect(deleteRes.body.ok).toBe(true);
 

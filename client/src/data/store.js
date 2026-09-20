@@ -239,6 +239,19 @@ export const attendanceApi = {
    * stops a runaway loop rather than silently trimming, and the caller is told
    * when it was hit so nothing is ever quietly dropped again.
    */
+  /**
+   * ONE page of the server's paged branch, for the date-range view. Kept
+   * separate from list()/listAll() so neither of those changes behaviour.
+   */
+  async page({ from, to, page = 1, limit = 200 } = {}) {
+    const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (from) qs.set('from', from);
+    if (to) qs.set('to', to);
+    const body = await apiFetch(`/attendance?${qs.toString()}`);
+    if (Array.isArray(body)) return { rows: body, total: body.length, page, limit };
+    return { rows: body.rows || [], total: body.total ?? (body.rows || []).length, page: body.page ?? page, limit: body.limit ?? limit };
+  },
+
   async listAll({ from, to, pageSize = 200, hardLimit = 100000 } = {}) {
     const rows = [];
     let page = 1;
@@ -295,6 +308,15 @@ export const faceApi = {
     return apiFetch('/face/enroll', { method: 'POST', body: form });
   },
   status: (userId) => apiFetch(`/face/status/${userId}`),
+
+  // HR/Admin-controlled re-verification access. Granting access never
+  // verifies a face: the employee still completes the same enrolment flow.
+  myAccess: () => apiFetch('/face/access/me'),
+  listAccess: (userId) => apiFetch(`/face/access${userId ? `?userId=${userId}` : ''}`),
+  grantAccess: ({ userId, email, reason, hours }) => apiFetch('/face/access', {
+    method: 'POST', body: { userId, email, reason, hours },
+  }),
+  revokeAccess: (id) => apiFetch(`/face/access/${id}`, { method: 'DELETE' }),
 };
 
 // Server-authoritative geofence + shift config (the subset of "settings"

@@ -5,6 +5,7 @@ import Employee from '../models/Employee.js';
 import FaceDescriptor from '../models/FaceDescriptor.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { evaluateGeofence } from '../lib/geofence.js';
+import { workedMinutesBetween } from '../lib/workingHours.js';
 import { resolveShiftForToday, isLate, isEarlyExit, isHalfDay, nowTimeIST } from '../lib/shifts.js';
 import { parseDeviceInfo, clientIp } from '../lib/deviceInfo.js';
 import { reverseGeocode } from '../lib/geocode.js';
@@ -289,6 +290,9 @@ router.post('/qr-checkin', async (req, res) => {
       }
     : {
         checkOut: time,
+        // Derived from the two times already being written — the punch
+        // decision itself is untouched.
+        workedMinutes: workedMinutesBetween(row.checkIn, time),
         status: isHalfDay(row.checkIn, time, shift)
           ? 'half-day'
           : isEarlyExit(time, shift) ? 'early-exit' : row.status,
@@ -494,6 +498,14 @@ router.patch('/:id', requireRole('HR Manager'), async (req, res) => {
     if (!patch.checkOutDevice) patch.checkOutDevice = device;
     if (!patch.checkOutIp) patch.checkOutIp = ip;
     if (!patch.checkOutDeviceId) patch.checkOutDeviceId = 'HR-Console';
+  }
+
+  // An HR correction to either time changes the day's total, so it is
+  // recomputed from whatever the row will hold after this patch.
+  if (patch.checkIn !== undefined || patch.checkOut !== undefined) {
+    const nextIn = patch.checkIn !== undefined ? patch.checkIn : before.checkIn;
+    const nextOut = patch.checkOut !== undefined ? patch.checkOut : before.checkOut;
+    patch.workedMinutes = workedMinutesBetween(nextIn, nextOut);
   }
 
   const updated = await Attendance.findOneAndUpdate({ _id: req.params.id, ...companyFilter(req) }, patch, { new: true });
@@ -794,6 +806,9 @@ async function handlePunch(req, res, direction) {
       }
     : {
         checkOut: time,
+        // Derived from the two times already being written — the punch
+        // decision itself is untouched.
+        workedMinutes: workedMinutesBetween(row.checkIn, time),
         status: isHalfDay(row.checkIn, time, shift)
           ? 'half-day'
           : isEarlyExit(time, shift) ? 'early-exit' : row.status,

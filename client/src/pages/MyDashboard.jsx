@@ -87,7 +87,7 @@ export default function MyDashboard() {
   const {
     currentUser, employees, leaves, attendance, payroll, settings, reviews,
     addLeave, checkIn, checkOut, audit, submitSelfReview, toast,
-    enrollFace, faceEnrolled, qrCheckIn, refreshAttendance,
+    enrollFace, faceEnrolled, faceAccess, qrCheckIn, refreshAttendance,
   } = useHRMS();
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -401,9 +401,24 @@ export default function MyDashboard() {
               ? <span className="state-badge approved">Face ID enrolled</span>
               : <span className="muted-text">Face ID not enrolled</span>}
             {me ? (
-              <button type="button" className="mini-btn" onClick={() => setFaceEnrollOpen(true)}>
-                {faceEnrolled ? 'Re-enroll my face' : 'Enroll my face'}
-              </button>
+              <>
+                {/* A first enrolment is self-service, as before. Redoing one
+                    is only offered while HR has granted this account access. */}
+                {faceAccess.canEnrol ? (
+                  <button type="button" className="mini-btn" onClick={() => setFaceEnrollOpen(true)}>
+                    {faceEnrolled ? 'Re-verify my face' : 'Enroll my face'}
+                  </button>
+                ) : (
+                  <span className="muted-text">
+                    Face re-verification needs HR approval — ask HR to grant access from Employee Management.
+                  </span>
+                )}
+                {faceAccess.grant && (
+                  <span className="muted-text">
+                    HR access active until {new Date(faceAccess.grant.expiresAt).toLocaleString()}
+                  </span>
+                )}
+              </>
             ) : (
               <span className="muted-text">Login not linked — ask HR to link your profile in Settings → Users.</span>
             )}

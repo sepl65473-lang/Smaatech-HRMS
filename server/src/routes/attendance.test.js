@@ -272,6 +272,30 @@ describe('self-service verification applies to EVERY role', () => {
     expect(res.body.checkInDetails).toBe('Face Verified');
   });
 
+  it('records total working hours on check-out, and derives them for older rows', async () => {
+    const { token, emp } = await seedPerson('Employee');
+    const row = await rowFor(emp);
+    await checkIn(row.id, token);
+    await Attendance.updateOne({ _id: row.id }, { checkIn: '09:15' });
+
+    const out = await request(app)
+      .post(`/api/v1/attendance/${row.id}/check-out`)
+      .set('Authorization', `Bearer ${token}`)
+      .attach('photo', makeJpeg(seq), { filename: 'p.jpg', contentType: 'image/jpeg' });
+    expect(out.status).toBe(200);
+    expect(out.body.workedMinutes).toBeGreaterThan(0);
+    const stored = await Attendance.findById(row.id);
+    expect(stored.workedMinutes).toBe(out.body.workedMinutes);
+
+    // A row written before this field existed keeps null in the database and
+    // is derived on read, so no historical record is rewritten.
+    await Attendance.updateOne({ _id: row.id }, { checkIn: '09:15', checkOut: '18:00', workedMinutes: null });
+    const list = await request(app).get('/api/v1/attendance').set('Authorization', `Bearer ${token}`);
+    const listed = list.body.find((r) => r.id === String(row.id));
+    expect(listed.workedMinutes).toBe(525);
+    expect(await Attendance.findById(row.id).then((r) => r.workedMinutes)).toBeNull();
+  });
+
   it('records GPS as unevaluated rather than claiming a geofence pass when geofencing is off', async () => {
     const { token, emp } = await seedPerson('Employee');
     const row = await rowFor(emp);

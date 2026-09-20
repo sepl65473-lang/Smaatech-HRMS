@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { workedMinutesBetween } from '../lib/workingHours.js';
 
 const attendanceSchema = new mongoose.Schema({
   empId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
@@ -80,6 +81,11 @@ const attendanceSchema = new mongoose.Schema({
   checkInFaceConfidence: { type: Number, default: null },
   checkOutFaceConfidence: { type: Number, default: null },
   anomalyFlags: { type: [String], default: [] },
+  // Total working time for the day, in minutes, derived from checkIn/checkOut
+  // when the punch is recorded. Rows written before this field existed simply
+  // have null and are derived on read below — nothing is back-filled into the
+  // database, so no historical record is rewritten.
+  workedMinutes: { type: Number, default: null },
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 
@@ -94,6 +100,9 @@ attendanceSchema.set('toJSON', {
   transform: (_doc, ret) => {
     ret.id = String(ret._id);
     ret.empId = String(ret.empId);
+    if (ret.workedMinutes == null && ret.checkIn && ret.checkOut) {
+      ret.workedMinutes = workedMinutesBetween(ret.checkIn, ret.checkOut);
+    }
     delete ret._id;
     delete ret.__v;
   },
