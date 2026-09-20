@@ -11,7 +11,12 @@ const TYPES = ['National', 'Regional', 'Optional'];
 const TYPE_CLASS = { National: 'tag-earned', Regional: 'tag-casual', Optional: 'tag-sick' };
 
 export default function Holidays() {
-  const { holidays, addHoliday, deleteHoliday, importHolidays, toast } = useHRMS();
+  const { holidays, addHoliday, deleteHoliday, importHolidays, toast, currentUser } = useHRMS();
+  // Managing the calendar is HR's job — the API already refuses POST/PATCH/
+  // DELETE from anyone below HR Manager (routes/holidays.js), so an employee
+  // who pressed these only ever got a 403. The calendar itself stays visible
+  // to everyone; only the management controls are HR's.
+  const isHR = ['HR Director', 'HR Manager'].includes(currentUser?.role);
   const today = new Date();
   const [year] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -92,9 +97,13 @@ export default function Holidays() {
             <select className="input" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
               {MONTH_NAMES.map((m, i) => <option key={m} value={i}>{m} {year}</option>)}
             </select>
-            <button className="btn btn-ghost" onClick={handleExportCsv}>Export CSV</button>
-            <button className="btn btn-ghost" onClick={() => setImportOpen(true)}>Import CSV</button>
-            <button className="btn" onClick={openAdd}><IconPlus width="14" height="14" /> Add holiday</button>
+            {isHR && (
+              <>
+                <button className="btn btn-ghost" onClick={handleExportCsv}>Export CSV</button>
+                <button className="btn btn-ghost" onClick={() => setImportOpen(true)}>Import CSV</button>
+                <button className="btn" onClick={openAdd}><IconPlus width="14" height="14" /> Add holiday</button>
+              </>
+            )}
           </div>
         </div>
 
@@ -143,101 +152,108 @@ export default function Holidays() {
                 <div className="leave-name">{h.name}</div>
                 <div className="leave-meta">{h.date}</div>
                 <span className={`leave-tag ${TYPE_CLASS[h.type] || 'tag-casual'}`}>{h.type}</span>
-                <div className="leave-actions">
-                  <button className="mini-btn danger" onClick={() => setConfirm(h)}>
-                    <IconTrash width="12" height="12" /> Delete
-                  </button>
-                </div>
+                {isHR && (
+                  <div className="leave-actions">
+                    <button className="mini-btn danger" onClick={() => setConfirm(h)}>
+                      <IconTrash width="12" height="12" /> Delete
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <Modal
-        open={formOpen}
-        title="Add holiday"
-        onClose={() => setFormOpen(false)}
-        width={420}
-        footer={(
-          <>
-            <button className="btn btn-ghost" onClick={() => setFormOpen(false)} disabled={saving}>Cancel</button>
-            <button className="btn" onClick={submit} disabled={saving}>{saving ? 'Adding…' : 'Add holiday'}</button>
-          </>
-        )}
-      >
-        {submitError && <span className="login-error" style={{ marginBottom: 16 }}>{submitError}</span>}
-        <div className="form-grid">
-          <label className="field field-full">
-            <span className="field-label">Holiday name</span>
-            <input className="input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Republic Day" />
-          </label>
-          <label className="field">
-            <span className="field-label">Day</span>
-            <input type="number" min="1" max="31" className="input" value={form.day} onChange={(e) => setForm((f) => ({ ...f, day: e.target.value }))} />
-          </label>
-          <label className="field">
-            <span className="field-label">Month</span>
-            <select className="input" value={form.month} onChange={(e) => setForm((f) => ({ ...f, month: Number(e.target.value) }))}>
-              {MONTH_NAMES.map((m, i) => <option key={m} value={i}>{m}</option>)}
-            </select>
-          </label>
-          <label className="field field-full">
-            <span className="field-label">Type</span>
-            <select className="input" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
-              {TYPES.map((t) => <option key={t}>{t}</option>)}
-            </select>
-          </label>
-        </div>
-      </Modal>
+      {isHR && (
+        <>
+        <Modal
+          open={formOpen}
+          title="Add holiday"
+          onClose={() => setFormOpen(false)}
+          width={420}
+          footer={(
+            <>
+              <button className="btn btn-ghost" onClick={() => setFormOpen(false)} disabled={saving}>Cancel</button>
+              <button className="btn" onClick={submit} disabled={saving}>{saving ? 'Adding…' : 'Add holiday'}</button>
+            </>
+          )}
+        >
+          {submitError && <span className="login-error" style={{ marginBottom: 16 }}>{submitError}</span>}
+          <div className="form-grid">
+            <label className="field field-full">
+              <span className="field-label">Holiday name</span>
+              <input className="input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Republic Day" />
+            </label>
+            <label className="field">
+              <span className="field-label">Day</span>
+              <input type="number" min="1" max="31" className="input" value={form.day} onChange={(e) => setForm((f) => ({ ...f, day: e.target.value }))} />
+            </label>
+            <label className="field">
+              <span className="field-label">Month</span>
+              <select className="input" value={form.month} onChange={(e) => setForm((f) => ({ ...f, month: Number(e.target.value) }))}>
+                {MONTH_NAMES.map((m, i) => <option key={m} value={i}>{m}</option>)}
+              </select>
+            </label>
+            <label className="field field-full">
+              <span className="field-label">Type</span>
+              <select className="input" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
+                {TYPES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </label>
+          </div>
+        </Modal>
 
-      <ConfirmDialog
-        open={Boolean(confirm)}
-        title="Remove holiday"
-        message={confirm ? `Remove "${confirm.name}" from the calendar?` : ''}
-        confirmLabel="Remove"
-        onCancel={() => setConfirm(null)}
-        onConfirm={async () => { await deleteHoliday(confirm.id); setConfirm(null); }}
-      />
+        <ConfirmDialog
+          open={Boolean(confirm)}
+          title="Remove holiday"
+          message={confirm ? `Remove "${confirm.name}" from the calendar?` : ''}
+          confirmLabel="Remove"
+          onCancel={() => setConfirm(null)}
+          onConfirm={async () => { await deleteHoliday(confirm.id); setConfirm(null); }}
+        />
 
-      <CsvImportModal
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        onImport={importHolidays}
-        title="Import holidays from CSV"
-        subtitle="Bulk add holidays to calendar"
-        templateHeader="name,date,type"
-        templateSample="Independence Day,15 Aug,National\nChristmas,2026-12-25,National"
-        templateFileName="holiday-import-template.csv"
-        columns={[
-          { key: 'name', label: 'Holiday Name' },
-          { key: 'date', label: 'Date' },
-          { key: 'type', label: 'Type' },
-        ]}
-        validateRow={(row) => {
-          const errors = [];
-          if (!row.name) errors.push('Name is required');
-          if (!row.date) errors.push('Date is required');
-          return errors;
-        }}
-        mapRow={(r) => {
-          let dateVal = r.date || '';
-          if (/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
-            const d = new Date(dateVal);
-            if (!isNaN(d.getTime())) {
-              const day = d.getDate();
-              const monthName = MONTH_NAMES[d.getMonth()];
-              const weekday = d.toLocaleDateString('en-IN', { weekday: 'short' });
-              dateVal = `${day} ${monthName}, ${weekday}`;
+        <CsvImportModal
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          onImport={importHolidays}
+          title="Import holidays from CSV"
+          subtitle="Bulk add holidays to calendar"
+          templateHeader="name,date,type"
+          templateSample="Independence Day,15 Aug,National\nChristmas,2026-12-25,National"
+          templateFileName="holiday-import-template.csv"
+          columns={[
+            { key: 'name', label: 'Holiday Name' },
+            { key: 'date', label: 'Date' },
+            { key: 'type', label: 'Type' },
+          ]}
+          validateRow={(row) => {
+            const errors = [];
+            if (!row.name) errors.push('Name is required');
+            if (!row.date) errors.push('Date is required');
+            return errors;
+          }}
+          mapRow={(r) => {
+            let dateVal = r.date || '';
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+              const d = new Date(dateVal);
+              if (!isNaN(d.getTime())) {
+                const day = d.getDate();
+                const monthName = MONTH_NAMES[d.getMonth()];
+                const weekday = d.toLocaleDateString('en-IN', { weekday: 'short' });
+                dateVal = `${day} ${monthName}, ${weekday}`;
+              }
             }
-          }
-          return {
-            name: r.name,
-            date: dateVal,
-            type: r.type || 'National',
-          };
-        }}
-      />
+            return {
+              name: r.name,
+              date: dateVal,
+              type: r.type || 'National',
+            };
+          }}
+        />
+        </>
+      )}
+
     </div>
   );
 }
