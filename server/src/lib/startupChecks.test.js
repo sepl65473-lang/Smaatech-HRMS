@@ -87,8 +87,20 @@ describe('deployment-shape checks', () => {
     expect(result.warnings.join(' ')).toMatch(/BREVO_API_KEY/);
   });
 
-  it('warns about ephemeral upload storage in production', () => {
+  it('defaults production uploads to durable storage rather than the ephemeral disk', () => {
+    // An unset STORAGE_DRIVER used to mean local disk, which on this host is
+    // wiped on every deploy — attendance selfies vanished while the rows kept
+    // pointing at them. Production now resolves to GridFS in the MongoDB this
+    // service already runs, so nothing is lost by omission.
     const env = validEnv();
+    delete env.ALLOW_EPHEMERAL_STORAGE;
+    delete env.STORAGE_DRIVER;
+    const result = runStartupChecks({ env, strict: true });
+    expect(result.warnings.join(' ')).not.toMatch(/lost on redeploy/);
+  });
+
+  it('still warns when ephemeral storage is chosen deliberately', () => {
+    const env = { ...validEnv(), STORAGE_DRIVER: 'local' };
     delete env.ALLOW_EPHEMERAL_STORAGE;
     const result = runStartupChecks({ env, strict: true });
     expect(result.warnings.join(' ')).toMatch(/lost on redeploy/);

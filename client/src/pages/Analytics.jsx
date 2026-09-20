@@ -2,10 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import { formatINR } from '../lib/helpers';
 import { downloadCSV } from '../lib/exportCsv';
-import { analyticsApi, fetchAllRows } from '../data/store';
+import { analyticsApi, fetchAllRows, fetchAllLoginActivity } from '../data/store';
 import {
   IconWorkforce, IconPresent, IconPerformance, IconPayroll,
 } from '../components/Icons';
+
+// Sign-in events already recorded by the audit log. Nothing about
+// authentication changes; this only lets HR export what is already stored.
+const LOGIN_ACTIONS = [
+  'User signed in', 'User signed out', 'Face sign-in',
+  'Failed sign-in attempt', 'Failed face sign-in attempt',
+  'Sign-in blocked (account locked)',
+];
 
 const REPORT_DATASETS = {
   employees: {
@@ -23,6 +31,15 @@ const REPORT_DATASETS = {
       { key: 'name', label: 'Name' }, { key: 'dept', label: 'Department' },
       { key: 'date', label: 'Date' }, { key: 'checkIn', label: 'Check-in' },
       { key: 'checkOut', label: 'Check-out' }, { key: 'status', label: 'Status' },
+    ],
+  },
+  login: {
+    label: 'Login activity',
+    columns: [
+      { key: 'when', label: 'When' }, { key: 'user', label: 'User' },
+      { key: 'role', label: 'Role' }, { key: 'action', label: 'Event' },
+      { key: 'ip', label: 'IP' }, { key: 'device', label: 'Device' },
+      { key: 'details', label: 'Details' },
     ],
   },
   leave: {
@@ -45,7 +62,11 @@ const REPORT_DATASETS = {
 };
 
 export default function Analytics() {
-  const { employees, attendance, leaves, payroll, recruitment, getMasterValues } = useHRMS();
+  const {
+    employees, attendance, leaves, payroll, recruitment, getMasterValues,
+    auditLog, currentUser, searchAuditLog,
+  } = useHRMS();
+  const canSeeLoginActivity = currentUser?.role === 'HR Director';
   const departments = getMasterValues('departments');
   const [dept, setDept] = useState('All');
 
@@ -53,10 +74,26 @@ export default function Analytics() {
   const [reportCols, setReportCols] = useState(() => new Set(REPORT_DATASETS.employees.columns.map((c) => c.key)));
 
   const reportDef = REPORT_DATASETS[reportKey];
+  const loginRows = useMemo(
+    () => (auditLog || [])
+      .filter((entry) => LOGIN_ACTIONS.includes(entry.action))
+      .map((entry) => ({
+        when: entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '',
+        user: entry.subject || entry.actor?.name || '',
+        role: entry.actor?.role || '',
+        action: entry.action,
+        ip: entry.ip || '',
+        device: entry.device || entry.userAgent || '',
+        details: entry.details || '',
+      })),
+    [auditLog],
+  );
+
   const reportRows = useMemo(() => {
+    if (reportKey === 'login') return loginRows;
     const rows = { employees, attendance, leave: leaves, payroll }[reportKey] || [];
     return dept === 'All' ? rows : rows.filter((r) => r.dept === dept);
-  }, [reportKey, dept, employees, attendance, leaves, payroll]);
+  }, [reportKey, dept, employees, attendance, leaves, payroll, loginRows]);
 
   const selectDataset = (key) => {
     setReportKey(key);
@@ -78,6 +115,15 @@ export default function Analytics() {
     const resource = { employees: 'employees', attendance: 'attendance', leave: 'leaves', payroll: 'payroll' }[reportKey];
     setExporting(true);
     try {
+      if (reportKey === 'login') {
+        // Sign-in history for the SELECTED period, paged out of the existing
+        // audit-log endpoint so the file is not the capped preview.
+        const rows = await fetchAllLoginActivity(searchAuditLog, {
+          from: range.from, to: range.to, actions: LOGIN_ACTIONS,
+        });
+        downloadCSV('login-activity-report', rows, cols);
+        return;
+      }
       const all = await fetchAllRows(resource);
       const rows = dept === 'All' ? all : all.filter((r) => r.dept === dept);
       downloadCSV(`${reportDef.label.toLowerCase().replace(/\s+/g, '-')}-report`, rows, cols);
@@ -369,7 +415,9 @@ export default function Analytics() {
         </div>
 
         <div className="filter-chips" style={{ marginBottom: 12 }}>
-          {Object.entries(REPORT_DATASETS).map(([key, def]) => (
+          {Object.entries(REPORT_DATASETS)
+            .filter(([key]) => key !== 'login' || canSeeLoginActivity)
+            .map(([key, def]) => (
             <button key={key} className={`chip ${reportKey === key ? 'active' : ''}`} onClick={() => selectDataset(key)}>
               {def.label}
             </button>

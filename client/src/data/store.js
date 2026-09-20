@@ -403,6 +403,35 @@ export const authApi = {
  * data while looking like a complete export — the worst kind of wrong, because
  * the person exporting it has no way to tell.
  */
+/**
+ * Every sign-in/sign-out entry the audit log already holds for a period,
+ * paged so the file is not the capped preview. Reads only; authentication,
+ * sessions and the audit entries themselves are untouched.
+ */
+export async function fetchAllLoginActivity(search, { from, to, actions, pageSize = 500, max = 50000 } = {}) {
+  const rows = [];
+  for (let page = 1; rows.length < max; page += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const res = await search({ page, limit: pageSize, from: from || undefined, to: to || undefined });
+    const batch = Array.isArray(res) ? res : (res.rows || res.logs || []);
+    rows.push(...batch);
+    const total = Array.isArray(res) ? batch.length : (res.total ?? rows.length);
+    if (batch.length < pageSize || rows.length >= total) break;
+  }
+  const wanted = actions ? new Set(actions) : null;
+  return rows
+    .filter((entry) => !wanted || wanted.has(entry.action))
+    .map((entry) => ({
+      when: entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '',
+      user: entry.subject || entry.actor?.name || '',
+      role: entry.actor?.role || '',
+      action: entry.action,
+      ip: entry.ip || '',
+      device: entry.device || entry.userAgent || '',
+      details: entry.details || '',
+    }));
+}
+
 export async function fetchAllRows(resource, { pageSize = 500, max = 50000, params = {} } = {}) {
   const rows = [];
   for (let page = 1; rows.length < max; page += 1) {

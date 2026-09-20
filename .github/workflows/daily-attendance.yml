@@ -1,0 +1,45 @@
+name: Daily attendance job (fallback trigger)
+
+# REDUNDANCY, NOT A REPLACEMENT. The API's own scheduler (server/src/lib/jobs.js)
+# still runs the daily attendance jobs at their existing times and is still the
+# primary path. It can only fire while the process is running, though, and this
+# service sleeps after 15 idle minutes — which is why 13 of the 31 days to
+# 20 Sep 2026 have no attendance rows at all in production.
+#
+# This calls the SAME job functions through
+# POST /api/v1/internal/jobs/daily-attendance. Running twice in one day is
+# safe: rows are only created for employees who have none for that date, and
+# no historical day is ever written.
+#
+# Required repository secrets:
+#   HRMS_API_BASE   e.g. https://smaatech-hrms-1.onrender.com/api/v1
+#   HRMS_JOB_TOKEN  the API's METRICS_TOKEN value
+
+on:
+  schedule:
+    - cron: '40 18 * * *' # 00:10 IST, just after the in-process job's 00:05
+  workflow_dispatch:
+
+concurrency:
+  group: hrms-daily-attendance
+  cancel-in-progress: false
+
+jobs:
+  run-daily-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger the existing daily attendance jobs
+        env:
+          HRMS_API_BASE: ${{ secrets.HRMS_API_BASE }}
+          HRMS_JOB_TOKEN: ${{ secrets.HRMS_JOB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HRMS_API_BASE" || { echo "HRMS_API_BASE secret is not set"; exit 1; }
+          test -n "$HRMS_JOB_TOKEN" || { echo "HRMS_JOB_TOKEN secret is not set"; exit 1; }
+          # --retry covers the cold start: the service may be asleep, and the
+          # first request can fail while it boots (measured at ~70s).
+          curl --silent --show-error --fail --retry 6 --retry-delay 20 --retry-all-errors \
+            --max-time 180 -X POST \
+            -H "X-Metrics-Token: $HRMS_JOB_TOKEN" \
+            "$HRMS_API_BASE/internal/jobs/daily-attendance"

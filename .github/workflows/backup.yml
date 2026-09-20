@@ -1,0 +1,119 @@
+name: Daily MongoDB backup to Backblaze B2
+
+# The HRMS database had no backup at all: MongoDB Atlas M0 takes none, and the
+# app's own nightly job writes to Render's disk, which is wiped on every
+# deploy. This takes a full mongodump — every collection, including the GridFS
+# buckets that hold attendance selfies and documents — and stores it OUTSIDE
+# both the cluster and Render, in Backblaze B2. Each run then restores what it
+# just uploaded into a throwaway MongoDB and checks it, so the backups are
+# known to be restorable rather than assumed to be.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   MONGODB_URI              the same connection string the API uses
+#   B2_APPLICATION_KEY_ID    Backblaze B2 application key id
+#   B2_APPLICATION_KEY       Backblaze B2 application key
+#   B2_BUCKET                the B2 bucket name to store archives in
+#
+# Retention: 30 days, pruned at the end of each run.
+
+on:
+  schedule:
+    - cron: '30 19 * * *' # 01:00 IST daily
+  workflow_dispatch:
+
+concurrency:
+  group: hrms-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # The restore target. Throwaway, local to this runner, and destroyed
+      # with it — production is never written to by this workflow.
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Install MongoDB database tools and the Backblaze B2 CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL -o mongodb-tools.deb \
+            https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2204-x86_64-100.10.0.deb
+          sudo dpkg -i mongodb-tools.deb
+          pipx install b2
+          mongodump --version | head -1
+          b2 version
+
+      - name: Take the backup
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          set -euo pipefail
+          test -n "$MONGODB_URI" || { echo "MONGODB_URI secret is not set"; exit 1; }
+          STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          echo "ARCHIVE=hrms-$STAMP.archive.gz" >> "$GITHUB_ENV"
+          # One archive of the whole database, GridFS buckets included.
+          mongodump --uri="$MONGODB_URI" --archive="hrms-$STAMP.archive.gz" --gzip
+          ls -lh "hrms-$STAMP.archive.gz"
+
+      - name: Upload to Backblaze B2
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: |
+          set -euo pipefail
+          b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
+          b2 file upload "$B2_BUCKET" "$ARCHIVE" "daily/$ARCHIVE"
+
+      - name: Restore the archive into a throwaway MongoDB and verify it
+        run: |
+          set -euo pipefail
+          RESTORE_URI="mongodb://127.0.0.1:27017/hrms_restore_check"
+          mongorestore --uri="$RESTORE_URI" --archive="$ARCHIVE" --gzip --nsFrom='*.*' --nsTo='hrms_restore_check.*'
+          npm --prefix server ci --omit=dev
+          node server/scripts/verifyRestore.js "$RESTORE_URI"
+
+      - name: Prune backups older than 30 days
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: |
+          set -euo pipefail
+          b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
+          CUTOFF="$(date -u -d '30 days ago' +%Y-%m-%d)"
+          echo "Removing archives taken before $CUTOFF"
+          b2 ls --recursive "b2://$B2_BUCKET/daily/" | while read -r name; do
+            stamp="$(basename "$name" | sed -n 's/^hrms-\([0-9-]\{10\}\)T.*/\1/p')"
+            [ -n "$stamp" ] || continue
+            if [[ "$stamp" < "$CUTOFF" ]]; then
+              echo "  delete $name"
+              b2 rm "b2://$B2_BUCKET/$name"
+            fi
+          done
+
+      - name: Report what was kept
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: |
+          set -euo pipefail
+          b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
+          echo "Archives currently retained:"
+          b2 ls --recursive "b2://$B2_BUCKET/daily/" | tail -35

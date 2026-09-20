@@ -35,8 +35,8 @@ function resolveWithinUploads(ref) {
 // silently. `STORAGE_DRIVER=s3` therefore refuses to start rather than
 // pretending to work — which is exactly the silent data loss that existed
 // before.
-export function storageDriver() {
-  const configured = (process.env.STORAGE_DRIVER || '').toLowerCase();
+export function resolveStorageDriver(env = process.env) {
+  const configured = (env.STORAGE_DRIVER || '').toLowerCase();
   if (configured === 's3') {
     throw new Error(
       'STORAGE_DRIVER=s3 is not implemented in this project. This HRMS stores files on '
@@ -45,7 +45,20 @@ export function storageDriver() {
     );
   }
   if (configured === 'gridfs') return 'gridfs';
+  if (configured === 'local') return 'local';
+
+  // PRODUCTION DEFAULTS TO DURABLE. The container filesystem is wiped on every
+  // deploy and every wake from sleep, so an unset variable used to mean
+  // "attendance selfies disappear" — and in this deployment it did: the rows
+  // still carry a photo ref while the file behind it is gone. GridFS needs no
+  // new provider or credential; it is the MongoDB this service already runs.
+  // ALLOW_EPHEMERAL_STORAGE=1 keeps the old behaviour for anyone who wants it.
+  if (env.NODE_ENV === 'production' && !env.ALLOW_EPHEMERAL_STORAGE) return 'gridfs';
   return 'local';
+}
+
+export function storageDriver() {
+  return resolveStorageDriver(process.env);
 }
 
 export function isDurableStorage() {
@@ -158,7 +171,7 @@ export function assertStorageConfigured(env = process.env) {
     );
   }
 
-  if (configured === 'gridfs') {
+  if (resolveStorageDriver(env) === 'gridfs') {
     logger.info('[photoStorage] durable storage: MongoDB GridFS (bucket %s)', env.GRIDFS_BUCKET || 'hrmsfiles');
     return { driver: 'gridfs', durable: true };
   }
