@@ -81,10 +81,20 @@ jobs:
           b2 file upload "$B2_BUCKET" "$ARCHIVE" "daily/$ARCHIVE"
 
       - name: Restore the archive into a throwaway MongoDB and verify it
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
         run: |
           set -euo pipefail
-          RESTORE_URI="mongodb://127.0.0.1:27017/hrms_restore_check"
-          mongorestore --uri="$RESTORE_URI" --archive="$ARCHIVE" --gzip --nsFrom='*.*' --nsTo='hrms_restore_check.*'
+          # Restored under its own database name: renaming needs matching
+          # asterisk counts and buys nothing here, since this MongoDB is a
+          # throwaway container that dies with the runner.
+          # sed, not a URL parser: an Atlas URI lists several hosts separated
+          # by commas, which URL() rejects outright.
+          DB_NAME="$(printf '%s' "$MONGODB_URI" | sed -E 's#^[^/]*//[^/]*/##; s#\?.*$##')"
+          DB_NAME="${DB_NAME:-test}"
+          RESTORE_URI="mongodb://127.0.0.1:27017/$DB_NAME"
+          echo "restoring into $RESTORE_URI"
+          mongorestore --uri="$RESTORE_URI" --archive="$ARCHIVE" --gzip
           npm --prefix server ci --omit=dev
           node server/scripts/verifyRestore.js "$RESTORE_URI"
 
