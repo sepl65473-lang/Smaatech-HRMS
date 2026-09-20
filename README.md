@@ -1639,6 +1639,40 @@ The deployment this repository is configured for is **static client on Vercel + 
 
 > **Render free tier spins down after ~15 minutes idle.** The first request after that takes 30–60 seconds while the service wakes and reloads the TensorFlow models. That is cold start, not a bug.
 
+### 4. Scheduled operations (GitHub Actions)
+
+Three workflows run against the deployed system. They need repository secrets
+(**Settings → Secrets and variables → Actions**):
+
+| Workflow | What it does | Secrets |
+|---|---|---|
+| `keep-alive.yml` | Pings `/api/v1/health` so the free instance sleeps less | none |
+| `daily-attendance.yml` | Calls `POST /api/v1/internal/jobs/daily-attendance`, a **redundant** trigger for the daily attendance jobs the in-process scheduler already runs. The service cannot run cron while it is asleep, which is why days can otherwise end up with no attendance rows at all. Running twice in a day is a no-op: rows are only created for employees who have none for that date. | `HRMS_API_BASE` (e.g. `https://<api-host>/api/v1`), `HRMS_JOB_TOKEN` (the API's `METRICS_TOKEN`) |
+| `backup.yml` | Daily `mongodump` of the whole database — GridFS buckets, so attendance selfies and documents included — uploaded to **Backblaze B2**, then restored into a throwaway MongoDB and checked with `server/scripts/verifyRestore.js`. Archives older than **30 days** are pruned. | `MONGODB_URI`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`, `B2_BUCKET` |
+
+Atlas M0 takes no backups of its own and Render's disk is ephemeral, so
+`backup.yml` is the only thing standing between a lost cluster and a lost
+year of attendance. Two settings on the B2 bucket matter: set **Lifecycle** to
+*keep only the last version* (otherwise pruned archives linger as hidden
+versions), and do not set a default **Object Lock** retention (it would stop
+the prune).
+
+Restoring for real is the same archive plus `mongorestore`:
+
+```bash
+b2 file download "b2://<bucket>/daily/<archive>" ./restore.archive.gz
+mongorestore --uri="<target-uri>" --archive=./restore.archive.gz --gzip
+```
+
+### Attendance file storage
+
+Uploads (attendance selfies, documents) go to **MongoDB GridFS in production by
+default** — the container filesystem is wiped on every deploy and every wake
+from sleep, so a local-disk default silently lost photos that attendance rows
+still pointed at. `STORAGE_DRIVER=gridfs|local` overrides it explicitly, and
+`ALLOW_EPHEMERAL_STORAGE=1` opts back into the ephemeral behaviour knowingly.
+Because the files live in MongoDB, `backup.yml` already covers them.
+
 ---
 
 ## 🔧 Troubleshooting
