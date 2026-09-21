@@ -488,7 +488,6 @@ export default function Attendance() {
                     <th style={{ whiteSpace: 'nowrap' }}>Shift</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Check-in</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Check-out</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Hours</th>
                     <th style={{ whiteSpace: 'nowrap' }}>Status</th>
                     <th style={{ whiteSpace: 'nowrap', maxWidth: 240 }}>Location</th>
                   </tr>
@@ -536,9 +535,6 @@ export default function Attendance() {
                               📸
                             </button>
                           )}
-                        </td>
-                        <td className="mono" style={{ whiteSpace: 'nowrap' }}>
-                          {formatWorkedMinutes(a.workedMinutes) || '—'}
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           {isHR ? (
