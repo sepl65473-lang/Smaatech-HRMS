@@ -95,3 +95,23 @@ describe('POST /internal/jobs/daily-attendance', () => {
     expect(asEmployee.status).toBe(403);
   });
 });
+
+describe('POST /internal/jobs/attendance-reminders', () => {
+  it('is not open to anonymous callers', async () => {
+    expect((await request(app).post('/api/v1/internal/jobs/attendance-reminders')).status).toBe(401);
+    expect((await request(app)
+      .post('/api/v1/internal/jobs/attendance-reminders')
+      .set('X-Metrics-Token', 'not-the-token')).status).toBe(401);
+  });
+
+  it('runs the reminder job for a valid token without touching attendance', async () => {
+    await Employee.create({ name: 'One', email: 'one@example.com', dept: 'Engineering', role: 'Engineer', company: COMPANY, status: 'active' });
+    const res = await request(app)
+      .post('/api/v1/internal/jobs/attendance-reminders')
+      .set('X-Metrics-Token', TOKEN);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.date).toBe(todayISO());
+    expect(await Attendance.countDocuments()).toBe(0);
+  });
+});

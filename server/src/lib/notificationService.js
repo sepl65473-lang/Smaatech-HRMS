@@ -236,6 +236,9 @@ export async function retryPendingDeliveries({ limit = 50, now = new Date() } = 
     status: 'failed',
     channel: 'email',
     nextAttemptAt: { $lte: now },
+    // Attendance reminders retry themselves (lib/attendanceReminderJob.js):
+    // they must re-check attendance before resending, which this pass cannot.
+    type: { $ne: 'attendance-reminder' },
   }).sort({ nextAttemptAt: 1 }).limit(limit);
 
   const summary = { considered: due.length, sent: 0, failed: 0, exhausted: 0 };

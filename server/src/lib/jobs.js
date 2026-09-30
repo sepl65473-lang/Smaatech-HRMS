@@ -7,6 +7,7 @@ import { retryPendingDeliveries } from './notificationService.js';
 import { runScheduledBackup, isScheduledBackupConfigured, backupDestination } from './backupJob.js';
 import { createTodaysAttendanceRows, notifyYesterdaysAbsences } from './attendanceDailyJob.js';
 import { checkDocumentExpirations } from './documentExpiryJob.js';
+import { sendAttendanceReminders } from './attendanceReminderJob.js';
 import { accrueMonthly, rollOverYear, leaveYearOf, ensureLeaveTypes } from './leaveLedger.js';
 import { notifyAttendanceEvent } from './attendanceNotify.js';
 import { processInNonBlockingBatches } from './jobQueue.js';
@@ -161,6 +162,10 @@ export function startSchedulers() {
   scheduleJob('attendance:create-daily-rows', '5 0 * * *', createTodaysAttendanceRows);
   scheduleJob('attendance:notify-absences', '0 10 * * *', notifyYesterdaysAbsences);
   scheduleJob('attendance:flag-missing-checkouts', '30 1 * * *', flagMissingCheckouts);
+  // Same-day missing Check-In / Check-Out emails to the employee. The job
+  // itself enforces the cutoff times and sends each reminder once per day, so
+  // this only sets how often it looks.
+  scheduleJob('attendance:same-day-reminders', process.env.ATTENDANCE_REMINDER_CRON || '*/30 * * * *', sendAttendanceReminders);
   scheduleJob('documents:expiry-reminders', '0 9 * * *', checkDocumentExpirations);
   // Last day handling is unnecessary: the accrual is idempotent per month, so
   // running on the 1st credits the month that just began.

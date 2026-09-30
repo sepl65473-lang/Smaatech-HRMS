@@ -1,0 +1,46 @@
+name: Attendance reminders (fallback trigger)
+
+# REDUNDANCY, NOT A REPLACEMENT — same reasoning as daily-attendance.yml. The
+# API's own scheduler runs the same-day attendance reminders every 30 minutes
+# (server/src/lib/attendanceReminderJob.js), but only while the service is
+# awake. This calls the SAME job through
+# POST /api/v1/internal/jobs/attendance-reminders.
+#
+# Extra runs are safe: the job enforces the configured cutoff times itself and
+# sends each reminder at most once per employee per day.
+#
+# Required repository secrets (shared with daily-attendance.yml):
+#   HRMS_API_BASE   e.g. https://smaatech-hrms-1.onrender.com/api/v1
+#   HRMS_JOB_TOKEN  the API's METRICS_TOKEN value
+
+on:
+  schedule:
+    # 14:45, 19:45 and 23:15 IST — just after the default Check-In (14:00)
+    # and Check-Out (19:00) cutoffs, and late enough for an evening shift.
+    - cron: '15 9 * * *'
+    - cron: '15 14 * * *'
+    - cron: '45 17 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: hrms-attendance-reminders
+  cancel-in-progress: false
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger the attendance reminder job
+        env:
+          HRMS_API_BASE: ${{ secrets.HRMS_API_BASE }}
+          HRMS_JOB_TOKEN: ${{ secrets.HRMS_JOB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HRMS_API_BASE" || { echo "HRMS_API_BASE secret is not set"; exit 1; }
+          test -n "$HRMS_JOB_TOKEN" || { echo "HRMS_JOB_TOKEN secret is not set"; exit 1; }
+          # --retry covers the cold start (see daily-attendance.yml).
+          curl --silent --show-error --fail --retry 6 --retry-delay 20 --retry-all-errors \
+            --max-time 180 -X POST \
+            -H "X-Metrics-Token: $HRMS_JOB_TOKEN" \
+            "$HRMS_API_BASE/internal/jobs/attendance-reminders"

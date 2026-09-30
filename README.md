@@ -1154,6 +1154,8 @@ Both schedulers start from `index.js` with a 5-second delay (to let the DB conne
 
 The unique `{ empId, date }` index makes the row-creation job safely re-runnable; duplicate-key errors (`code 11000`) are swallowed by design.
 
+**Same-day attendance reminders** (`lib/attendanceReminderJob.js`, every 30 min by default via `ATTENDANCE_REMINDER_CRON`). After `ATTENDANCE_CHECKIN_CUTOFF` (default `14:00` IST) an employee with no Check-In today is emailed a "Check-In missing" notice; after `ATTENDANCE_CHECKOUT_CUTOFF` (default `19:00`) someone who checked in but has not checked out gets a "Check-Out missing" notice. The email goes **only to that employee's `Employee.email`**, not to their manager or HR. Nobody is emailed on a holiday or weekly off (`Settings.workWeek`), while on approved leave, when their row is already `leave`/`holiday`, when they are `exited`/`terminated`/`on-leave`, or before their own shift's start (+ grace) or end (+ `ATTENDANCE_CHECKOUT_GRACE_MINS`). Overnight shifts get no same-day check-out reminder. Each reminder is a `NotificationDelivery` row with type `attendance-reminder` and dedupe key `attendance-reminder:<event>:<empId>:<date>`, so it is sent at most once per day however often the job runs. The job retries failed sends itself (the generic retry pass skips this type) and re-reads attendance first, so a late punch cancels a pending retry. `ATTENDANCE_REMINDERS_ENABLED=false` switches it off.
+
 ---
 
 ## 🚀 CI/CD Pipeline
@@ -1641,13 +1643,14 @@ The deployment this repository is configured for is **static client on Vercel + 
 
 ### 4. Scheduled operations (GitHub Actions)
 
-Three workflows run against the deployed system. They need repository secrets
+Four workflows run against the deployed system. They need repository secrets
 (**Settings → Secrets and variables → Actions**):
 
 | Workflow | What it does | Secrets |
 |---|---|---|
 | `keep-alive.yml` | Pings `/api/v1/health` so the free instance sleeps less | none |
 | `daily-attendance.yml` | Calls `POST /api/v1/internal/jobs/daily-attendance`, a **redundant** trigger for the daily attendance jobs the in-process scheduler already runs. The service cannot run cron while it is asleep, which is why days can otherwise end up with no attendance rows at all. Running twice in a day is a no-op: rows are only created for employees who have none for that date. | `HRMS_API_BASE` (e.g. `https://<api-host>/api/v1`), `HRMS_JOB_TOKEN` (the API's `METRICS_TOKEN`) |
+| `attendance-reminders.yml` | Calls `POST /api/v1/internal/jobs/attendance-reminders` at 14:45, 19:45 and 23:15 IST, a **redundant** trigger for the same-day attendance reminder job. It is safe to run extra times: the job enforces the cutoffs and sends each reminder once per employee per day. | same as `daily-attendance.yml` |
 | `backup.yml` | Daily `mongodump` of the whole database — GridFS buckets, so attendance selfies and documents included — uploaded to **Backblaze B2**, then restored into a throwaway MongoDB and checked with `server/scripts/verifyRestore.js`. Archives older than **30 days** are pruned. | `MONGODB_URI`, `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`, `B2_BUCKET` |
 
 Atlas M0 takes no backups of its own and Render's disk is ephemeral, so
