@@ -1,5 +1,22 @@
 import AuditLog from '../models/AuditLog.js';
 
+// Credentials and their hashes never belong in the audit trail. Logging a User
+// document used to copy passwordHash/otpHash into before/after/diff and into
+// the human-readable details line shown in the activity feed.
+const SENSITIVE_KEYS = new Set([
+  'password', 'passwordHash', 'otpHash', 'otpExpiresAt',
+  'loginOtpHash', 'loginOtpExpiresAt', 'tokens', 'tokenHash',
+]);
+
+function withoutSensitive(doc) {
+  if (!doc) return null;
+  const obj = doc.toObject ? doc.toObject() : doc;
+  if (typeof obj !== 'object' || Array.isArray(obj)) return obj;
+  const copy = { ...obj };
+  for (const key of SENSITIVE_KEYS) delete copy[key];
+  return copy;
+}
+
 function summarizeValue(v) {
   if (v === undefined) return 'undefined';
   if (v !== null && typeof v === 'object') return Array.isArray(v) ? `[${v.length} item(s)]` : '{…}';
@@ -23,7 +40,7 @@ export async function logAudit(req, { action, subject, before, after, details = 
       const keys = new Set([...Object.keys(beforeObj), ...Object.keys(afterObj)]);
 
       for (const key of keys) {
-        if (['createdAt', 'updatedAt', '__v', 'id', '_id', 'password', 'tokens'].includes(key)) continue;
+        if (['createdAt', 'updatedAt', '__v', 'id', '_id'].includes(key) || SENSITIVE_KEYS.has(key)) continue;
         const bVal = beforeObj[key];
         const aVal = afterObj[key];
 
@@ -53,8 +70,8 @@ export async function logAudit(req, { action, subject, before, after, details = 
       action,
       subject: subject || '',
       details: computedDetails || '',
-      before: before ? (before.toObject ? before.toObject() : before) : null,
-      after: after ? (after.toObject ? after.toObject() : after) : null,
+      before: withoutSensitive(before),
+      after: withoutSensitive(after),
       diff,
       ip,
       userAgent,

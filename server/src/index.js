@@ -31,7 +31,9 @@ setupCluster(() => {
       // A server that can never reach its database serves nothing but errors;
       // exiting lets the orchestrator restart or roll back instead of leaving
       // a permanently unhealthy instance in the load balancer.
-      if (process.env.NODE_ENV === 'production') process.exitCode = 1;
+      // process.exitCode alone never ended the process: the HTTP server keeps
+      // the event loop alive, so it stayed up answering 500s.
+      if (process.env.NODE_ENV === 'production') process.exit(1);
     });
 
     initFaceEngine().catch((err) => {

@@ -35,11 +35,13 @@ services:
       # This project's own Vercel URL prefix, so preview deployments pass CORS.
       - key: VERCEL_PREVIEW_PREFIX
         sync: false
-      # Render terminates TLS at its edge — one proxy hop. Without this, every
-      # request looks like it comes from the proxy, so per-IP rate limiting
-      # buckets all users together and audit logs record the wrong address.
+      # A request reaches this service as client -> Cloudflare -> Render's
+      # internal router -> app: three proxy hops, confirmed from the
+      # X-Forwarded-For recorded on production requests. With "1", req.ip was
+      # Render's internal 10.x address, so per-IP rate limiting bucketed all
+      # users together and sessions recorded the wrong address.
       - key: TRUST_PROXY_HOPS
-        value: "1"
+        value: "3"
       # Guards /api/v1/metrics and /api/v1/ai/* for scrapers with no session.
       - key: METRICS_TOKEN
         generateValue: true

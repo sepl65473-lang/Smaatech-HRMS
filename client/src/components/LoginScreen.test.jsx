@@ -83,4 +83,25 @@ describe('LoginScreen', () => {
     expect(await screen.findByText('Invalid mobile number or password.')).toBeTruthy();
     expect(ctx.finishLogin).not.toHaveBeenCalled();
   });
+
+  it('sends ONE request however many times sign-in is pressed while it is in flight', async () => {
+    const user = userEvent.setup();
+    let finish;
+    const ctx = renderLogin({
+      login: vi.fn(() => new Promise((resolve) => { finish = () => resolve({ accessToken: 't', user: {} }); })),
+    });
+
+    await user.type(screen.getByPlaceholderText('you@smaatech.co'), 'someone@example.com');
+    await user.type(screen.getByPlaceholderText('••••••••'), 'CorrectPass123');
+    const button = screen.getByRole('button', { name: 'Sign in' });
+    await user.click(button);
+    await user.click(button);
+    await user.type(screen.getByPlaceholderText('••••••••'), '{Enter}');
+
+    expect(ctx.login).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+
+    finish();
+    await waitFor(() => expect(button.disabled).toBe(false));
+  });
 });

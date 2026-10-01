@@ -16,6 +16,8 @@ import { logAudit } from '../lib/auditLogger.js';
 import { mobileKey } from '../lib/phoneNumber.js';
 import { extractDescriptor, matchDescriptor, faceFailureMessage } from '../lib/faceEngine.js';
 import { imageUploadMiddleware } from '../lib/photoStorage.js';
+import { terminateAllAccess } from '../lib/sessionRevoker.js';
+import crypto from 'node:crypto';
 
 const router = Router();
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -426,7 +428,7 @@ router.post('/forgot-password', validate(forgotPasswordSchema), async (req, res)
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Admin password can only be changed from Settings after signing in.' } });
   }
 
-  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  const otp = String(crypto.randomInt(100000, 1000000));
   user.otpHash = await hashPassword(otp, 10);
   user.otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
   await user.save();
@@ -473,6 +475,9 @@ router.post('/reset-password', validate(resetPasswordSchema), async (req, res) =
     user.lockedUntil = null;
   }
   await user.save();
+  // The old password may be why this reset happened; anything still signed in
+  // with it must not survive the change.
+  await terminateAllAccess(user._id, { reason: 'password reset by OTP' });
   await logAudit(req, {
     action: 'Password reset completed', subject: user.email,
     actor: loginActor(user), company: user.company,

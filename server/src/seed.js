@@ -44,27 +44,40 @@ const MANAGER_OF = {
   'Pooja Desai': 'Aditi Rao',
 };
 
-// Demo passwords are read from environment variables or fall back to safe defaults.
-const DEFAULT_PASSWORDS = {
-  SEED_ADMIN_PASS: 'Admin@123',
-  SEED_HR_PASS: 'Manager@123',
-  SEED_FINANCE_PASS: 'Finance@123',
-  SEED_EMPLOYEE_PASS: 'Employee@123',
-};
-
+// Demo passwords come ONLY from the environment. The old fallbacks were
+// published in this repository and in the client bundle, and one of them ended
+// up as a real production password.
 const DEMO_ACCOUNTS = [
   { name: 'Admin', role: 'HR Director', initials: 'AD', email: 'admin@smaatech.co', envKey: 'SEED_ADMIN_PASS' },
   { name: 'Nisha Rao', role: 'HR Manager', initials: 'NR', email: 'hr.manager@smaatech.co', envKey: 'SEED_HR_PASS' },
   { name: 'Kabir Mehta', role: 'Finance Lead', initials: 'KM', email: 'finance.lead@smaatech.co', envKey: 'SEED_FINANCE_PASS' },
   { name: 'Priya Sharma', role: 'Employee', initials: 'PS', email: 'priya.sharma@smaatech.co', envKey: 'SEED_EMPLOYEE_PASS', empName: 'Priya Sharma' },
 ].map(acc => {
-  const password = process.env[acc.envKey] || DEFAULT_PASSWORDS[acc.envKey];
+  const password = process.env[acc.envKey];
   const { envKey, ...rest } = acc;
-  return { ...rest, password };
+  return { ...rest, password, envKey };
 });
 
 async function run() {
+  const missing = DEMO_ACCOUNTS.filter((a) => !a.password).map((a) => a.envKey);
+  if (missing.length) {
+    throw new Error(`Refusing to seed: set ${missing.join(', ')} in server/.env first (see .env.example).`);
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to seed: NODE_ENV is production. This script wipes Users, Employees, Attendance, Settings, Roles and master data.');
+  }
+
   await connectDB();
+
+  // This script DELETES every user, employee and role before rebuilding the
+  // demo set. A local .env pointing at a live database turned that into a
+  // one-command wipe of production, so a database that already holds accounts
+  // is only overwritten when that is asked for explicitly.
+  const existingUsers = await User.countDocuments({});
+  if (existingUsers > 0 && process.env.SEED_ALLOW_WIPE !== 'true') {
+    throw new Error(`Refusing to seed: this database already holds ${existingUsers} login account(s) and seeding deletes them all. `
+      + 'Check MONGODB_URI. To wipe a throwaway database on purpose, re-run with SEED_ALLOW_WIPE=true.');
+  }
 
   await Promise.all([
     Employee.deleteMany({}),

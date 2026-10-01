@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import { DEFAULT_LOGIN_PROFILES } from '../lib/permissions';
 import ForgotPasswordModal from './ForgotPasswordModal';
@@ -22,7 +22,18 @@ export default function LoginScreen() {
   // Password sign-in is the whole flow: the server either rejects the
   // credentials or issues the session in the same response. (There used to be
   // an emailed 2FA code step here; it has been removed.)
+  //
+  // One action, one request. Enter in either field and the button all call
+  // this, and a sign-in can take seconds (a minute on a cold start), so
+  // without a guard a second tap sent a second login — and a wrong password
+  // cost two of the five lockout strikes. The ref closes the gap before the
+  // disabled state has rendered.
+  const inFlight = useRef(false);
+  const [busy, setBusy] = useState(false);
   const submit = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
     try {
       const { accessToken, user } = byMobile
         ? await loginWithMobile(mobile.trim(), password)
@@ -31,6 +42,9 @@ export default function LoginScreen() {
       await finishLogin(accessToken, user);
     } catch (err) {
       setError(err.message || (byMobile ? 'Invalid mobile number or password.' : 'Invalid email or password.'));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
     }
   };
 
@@ -219,7 +233,7 @@ export default function LoginScreen() {
             </div>
 
             {/* Sign in button */}
-            <button className="login-submit-btn" onClick={submit}>
+            <button className="login-submit-btn" onClick={submit} disabled={busy} aria-busy={busy}>
               Sign in
             </button>
 

@@ -54,7 +54,10 @@ export async function sendWelcomeEmail({ toEmail, userName, role, tempPassword, 
   const EmailLog = (await import('../models/EmailLog.js')).default;
   const { generateWelcomeEmail } = await import('./templates/welcomeEmail.js');
 
-  const key = idempotencyKey || `${company}_welcome_${toEmail}`;
+  // Scoped to the ACCOUNT, not just the address: a login that is deleted and
+  // re-created with the same email is a new account with a new temporary
+  // password, and the address-only key skipped its email while reporting SENT.
+  const key = idempotencyKey || `${company}_welcome_${toEmail}${userId ? `_${userId}` : ''}`;
   if (key) {
     const existing = await EmailLog.findOne({ company, idempotencyKey: key, status: 'SENT' });
     if (existing) {

@@ -32,7 +32,10 @@ export default function ForgotPasswordModal({ open, onClose, onRequestOtp, onRes
 
   const submitReset = async () => {
     if (otp.trim().length !== 6) { setError('Enter the 6-digit code from your email.'); return; }
-    if (!password || password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (!password || password.length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+      setError('Password must be at least 8 characters and include a letter and a number.');
+      return;
+    }
     if (password !== confirm) { setError('Passwords do not match.'); return; }
     setError('');
     setSending(true);
@@ -107,7 +110,7 @@ export default function ForgotPasswordModal({ open, onClose, onRequestOtp, onRes
               type="password"
               value={password}
               onChange={(e) => { setPassword(e.target.value); setError(''); }}
-              placeholder="At least 6 characters"
+              placeholder="At least 8 characters, with a letter and a number"
             />
           </label>
           <label className="field field-full">

@@ -222,6 +222,10 @@ router.patch('/:id', requireRole(), async (req, res) => {
       return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: PASSWORD_POLICY_MESSAGE } });
     }
     patch.passwordHash = await bcrypt.hash(password, 10);
+    // An admin resets a password because the person cannot get in; leaving
+    // the lockout in place kept them out for the rest of its 15 minutes.
+    patch.failedLoginAttempts = 0;
+    patch.lockedUntil = null;
   }
 
   const before = await User.findOne({ _id: req.params.id, ...companyFilter(req) });

@@ -27,7 +27,7 @@ vi.mock('axios', () => ({
   },
 }));
 
-const { ApiError } = await import('./apiClient');
+const { ApiError, setAccessToken, setSessionLostHandler } = await import('./apiClient');
 
 const reject = async (err) => {
   try {
@@ -167,5 +167,43 @@ describe('sleeping server: retried instead of surfaced', () => {
   it('does not replay a timed-out POST, which the server may have already processed', async () => {
     const err = await reject({ config: { url: '/employees', method: 'post' }, code: 'ECONNABORTED', message: 'timeout' });
     expect(err.code).toBe('TIMEOUT');
+  });
+});
+
+describe('a session the server has ended', () => {
+  const disabled = () => ({
+    config: { url: '/employees', method: 'get' },
+    response: { status: 403, data: { error: { code: 'ACCOUNT_DISABLED', message: 'This account has been deactivated.' } }, headers: {} },
+  });
+
+  it('is reported once so the app can return to the login screen', async () => {
+    const lost = vi.fn();
+    setSessionLostHandler(lost);
+    setAccessToken('token');
+
+    await reject(disabled());
+    await reject(disabled());
+
+    expect(lost).toHaveBeenCalledTimes(1);
+    expect(lost.mock.calls[0][0].code).toBe('ACCOUNT_DISABLED');
+    setSessionLostHandler(null);
+  });
+
+  it('is not reported when nobody was signed in, or for an ordinary refusal', async () => {
+    const lost = vi.fn();
+    setSessionLostHandler(lost);
+
+    setAccessToken(null);
+    await reject(disabled());
+
+    setAccessToken('token');
+    await reject({
+      config: { url: '/payroll', method: 'get' },
+      response: { status: 403, data: { error: { code: 'FORBIDDEN', message: 'no' } }, headers: {} },
+    });
+
+    expect(lost).not.toHaveBeenCalled();
+    setAccessToken(null);
+    setSessionLostHandler(null);
   });
 });

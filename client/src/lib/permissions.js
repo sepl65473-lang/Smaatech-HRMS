@@ -18,10 +18,10 @@ export const ROLE_SCOPE = {
 };
 
 export const DEFAULT_LOGIN_PROFILES = [
-  { id: 'profile_hr_director', name: 'Admin', role: 'HR Director', initials: 'AD', scope: ROLE_SCOPE['HR Director'], email: 'admin@smaatech.co', password: 'Admin@123' },
-  { id: 'profile_hr_manager', name: 'Nisha Rao', role: 'HR Manager', initials: 'NR', scope: ROLE_SCOPE['HR Manager'], email: 'hr.manager@smaatech.co', password: 'Manager@123' },
-  { id: 'profile_finance_lead', name: 'Kabir Mehta', role: 'Finance Lead', initials: 'KM', scope: ROLE_SCOPE['Finance Lead'], email: 'finance.lead@smaatech.co', password: 'Finance@123' },
-  { id: 'profile_employee', name: 'Priya Sharma', role: 'Employee', initials: 'PS', scope: ROLE_SCOPE['Employee'], email: 'priya.sharma@smaatech.co', password: 'Employee@123', empName: 'Priya Sharma' },
+  { id: 'profile_hr_director', name: 'Admin', role: 'HR Director', initials: 'AD', scope: ROLE_SCOPE['HR Director'], email: 'admin@smaatech.co' },
+  { id: 'profile_hr_manager', name: 'Nisha Rao', role: 'HR Manager', initials: 'NR', scope: ROLE_SCOPE['HR Manager'], email: 'hr.manager@smaatech.co' },
+  { id: 'profile_finance_lead', name: 'Kabir Mehta', role: 'Finance Lead', initials: 'KM', scope: ROLE_SCOPE['Finance Lead'], email: 'finance.lead@smaatech.co' },
+  { id: 'profile_employee', name: 'Priya Sharma', role: 'Employee', initials: 'PS', scope: ROLE_SCOPE['Employee'], email: 'priya.sharma@smaatech.co', empName: 'Priya Sharma' },
 ];
 
 export const canAccess = (role, path) => {

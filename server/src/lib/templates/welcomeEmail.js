@@ -3,6 +3,10 @@
 // at a fixed domain that is not where this deployment lives, so every new
 // employee received a sign-in button that went nowhere. A missing value now
 // omits the button rather than shipping a dead link.
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 export function generateWelcomeEmail({ userName, role, tempPassword, company = 'Smaatech', portalUrl = null }) {
   const subject = `Welcome to ${company} HRMS — Your Account Credentials`;
 
@@ -54,7 +58,7 @@ ${company}`;
       <div class="value">${role}</div>
       
       <div class="label">Temporary Password</div>
-      <div class="value"><span class="password-box">${tempPassword}</span></div>
+      <div class="value"><span class="password-box">${escapeHtml(tempPassword)}</span></div>
     </div>
 
     <div class="alert-box">

@@ -4,9 +4,31 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 let accessToken = null;
 let refreshingPromise = null;
+// True from sign-in (or a successful silent restore) until the session ends.
+let sessionActive = false;
 
 export function setAccessToken(token) {
   accessToken = token;
+  sessionActive = Boolean(token);
+}
+
+// Called when the server has definitively ended the session: the refresh
+// token was rejected, or the account was disabled. Without it the app stayed
+// inside the signed-in shell with every request failing and no way back to the
+// login screen short of a manual reload.
+let sessionLostHandler = null;
+export function setSessionLostHandler(handler) {
+  sessionLostHandler = handler;
+}
+
+function notifySessionLost(error) {
+  // Only a session that existed can be lost — the silent restore attempt on
+  // page load and the login form never had one — and it is reported once,
+  // however many parallel requests were waiting on the same failed refresh.
+  if (!sessionActive) return;
+  sessionActive = false;
+  accessToken = null;
+  if (sessionLostHandler) sessionLostHandler(error);
 }
 
 export class ApiError extends Error {
@@ -129,6 +151,9 @@ axiosInstance.interceptors.response.use(
         }
         return axiosInstance(originalRequest);
       } catch (refreshErr) {
+        // The server ANSWERED and refused the refresh token. A transport
+        // failure (status 0) or a 5xx is not a verdict on the session.
+        if (refreshErr?.status === 401 || refreshErr?.status === 403) notifySessionLost(refreshErr);
         return Promise.reject(refreshErr);
       }
     }
@@ -170,7 +195,9 @@ axiosInstance.interceptors.response.use(
         if (Number.isFinite(parsed)) retryAfterSeconds = parsed;
       }
 
-      return Promise.reject(new ApiError(status, code, message, { retryAfterSeconds }));
+      const apiError = new ApiError(status, code, message, { retryAfterSeconds });
+      if (code === 'ACCOUNT_DISABLED' && !originalRequest.skipAuth) notifySessionLost(apiError);
+      return Promise.reject(apiError);
     }
 
     // No response at all. axios labels ALL of these "Network Error", which is

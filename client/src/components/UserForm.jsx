@@ -37,7 +37,9 @@ export default function UserForm({ open, user, employees, onClose, onSave }) {
       initials: initials(form.name),
       email: form.email.trim(),
       ...(form.password ? { password: form.password } : {}),
-      ...(form.role === 'Employee' ? { employeeId: form.employeeId || null } : {}),
+      // Sent for every role: an HR Manager or Finance Lead is an employee too,
+      // and mobile sign-in finds an account only through this link.
+      employeeId: form.employeeId || null,
     });
   };
 
@@ -67,15 +69,13 @@ export default function UserForm({ open, user, employees, onClose, onSave }) {
             {ROLES.map((r) => <option key={r}>{r}</option>)}
           </select>
         </label>
-        {form.role === 'Employee' && (
-          <label className="field field-full">
-            <span className="field-label">Linked employee record (optional)</span>
-            <select className="input" value={form.employeeId} onChange={set('employeeId')}>
-              <option value="">— none —</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.name} · {e.dept}</option>)}
-            </select>
-          </label>
-        )}
+        <label className="field field-full">
+          <span className="field-label">Linked employee record (optional)</span>
+          <select className="input" value={form.employeeId} onChange={set('employeeId')}>
+            <option value="">— none —</option>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.name} · {e.dept}</option>)}
+          </select>
+        </label>
         <label className="field field-full">
           <span className="field-label">Email</span>
           <input className="input" type="email" value={form.email} onChange={set('email')} placeholder="name@smaatech.co" />

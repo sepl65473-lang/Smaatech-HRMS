@@ -7,7 +7,7 @@ import {
   celebrationsApi, recruitmentApi, settingsApi, holidaysApi, reviewsApi,
   expensesApi, assetsApi, jobsApi, authApi, faceApi, usersApi, rolesApi, masterValuesApi, auditLogsApi, notificationsApi, documentsApi, resignationsApi, attendanceCorrectionsApi, deviceMappingsApi,
 } from '../data/store';
-import { setAccessToken } from '../lib/apiClient';
+import { setAccessToken, setSessionLostHandler } from '../lib/apiClient';
 import { getDeviceId } from '../lib/deviceId';
 import { uid, daysBetween, todayISO, DEPARTMENTS as fallbackDepts, LOCATIONS as fallbackLocs, LEAVE_TYPES as fallbackLeaves } from '../lib/helpers';
 import { resolveShiftForToday, isLate as isLateForShift } from '../lib/shifts';
@@ -224,6 +224,25 @@ export function HRMSProvider({ children }) {
     setNotifications([]);
     setFaceEnrolled(false);
     toast('info', 'Signed out');
+  }, [toast]);
+
+  // The server ended the session (refresh token expired or revoked, account
+  // disabled). Return to the login screen exactly as a sign-out does, instead
+  // of leaving a signed-in shell in which every request fails.
+  useEffect(() => {
+    setSessionLostHandler((err) => {
+      setAuthUser(null);
+      setEmployees([]);
+      setAttendance([]);
+      setRoles([]);
+      setMasterCategories([]);
+      setMasterValues([]);
+      setAuditLog([]);
+      setNotifications([]);
+      setFaceEnrolled(false);
+      toast('info', err?.code === 'ACCOUNT_DISABLED' ? err.message : 'Your session has ended. Please sign in again.');
+    });
+    return () => setSessionLostHandler(null);
   }, [toast]);
 
   const forgotPassword = useCallback((email) => authApi.forgotPassword(email), []);

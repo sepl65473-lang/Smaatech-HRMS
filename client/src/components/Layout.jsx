@@ -13,7 +13,7 @@ const EmployeeForm = lazy(() => import('./EmployeeForm'));
 const ChangePasswordModal = lazy(() => import('./ChangePasswordModal'));
 
 export default function Layout() {
-  const { addEmployee, loading, isAuthenticated, booting, currentUser } = useHRMS();
+  const { addEmployee, addUserAccount, toast, loading, isAuthenticated, booting, currentUser } = useHRMS();
   const [addOpen, setAddOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -80,7 +80,19 @@ export default function Layout() {
             open={addOpen}
             employee={null}
             onClose={() => setAddOpen(false)}
-            onSave={async (data) => { await addEmployee(data); setAddOpen(false); }}
+            onSave={async (data, loginPayload) => {
+              const created = await addEmployee(data);
+              // Same handling as the Employees page: the form's "create login"
+              // choice was dropped here, so no account was made and nothing said so.
+              if (loginPayload) {
+                try {
+                  await addUserAccount({ ...loginPayload, employeeId: created.id });
+                } catch (err) {
+                  toast('error', `Employee added, but creating the login failed: ${err.message}. Retry from Settings > Users & role access.`);
+                }
+              }
+              setAddOpen(false);
+            }}
           />
         </Suspense>
       )}
