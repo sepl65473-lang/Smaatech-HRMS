@@ -80,8 +80,13 @@ async function rowFor(emp) {
   return Attendance.create({ empId: emp._id, name: emp.name, dept: emp.dept, date: todayISO(), company: emp.company });
 }
 
-function checkIn(rowId, token, { photo = true } = {}) {
+// A self-punch must carry a valid position, so every punch here sends one
+// unless the test is about the location itself.
+const HERE = { lat: '12.97160', lng: '77.59460', accuracy: '10' };
+
+function checkIn(rowId, token, { photo = true, coords = true } = {}) {
   const req = request(app).post(`/api/v1/attendance/${rowId}/check-in`).set('Authorization', `Bearer ${token}`);
+  if (coords) req.field('lat', HERE.lat).field('lng', HERE.lng).field('accuracy', HERE.accuracy);
   if (photo) req.attach('photo', makeJpeg(seq), { filename: 'p.jpg', contentType: 'image/jpeg' });
   return req;
 }
@@ -215,6 +220,7 @@ describe('CONCURRENT punches', () => {
     const results = await Promise.all(Array.from({ length: 5 }, () => request(app)
       .post(`/api/v1/attendance/${row.id}/check-out`)
       .set('Authorization', `Bearer ${token}`)
+      .field('lat', HERE.lat).field('lng', HERE.lng)
       .attach('photo', makeJpeg(2), { filename: 'p.jpg', contentType: 'image/jpeg' })));
 
     expect(results.filter((r) => r.status === 200)).toHaveLength(1);
@@ -269,7 +275,7 @@ describe('self-service verification applies to EVERY role', () => {
     // The server must never store a liveness claim it did not make.
     expect(res.body.checkInVerification.liveness.verified).toBe(false);
     expect(res.body.checkInVerification.liveness.reason).toBe('not-required-by-policy');
-    expect(res.body.checkInDetails).toBe('Face Verified');
+    expect(res.body.checkInDetails).toBe('Face Verified + GPS Recorded');
   });
 
   it('records total working hours on check-out, and derives them for older rows', async () => {
@@ -281,6 +287,7 @@ describe('self-service verification applies to EVERY role', () => {
     const out = await request(app)
       .post(`/api/v1/attendance/${row.id}/check-out`)
       .set('Authorization', `Bearer ${token}`)
+      .field('lat', HERE.lat).field('lng', HERE.lng)
       .attach('photo', makeJpeg(seq), { filename: 'p.jpg', contentType: 'image/jpeg' });
     expect(out.status).toBe(200);
     expect(out.body.workedMinutes).toBeGreaterThan(0);
@@ -299,7 +306,7 @@ describe('self-service verification applies to EVERY role', () => {
   it('records GPS as unevaluated rather than claiming a geofence pass when geofencing is off', async () => {
     const { token, emp } = await seedPerson('Employee');
     const row = await rowFor(emp);
-    const res = await checkIn(row.id, token)
+    const res = await checkIn(row.id, token, { coords: false })
       .field('lat', '12.97160')
       .field('lng', '77.59460')
       .field('accuracy', '10')
@@ -357,6 +364,7 @@ describe('liveness enforcement when enabled', () => {
       .post(`/api/v1/attendance/${row.id}/check-in`)
       .set('Authorization', `Bearer ${token}`)
       .field('challengeId', challenge.body.challengeId)
+      .field('lat', HERE.lat).field('lng', HERE.lng)
       .attach('frames', makeJpeg(1), { filename: 'a.jpg', contentType: 'image/jpeg' })
       .attach('frames', makeJpeg(2), { filename: 'b.jpg', contentType: 'image/jpeg' })
       .attach('frames', makeJpeg(3), { filename: 'c.jpg', contentType: 'image/jpeg' });

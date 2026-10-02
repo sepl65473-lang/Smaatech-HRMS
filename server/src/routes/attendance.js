@@ -4,7 +4,7 @@ import Attendance from '../models/Attendance.js';
 import Employee from '../models/Employee.js';
 import FaceDescriptor from '../models/FaceDescriptor.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
-import { evaluateGeofence } from '../lib/geofence.js';
+import { evaluateGeofence, parseCoordinate, validateCoordinates } from '../lib/geofence.js';
 import { workedMinutesBetween } from '../lib/workingHours.js';
 import { resolveShiftForToday, isLate, isEarlyExit, isHalfDay, nowTimeIST } from '../lib/shifts.js';
 import { parseDeviceInfo, clientIp } from '../lib/deviceInfo.js';
@@ -258,10 +258,17 @@ router.post('/qr-checkin', async (req, res) => {
   }
 
   const settings = await getSettingsDoc(req.auth.company);
-  const lat = req.body.lat != null ? Number(req.body.lat) : null;
-  const lng = req.body.lng != null ? Number(req.body.lng) : null;
-  const accuracy = req.body.accuracy != null ? Number(req.body.accuracy) : null;
+  const lat = parseCoordinate(req.body.lat);
+  const lng = parseCoordinate(req.body.lng);
+  const accuracy = readAccuracy(req.body.accuracy);
   const timestamp = req.body.timestamp != null ? Number(req.body.timestamp) : null;
+
+  // A QR punch is always the employee's own, so a real position is required
+  // whether or not geofencing is on.
+  const coordCheck = validateCoordinates(lat, lng);
+  if (!coordCheck.ok) {
+    return res.status(400).json({ error: { code: coordCheck.reason, message: gpsFailureMessage(coordCheck) } });
+  }
 
   let gpsResult = null;
   if (settings.gpsCheckInEnabled) {
@@ -275,7 +282,17 @@ router.post('/qr-checkin', async (req, res) => {
   const hasGpsCoords = lat != null && lng != null;
   const device = parseDeviceInfo(req.headers['user-agent']);
   const ip = clientIp(req);
-  const address = hasGpsCoords ? await reverseGeocode(lat, lng) : null;
+  // reverseGeocode returns an OBJECT. The address fields are Strings, so only
+  // its one-line `display` goes there; the rest goes to the structured field,
+  // exactly as handlePunch does. A failed lookup still carries the coordinates.
+  const geo = await reverseGeocode(lat, lng, { accuracy }).catch(() => null);
+  const address = geo?.display || null;
+  const structuredLocation = {
+    placeName: geo?.placeName ?? null, fullAddress: geo?.fullAddress ?? null, pincode: geo?.pincode ?? null,
+    area: geo?.area ?? null, city: geo?.city ?? null, district: geo?.district ?? null,
+    state: geo?.state ?? null, country: geo?.country ?? null,
+    lat, lng, accuracy, source: geo?.source ?? 'unresolved', resolvedAt: geo?.resolvedAt ?? new Date().toISOString(),
+  };
   const shift = resolveShiftForToday(String(row.empId), settings);
 
   const patch = direction === 'in'
@@ -284,6 +301,8 @@ router.post('/qr-checkin', async (req, res) => {
         status: isLate(time, shift) ? 'late' : 'present',
         checkInLoc: hasGpsCoords ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
         checkInAddress: address,
+        checkInLocation: structuredLocation,
+        checkInAccuracy: accuracy,
         checkInDetails: `QR Check-in${hasGpsCoords ? (gpsResult ? ' + GPS Verified' : ' + GPS Recorded') : ''}`,
         checkInIp: ip,
         checkInDevice: device,
@@ -298,6 +317,8 @@ router.post('/qr-checkin', async (req, res) => {
           : isEarlyExit(time, shift) ? 'early-exit' : row.status,
         checkOutLoc: hasGpsCoords ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : null,
         checkOutAddress: address,
+        checkOutLocation: structuredLocation,
+        checkOutAccuracy: accuracy,
         checkOutDetails: `QR Check-out${hasGpsCoords ? (gpsResult ? ' + GPS Verified' : ' + GPS Recorded') : ''}`,
         checkOutIp: ip,
         checkOutDevice: device,
@@ -520,9 +541,16 @@ router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
   res.json({ id: req.params.id });
 });
 
+// Accuracy is optional, but it is stored — so a non-number never reaches the row.
+function readAccuracy(value) {
+  const n = value != null && value !== '' ? Number(value) : null;
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function gpsFailureMessage(result) {
   switch (result.reason) {
     case 'NO_COORDINATES': return 'Location is required for check-in but none was received.';
+    case 'INVALID_COORDINATES': return 'The location received was not valid. Please turn on location and try again.';
     case 'LOW_ACCURACY': return `GPS reading too imprecise (±${Math.round(result.accuracy)}m) to verify your location.`;
     case 'STALE_FIX': return 'Location reading is too old, please try again.';
     case 'OUTSIDE_GEOFENCE': return `You're ${Math.round(result.distance)}m from the office — outside the allowed radius.`;
@@ -568,11 +596,27 @@ async function handlePunch(req, res, direction) {
   const isHrOverride = isAdminRole && !isOwnRow;
 
   const settings = await getSettingsDoc(req.auth.company);
-  const lat = req.body.lat != null ? Number(req.body.lat) : null;
-  const lng = req.body.lng != null ? Number(req.body.lng) : null;
-  const accuracy = req.body.accuracy != null ? Number(req.body.accuracy) : null;
+  const lat = parseCoordinate(req.body.lat);
+  const lng = parseCoordinate(req.body.lng);
+  const accuracy = readAccuracy(req.body.accuracy);
   const timestamp = req.body.timestamp != null ? Number(req.body.timestamp) : null;
   const deviceId = req.body.deviceId ? String(req.body.deviceId).slice(0, 128) : null;
+
+  // A self-punch must carry a real position, with geofencing on or off. An HR
+  // override on someone else's row may still omit it (HR is not at that
+  // employee's location), but if it sends coordinates they must be valid too.
+  const coordCheck = validateCoordinates(lat, lng);
+  if (!coordCheck.ok && (isSelfService || lat != null || lng != null)) {
+    // Evidence on the employee's own record only — a mistyped HR override
+    // must not count as a failed verification against that employee.
+    if (isSelfService) {
+      await recordFailedAttempt(req, {
+        row, direction, stage: 'geofence', reasonCode: coordCheck.reason,
+        reasonMessage: gpsFailureMessage(coordCheck), geo: null, gpsResult: coordCheck, deviceId,
+      });
+    }
+    return res.status(400).json({ error: { code: coordCheck.reason, message: gpsFailureMessage(coordCheck) } });
+  }
 
   let gpsResult = null;
   if (settings.gpsCheckInEnabled && isSelfService) {
@@ -772,7 +816,10 @@ async function handlePunch(req, res, direction) {
     placeName: geo.placeName, fullAddress: geo.fullAddress, pincode: geo.pincode,
     area: geo.area, city: geo.city, district: geo.district, state: geo.state, country: geo.country,
     lat: geo.lat, lng: geo.lng, accuracy: geo.accuracy, source: geo.source, resolvedAt: geo.resolvedAt,
-  } : undefined;
+  } : (hasGpsCoords
+    // The address lookup failed outright; the validated position is still saved.
+    ? { lat, lng, accuracy, source: 'unresolved', resolvedAt: new Date().toISOString() }
+    : undefined);
   // Independent of each other, so done concurrently.
   const [sharedDeviceFlag, photoRef] = await Promise.all([
     isSelfService

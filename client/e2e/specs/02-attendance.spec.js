@@ -62,6 +62,31 @@ test.describe('employee attendance through the browser', () => {
     await expect(page.locator('body')).toContainText(/No check-in|Check In/i, { timeout: 20_000 });
   });
 
+  test('WITHOUT location permission, check-in is refused and nothing is sent', async ({ page }) => {
+    // Geofencing is off for this tenant; location is required all the same.
+    await page.context().clearPermissions();
+    await page.context().grantPermissions(['camera']);
+    await login(page, 'employee');
+
+    let punchRequests = 0;
+    page.on('request', (r) => {
+      if (r.url().includes('/check-in') && r.method() === 'POST') punchRequests += 1;
+    });
+
+    const checkIn = page.getByRole('button', { name: /Check In \(Face \+ GPS\)/i });
+    await expect(checkIn).toBeVisible({ timeout: 20_000 });
+    await checkIn.click();
+
+    await expect(page.locator('body')).toContainText(/location/i, { timeout: 20_000 });
+    // The capture modal is closed again and the employee is still not checked in.
+    await expect(page.getByRole('button', { name: 'Take Photo' })).toBeHidden({ timeout: 20_000 });
+    await expect(checkIn).toBeVisible();
+    expect(punchRequests).toBe(0);
+
+    const list = await apiCall(page, 'GET', '/attendance');
+    expect(list.body[0].checkIn).toBeNull();
+  });
+
   test('CHECK-IN through the real capture UI writes a verified row', async ({ page }) => {
     await login(page, 'employee');
 
@@ -79,6 +104,9 @@ test.describe('employee attendance through the browser', () => {
     const row = await response.json();
     expect(row.checkIn).toBeTruthy();
     expect(row.checkInVerification.face.matched).toBe(true);
+    // The browser's own position (playwright.config.js) is what was stored.
+    expect(row.checkInLocation.lat).toBeCloseTo(19.0760, 4);
+    expect(row.checkInLocation.lng).toBeCloseTo(72.8777, 4);
     expect(['present', 'late']).toContain(row.status);
 
     // The UI must reflect it, not just the API.
@@ -86,6 +114,8 @@ test.describe('employee attendance through the browser', () => {
   });
 
   test('CHECK-OUT through the real capture UI completes the day', async ({ page }) => {
+    // A different position from check-in, so a reused fix would be caught.
+    await page.context().setGeolocation({ latitude: 19.0800, longitude: 72.8800, accuracy: 10 });
     await login(page, 'employee');
 
     const checkOut = page.getByRole('button', { name: /Check Out/i }).first();
@@ -101,6 +131,10 @@ test.describe('employee attendance through the browser', () => {
     expect(response.status()).toBe(200);
     const row = await response.json();
     expect(row.checkOut).toBeTruthy();
+    expect(row.checkOutLocation.lat).toBeCloseTo(19.0800, 4);
+    expect(row.checkOutLocation.lng).toBeCloseTo(72.8800, 4);
+    expect(row.checkInLocation.lat).toBeCloseTo(19.0760, 4);
+    expect(row.checkInLocation.lng).toBeCloseTo(72.8777, 4);
     await expect(page.locator('body')).toContainText(new RegExp(`Out ${row.checkOut}`), { timeout: 20_000 });
   });
 
@@ -142,6 +176,10 @@ test.describe('face identity binding, in the browser', () => {
       const form = new FormData();
       form.append('e2eFaceUserId', foreignId);
       form.append('deviceId', 'e2e-browser');
+      // A self-punch needs a location; without one it is refused before the
+      // face is even looked at.
+      form.append('lat', '19.0760');
+      form.append('lng', '72.8777');
       // A real JPEG so the upload filter behaves exactly as in production.
       const canvas = document.createElement('canvas');
       canvas.width = 200; canvas.height = 200;
@@ -192,7 +230,13 @@ test.describe('HR attendance has no biometric bypass', () => {
 
     const list = await apiCall(page, 'GET', '/attendance');
     const own = list.body.find((r) => r.name === USERS.hr.name);
-    const res = await apiCall(page, 'POST', `/attendance/${own.id}/check-in`);
+    // With no location either, the location check refuses first — HR is not
+    // exempt from that.
+    const bare = await apiCall(page, 'POST', `/attendance/${own.id}/check-in`);
+    expect(bare.status).toBe(400);
+    expect(bare.body.error.code).toBe('NO_COORDINATES');
+
+    const res = await apiCall(page, 'POST', `/attendance/${own.id}/check-in`, { lat: 19.0760, lng: 72.8777 });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('NO_PHOTO');
   });

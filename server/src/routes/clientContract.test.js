@@ -424,6 +424,8 @@ describe('attendance self check-in — the client sends field name "photo"', () 
       .post(`/api/v1/attendance/${row.id}/check-in`)
       .set('Authorization', `Bearer ${ctx.tokens.employee}`)
       .field('deviceId', 'browser-abc')
+      .field('lat', '19.0760')
+      .field('lng', '72.8777')
       .attach('photo', buf, { filename: 'selfie.jpg', contentType: 'image/jpeg' });
 
     // The face model will reject a flat grey frame (NO_FACE) — that is fine.

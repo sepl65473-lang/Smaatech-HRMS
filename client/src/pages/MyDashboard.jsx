@@ -16,6 +16,17 @@ import { downloadPayslip } from '../lib/payslip';
 import { apiFetchBlob } from '../lib/apiClient';
 import { loadFaceModels } from '../lib/faceAuth';
 
+// Keyed by GeolocationPositionError.code.
+const LOCATION_ERROR_MESSAGES = {
+  1: 'Location permission was denied. Allow location access for this site and try again — your location is required to check in or out.',
+  2: 'Your location is unavailable right now. Turn on location/GPS on this device and try again.',
+  3: 'Getting your location took too long. Move to a spot with better signal and try again.',
+};
+
+// A fix older than this is replaced before the punch is sent — a camera retry
+// can otherwise outlast the server's 30s limit on a geofenced punch.
+const LOCATION_MAX_AGE_MS = 20_000;
+
 function AttendancePhotoPreview({ attendanceId, which }) {
   const [url, setUrl] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -105,6 +116,8 @@ export default function MyDashboard() {
   // The in-flight GPS lookup for the current check-in/out attempt, or null
   // once it is finished, rejected or cancelled.
   const locationRef = useRef(null);
+  // The GPS lookup started when the QR scanner was opened.
+  const qrLocationRef = useRef(null);
   const [faceEnrollOpen, setFaceEnrollOpen] = useState(false);
   // A check-in/out the user started before enrolling their face; resumed
   // automatically once enrollment succeeds so they don't have to click again.
@@ -144,14 +157,27 @@ export default function MyDashboard() {
           resolve({
             lat, lng, distance: dist, isInside: dist <= radius,
             accuracy: pos.coords.accuracy, timestamp: pos.timestamp,
+            acquiredAt: Date.now(),
           });
         },
         (err) => {
-          reject(new Error(`GPS Error: ${err.message}`));
+          reject(new Error(LOCATION_ERROR_MESSAGES[err.code] || `GPS Error: ${err.message}`));
         },
-        { enableHighAccuracy: true, timeout: 8000 }
+        // maximumAge 0: always a new fix, never one the browser cached earlier.
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
       );
     });
+  };
+
+  // Location is mandatory for a self check-in/out. Reports why it could not be
+  // read and returns null, so the caller can stop without punching.
+  const resolveLocationOrToast = async () => {
+    try {
+      return await resolveLocation();
+    } catch (err) {
+      toast('error', err.message);
+      return null;
+    }
   };
 
   const me = useMemo(
@@ -182,9 +208,10 @@ export default function MyDashboard() {
     if (locationRef.current !== attempt) return; // cancelled or superseded
     setGpsLoading(false);
     setGpsStatus(loc || { error });
-    if (!settings.gpsCheckInEnabled) return;
+    // No location stops the punch whether or not geofencing is on; the
+    // distance check below still applies only when it is.
     const rejection = error
-      || (!loc.isInside
+      || (settings.gpsCheckInEnabled && !loc.isInside
         ? `Location check failed: You're ${loc.distance.toFixed(0)}m from the office — outside the allowed ${settings.geofenceRadius ?? 25}m radius.`
         : null);
     if (rejection) {
@@ -206,10 +233,23 @@ export default function MyDashboard() {
     const attempt = locationRef.current;
     if (!attempt) return;
     // The face scan usually finishes after GPS; if not, wait for the fix.
-    const { loc = null } = await attempt;
-    // A geofence rejection (already reported) or a cancel happened meanwhile.
+    let { loc = null } = await attempt;
+    // A location rejection (already reported) or a cancel happened meanwhile.
     if (locationRef.current !== attempt) return;
-    const locationData = { ...(loc || {}), photo };
+    // The fix was taken when the modal opened. After a slow scan or a camera
+    // "Try Again" it is too old to send, so a new one is taken.
+    if (!loc || Date.now() - loc.acquiredAt > LOCATION_MAX_AGE_MS) {
+      loc = await resolveLocationOrToast();
+      if (locationRef.current !== attempt) return;
+      if (!loc) {
+        locationRef.current = null;
+        setFaceModalOpen(false);
+        setPendingRowId(null);
+        return;
+      }
+      setGpsStatus(loc);
+    }
+    const locationData = { ...loc, photo };
     // The modal stays open showing "verifying with the server" until the
     // answer arrives, instead of closing to a screen where nothing happens.
     try {
@@ -234,17 +274,24 @@ export default function MyDashboard() {
     }
   };
 
-  // GPS is attached best-effort here (if geofencing is on and the browser
-  // grants location) — the server is the one that actually enforces it and
-  // will reject with a clear reason if location was required but missing.
+  // A QR punch needs the employee's current location too, with geofencing on
+  // or off — the server rejects one without it, so don't spend the token.
+  // The lookup starts with the scanner rather than after the scan: the QR
+  // token only lives a few seconds, too short to wait for a GPS fix afterwards.
+  const openQrModal = () => {
+    qrLocationRef.current = resolveLocation().catch(() => null);
+    setQrModalOpen(true);
+  };
+
   const handleQrScanSuccess = async ({ token }) => {
     setQrModalOpen(false);
-    let loc = null;
-    if (settings.gpsCheckInEnabled) {
-      try { loc = await resolveLocation(); } catch { /* let the server report it if location turns out to be required */ }
+    let loc = await qrLocationRef.current;
+    if (!loc || Date.now() - loc.acquiredAt > LOCATION_MAX_AGE_MS) {
+      loc = await resolveLocationOrToast();
     }
+    if (!loc) return;
     try {
-      await qrCheckIn(token, loc || {});
+      await qrCheckIn(token, loc);
     } catch {
       // qrCheckIn() already toasted the failure reason (expired token, outside geofence, etc.)
     }
@@ -516,7 +563,7 @@ export default function MyDashboard() {
                     >
                       {gpsLoading ? 'Checking location…' : 'Check In (Face + GPS)'}
                     </button>
-                    <button type="button" className="mini-btn" onClick={() => setQrModalOpen(true)}>
+                    <button type="button" className="mini-btn" onClick={openQrModal}>
                       Scan office QR
                     </button>
                   </>
@@ -534,7 +581,7 @@ export default function MyDashboard() {
                     >
                       {gpsLoading ? 'Checking location…' : 'Check Out (Face + GPS)'}
                     </button>
-                    <button type="button" className="mini-btn" onClick={() => setQrModalOpen(true)}>
+                    <button type="button" className="mini-btn" onClick={openQrModal}>
                       Scan office QR
                     </button>
                   </>
@@ -554,7 +601,7 @@ export default function MyDashboard() {
                 <button type="button" className="mini-btn approve" onClick={() => refreshAttendance()}>
                   Initialize Today's Row
                 </button>
-                <button type="button" className="mini-btn" onClick={() => setQrModalOpen(true)}>
+                <button type="button" className="mini-btn" onClick={openQrModal}>
                   Scan Office QR
                 </button>
               </div>

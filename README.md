@@ -849,7 +849,7 @@ flowchart LR
 | GET | `/` | ✅ any | Non-managers see only their own rows; auto-creates today's row |
 | GET | `/summary` | ✅ any | `range=Week\|Month\|Quarter` or `from`/`to` → per-department totals |
 | GET | `/qr-token` | HR Manager | Single-use token, 12-second TTL |
-| POST | `/qr-checkin` | ✅ any | `{ token, lat?, lng?, accuracy?, timestamp? }` |
+| POST | `/qr-checkin` | ✅ any | `{ token, lat, lng, accuracy?, timestamp? }` |
 | GET | `/:id` | ✅ any | |
 | POST | `/` | HR Manager | Manual row creation |
 | PATCH | `/:id` | HR Manager | Only `name`, `dept`, `status`, `checkIn`, `checkOut` |
@@ -1034,11 +1034,17 @@ Everything persisted about a punch's origin is **derived server-side from the re
 | `checkInVerification` | `{ face: { matched, confidence, distance }, gps: { inside, distance }, verifiedAt }` | ✅ |
 | `anomalyFlags` | `shared-device` when the same device punched another employee within 24 h | ✅ |
 
+**Location is required on every self-punch** (face and QR), whether or not geofencing is enabled. An HR override on another employee's row may omit it.
+
+| Rejection | Trigger |
+|---|---|
+| `NO_COORDINATES` | `lat` or `lng` missing |
+| `INVALID_COORDINATES` | Not a finite number, latitude outside ±90 or longitude outside ±180 |
+
 **Geofence enforcement** (`lib/geofence.js`), active only when `Settings.gpsCheckInEnabled`:
 
 | Rejection | Trigger |
 |---|---|
-| `NO_COORDINATES` | `lat`/`lng` missing |
 | `LOW_ACCURACY` | `accuracy > 100 m` |
 | `STALE_FIX` | Fix older than 30 seconds |
 | `OUTSIDE_GEOFENCE` | Haversine distance > `Settings.geofenceRadius` (default 25 m from 19.0760, 72.8777) |
@@ -1411,7 +1417,8 @@ An event-loop lag estimator runs on a 1-second `setInterval` (`.unref()`-ed so i
 | `TOO_MANY_REQUESTS` / `TOO_MANY_ATTEMPTS` | 429 | Rate limit |
 | `INVALID_FILE` | 400 | MIME or size rejection |
 | `NOT_ENROLLED` / `NO_FACE` / `MULTIPLE_FACES` / `LOW_QUALITY` / `LOW_RESOLUTION` / `FACE_NOT_MATCHED` | 400 | Face verification |
-| `NO_COORDINATES` / `LOW_ACCURACY` / `STALE_FIX` / `OUTSIDE_GEOFENCE` | 400 | Geofence |
+| `NO_COORDINATES` / `INVALID_COORDINATES` | 400 | Self-punch location |
+| `LOW_ACCURACY` / `STALE_FIX` / `OUTSIDE_GEOFENCE` | 400 | Geofence |
 | `ALREADY_CHECKED_IN` / `NOT_CHECKED_IN` / `ALREADY_CHECKED_OUT` | 400 | Punch state |
 | `INVALID_QR_TOKEN` | 400 | Expired or already-consumed QR token |
 | `DEVICE_USER_UNMAPPED` | 404 | Biometric device user not linked |

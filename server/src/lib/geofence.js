@@ -14,6 +14,28 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
   return EARTH_RADIUS_M * c;
 }
 
+// Reads one raw request value as a coordinate: null when it was not supplied,
+// NaN when it was supplied but is not a number. Number() alone is not enough —
+// it turns '' and [] into 0, which is a real place off the coast of Africa.
+export function parseCoordinate(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string' && value.trim() !== '') return Number(value);
+  return NaN;
+}
+
+// Independent of geofencing: is this a position on Earth at all? Runs whether
+// or not the geofence is enabled, so "NaN, NaN" or latitude 123 is never stored.
+export function validateCoordinates(lat, lng) {
+  if (lat == null || lng == null) {
+    return { ok: false, reason: 'NO_COORDINATES' };
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return { ok: false, reason: 'INVALID_COORDINATES' };
+  }
+  return { ok: true, reason: null };
+}
+
 const MAX_ACCEPTABLE_ACCURACY_M = 100;
 const MAX_FIX_AGE_MS = 30_000;
 
