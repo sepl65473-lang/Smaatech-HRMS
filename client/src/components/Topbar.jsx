@@ -145,7 +145,7 @@ export default function Topbar({ onMenu, onAddEmployee }) {
         <button className="icon-btn menu-btn" title="Open navigation" onClick={onMenu}>
           <IconMenu width="17" height="17" />
         </button>
-        <div className="topbar-popover-wrap">
+        <div className="topbar-popover-wrap search-wrap">
         <input
           ref={searchInputRef}
           className="search"

@@ -2352,6 +2352,82 @@
     }
   }
 
+  /* 4. Phone comfort. Positioning, wrapping and touch size only: nothing
+     is hidden, and nothing above these widths is affected. */
+  @media (max-width: 900px) {
+    /* The drawer is pinned top and bottom; the inherited height:100vh
+       overrode that, and on a phone 100vh is taller than the visible screen
+       (it ignores the browser's address bar), which left the last nav items
+       and the user card below the fold with no way to scroll to them. */
+    aside {
+      height: auto !important;
+    }
+  }
+
+  @media (max-width: 768px) {
+    /* The search, notification and profile dropdowns were measured against
+       the page instead of the top bar (their wrappers are unpositioned at
+       this width), so they opened just BELOW the bottom edge of the screen.
+       They now open directly under the top bar. */
+    .topbar-actions {
+      position: relative;
+    }
+    .topbar-popover-wrap.search-wrap {
+      position: relative !important;
+    }
+    .search-popover, .notification-popover {
+      left: 0 !important;
+      right: 0 !important;
+    }
+    .profile-popover {
+      left: auto !important;
+      right: 0 !important;
+    }
+    .topbar-popover {
+      max-height: min(390px, 50vh);
+    }
+
+    /* A card's title and its action buttons shared one unwrappable line, so
+       the buttons ran off the right edge and made the whole page pan
+       sideways. They wrap onto the next line instead. */
+    .card-head {
+      flex-wrap: wrap;
+    }
+    .card-head > * {
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
+    /* Finger-sized targets: these were 20-24px tall. */
+    .mini-btn {
+      min-height: 34px;
+      padding: 6px 12px;
+    }
+    .chip, .tab {
+      min-height: 32px;
+    }
+    .leave-actions, .row-actions {
+      gap: 8px;
+    }
+  }
+
+  @media (max-width: 500px) {
+    /* On a 320px phone the sign-in panel refused to shrink below the natural
+       width of its inputs, so the card was 32px wider than the screen. */
+    .login-right, .login-card, .login-input {
+      min-width: 0;
+    }
+
+    /* 90vh is measured against the screen WITHOUT the browser's address
+       bar, so a tall dialog's Save/Cancel row could sit under it. dvh is
+       the height actually visible. */
+    @supports (height: 100dvh) {
+      .modal {
+        max-height: 90dvh !important;
+      }
+    }
+  }
+
   @media print{
     body *{visibility:hidden}
     .print-area,
