@@ -285,7 +285,7 @@ export default function Attendance() {
       checkIn: a.checkIn || '—',
       checkOut: a.checkOut || '—',
       status: STATUS[a.status]?.label || a.status,
-      location: cleanLocationText(a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc),
+      location: cleanLocationText(a.checkInAddress || a.checkOutAddress),
     })),
     [filtered, shiftNameFor, leaveTypeFor],
   );
@@ -324,7 +324,7 @@ export default function Attendance() {
       checkIn: a.checkIn || '—',
       checkOut: a.checkOut || '—',
       status: STATUS[a.status]?.label || a.status,
-      location: cleanLocationText(a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc),
+      location: cleanLocationText(a.checkInAddress || a.checkOutAddress),
     }));
   }, [dept, status, shiftNameFor, toast, leaveTypeFor, range.from, range.to]);
 

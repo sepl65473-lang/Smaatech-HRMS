@@ -321,7 +321,7 @@ export default function Settings() {
                   {s.userAgent || 'Unknown device'}{s.current && <span className="state-badge approved" style={{ marginLeft: 8 }}>This device</span>}
                 </div>
                 <div className="settings-row-sub">
-                  Signed in {new Date(s.createdAt).toLocaleString('en-IN')}{s.ip ? ` · ${s.ip}` : ''}
+                  Signed in {new Date(s.createdAt).toLocaleString('en-IN')}{s.location ? ` · ${s.location}` : ''}{s.ip ? ` · ${s.ip}` : ''}
                 </div>
               </div>
               {!s.current && (
@@ -704,7 +704,7 @@ export default function Settings() {
               <div>
                 <div className="settings-row-label">{s.userAgent || 'Unknown device'}</div>
                 <div className="settings-row-sub">
-                  Signed in {new Date(s.createdAt).toLocaleString('en-IN')}{s.ip ? ` · ${s.ip}` : ''}
+                  Signed in {new Date(s.createdAt).toLocaleString('en-IN')}{s.location ? ` · ${s.location}` : ''}{s.ip ? ` · ${s.ip}` : ''}
                 </div>
               </div>
               <button className="mini-btn danger" onClick={() => handleRevokeUserSession(s.id)}>Sign out</button>

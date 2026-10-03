@@ -486,7 +486,7 @@ export default function MyDashboard() {
                       📸
                     </button>
                   )}
-                  {todayRow.checkInLoc && <span className="muted-text"> ({todayRow.checkInDetails || 'GPS'}: {todayRow.checkInLoc})</span>}
+                  {todayRow.checkInLoc && <span className="muted-text"> ({todayRow.checkInDetails || 'GPS'}: {todayRow.checkInAddress || 'Address unavailable'})</span>}
                   <br />
                   Check-out: <strong className="mono">{todayRow.checkOut || '—'}</strong>
                   {todayRow.checkOut && (
@@ -500,7 +500,7 @@ export default function MyDashboard() {
                       📸
                     </button>
                   )}
-                  {todayRow.checkOutLoc && <span className="muted-text"> ({todayRow.checkOutDetails || 'GPS'}: {todayRow.checkOutLoc})</span>}
+                  {todayRow.checkOutLoc && <span className="muted-text"> ({todayRow.checkOutDetails || 'GPS'}: {todayRow.checkOutAddress || 'Address unavailable'})</span>}
                 </div>
               </div>
 

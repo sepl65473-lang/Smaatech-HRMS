@@ -112,3 +112,27 @@ describe('structureAddress — nothing is invented', () => {
     }
   });
 });
+
+// The exact `address` object Nominatim returns for the company's own office
+// coordinates (20.2733, 85.8778): the locality arrives under `county`.
+describe('structureAddress — locality returned as county', () => {
+  const OFFICE = {
+    county: 'Saheednagar', state_district: 'Khordha', state: 'Odisha',
+    postcode: '751025', country: 'India', country_code: 'in',
+  };
+
+  it('keeps the locality instead of collapsing to district and state', () => {
+    const out = structureAddress(OFFICE, 'Saheednagar, Khordha, Odisha, 751025, India', '');
+    expect(out.fullAddress).toBe('Saheednagar, Khordha, Odisha, India');
+    expect(out.placeName).toBe('Saheednagar');
+    expect(out.district).toBe('Khordha');
+    expect(out.pincode).toBe('751025');
+  });
+
+  it('still treats county as the district when there is no state_district, without repeating it', () => {
+    const out = structureAddress({ county: 'Rayagada', state: 'Odisha', country: 'India' }, null, null);
+    expect(out.district).toBe('Rayagada');
+    expect(out.fullAddress).toBe('Rayagada, Odisha, India');
+    expect(out.placeName).toBeNull();
+  });
+});

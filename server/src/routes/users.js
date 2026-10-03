@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
-import RefreshToken from '../models/RefreshToken.js';
+import RefreshToken, { sessionLocationLabel } from '../models/RefreshToken.js';
 import { requireAuth, requireRole, companyFilter } from '../middleware/auth.js';
 import { logAudit } from '../lib/auditLogger.js';
 import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from '../lib/passwordPolicy.js';
@@ -52,6 +52,7 @@ router.get('/:id/sessions', requireRole(), async (req, res) => {
     id: String(s._id),
     userAgent: s.userAgent || '',
     ip: s.ip || '',
+    location: sessionLocationLabel(s.location),
     createdAt: s.createdAt,
   })));
 });

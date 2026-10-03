@@ -791,7 +791,7 @@ export function HRMSProvider({ children }) {
       throw err;
     }
     setAttendance((list) => list.map((a) => (a.id === id ? updated : a)));
-    auditLocal('Attendance check-in', updated.name, `${updated.checkIn}${updated.checkInDetails ? ` (${updated.checkInDetails}${updated.checkInLoc ? `: ${updated.checkInLoc}` : ''})` : ''}`);
+    auditLocal('Attendance check-in', updated.name, `${updated.checkIn}${updated.checkInDetails ? ` (${updated.checkInDetails}${updated.checkInAddress ? `: ${updated.checkInAddress}` : ''})` : ''}`);
     toast('success', `<strong>${updated.name}</strong> checked in · ${updated.checkIn}`);
     return updated;
   };
@@ -805,7 +805,7 @@ export function HRMSProvider({ children }) {
       throw err;
     }
     setAttendance((list) => list.map((a) => (a.id === id ? updated : a)));
-    auditLocal('Attendance check-out', updated.name, `${updated.checkOut}${updated.checkOutDetails ? ` (${updated.checkOutDetails}${updated.checkOutLoc ? `: ${updated.checkOutLoc}` : ''})` : ''}`);
+    auditLocal('Attendance check-out', updated.name, `${updated.checkOut}${updated.checkOutDetails ? ` (${updated.checkOutDetails}${updated.checkOutAddress ? `: ${updated.checkOutAddress}` : ''})` : ''}`);
     toast('info', `<strong>${updated.name}</strong> checked out · ${updated.checkOut}`);
     return updated;
   };

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import { DEFAULT_LOGIN_PROFILES } from '../lib/permissions';
 import ForgotPasswordModal from './ForgotPasswordModal';
+import { reportLoginLocation } from '../lib/loginLocation';
 
 export default function LoginScreen() {
   const {
@@ -39,7 +40,12 @@ export default function LoginScreen() {
         ? await loginWithMobile(mobile.trim(), password)
         : await login(email.trim(), password);
       setError('');
-      await finishLogin(accessToken, user);
+      const finished = finishLogin(accessToken, user);
+      // Signed in already; the location is recorded alongside, never awaited.
+      // (An account on a temporary password can reach nothing but the
+      // change-password form, so there is nothing to report to yet.)
+      if (!user.mustChangePassword) reportLoginLocation();
+      await finished;
     } catch (err) {
       setError(err.message || (byMobile ? 'Invalid mobile number or password.' : 'Invalid email or password.'));
     } finally {
@@ -236,6 +242,9 @@ export default function LoginScreen() {
             <button className="login-submit-btn" onClick={submit} disabled={busy} aria-busy={busy}>
               Sign in
             </button>
+            <p className="muted-text" style={{ fontSize: '12px', textAlign: 'center', marginTop: 10 }}>
+              Your location is recorded when you sign in, if you allow it. You can sign in without sharing it.
+            </p>
 
           </div>
       </div>

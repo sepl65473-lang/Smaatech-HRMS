@@ -37,6 +37,37 @@ export function validateCoordinates(lat, lng) {
 }
 
 const MAX_ACCEPTABLE_ACCURACY_M = 100;
+
+/**
+ * The one-line readable address recorded for one punch (checkInAddress /
+ * checkOutAddress — what HR and the employee see), built only from what the
+ * server holds: the reverse-geocoded address and the company site already
+ * configured in Settings (orgName + geofenceLat/Lng/Radius).
+ *
+ * The company name is added ONLY when the punch's own coordinates fall inside
+ * the configured site radius and the fix is precise enough to say so; a punch
+ * anywhere else keeps the address of where it actually happened. This never
+ * accepts or rejects a punch — that remains evaluateGeofence(), and only when
+ * geofencing is enabled.
+ */
+export function describePunchLocation(geo, { lat, lng, accuracy }, settings) {
+  const precise = accuracy == null || accuracy <= MAX_ACCEPTABLE_ACCURACY_M;
+  const siteName = typeof settings?.orgName === 'string' ? settings.orgName.trim() : '';
+  const siteLat = Number(settings?.geofenceLat);
+  const siteLng = Number(settings?.geofenceLng);
+  const siteRadius = Number(settings?.geofenceRadius);
+  const atSite = Boolean(siteName) && precise
+    && Number.isFinite(lat) && Number.isFinite(lng)
+    && Number.isFinite(siteLat) && Number.isFinite(siteLng) && siteRadius > 0
+    && haversineMeters(lat, lng, siteLat, siteLng) <= siteRadius;
+
+  const resolved = geo?.display || null;
+  let address = atSite ? [siteName, resolved].filter(Boolean).join(', ') : resolved;
+  // A coarse fix is recorded as given, but never presented as exact.
+  if (address && !precise) address = `${address} (approximate, within ${Math.round(accuracy)} m)`;
+
+  return { address, atSite };
+}
 const MAX_FIX_AGE_MS = 30_000;
 
 // Independently re-derives geofence pass/fail from raw coordinates the client

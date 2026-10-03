@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { comparePassword, hashPassword } from '../lib/passwordHasher.js';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
-import RefreshToken from '../models/RefreshToken.js';
+import RefreshToken, { sessionLocationLabel } from '../models/RefreshToken.js';
 import FaceDescriptor from '../models/FaceDescriptor.js';
 import {
   signAccessToken, generateRefreshToken, hashToken,
@@ -18,6 +18,9 @@ import { extractDescriptor, matchDescriptor, faceFailureMessage } from '../lib/f
 import { imageUploadMiddleware } from '../lib/photoStorage.js';
 import { terminateAllAccess } from '../lib/sessionRevoker.js';
 import crypto from 'node:crypto';
+import { parseCoordinate, validateCoordinates, describePunchLocation } from '../lib/geofence.js';
+import { reverseGeocode } from '../lib/geocode.js';
+import { getSettingsDoc } from './settings.js';
 
 const router = Router();
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -45,7 +48,7 @@ async function sanitizeEmployeeLink(user) {
   return user;
 }
 
-async function issueSession(res, user, req) {
+async function issueSession(res, user, req, location = null) {
   const accessToken = signAccessToken(user);
   const refreshToken = generateRefreshToken();
   await RefreshToken.create({
@@ -54,6 +57,7 @@ async function issueSession(res, user, req) {
     expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
     userAgent: req.headers['user-agent'],
     ip: req.ip,
+    location,
   });
   res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions());
   return accessToken;
@@ -284,8 +288,67 @@ router.post('/refresh', async (req, res) => {
 
   record.revokedAt = new Date();
   await record.save();
-  const accessToken = await issueSession(res, user, req);
+  // A refresh rotates the token, not the sign-in: its location carries over.
+  const accessToken = await issueSession(res, user, req, record.location || null);
   res.json({ accessToken, user });
+});
+
+// Where the person was when they signed in — recorded AFTER a successful
+// sign-in, and only if their device shares it. This is visibility for HR, not
+// a control: it never runs before authentication, a refusal to share is
+// recorded as exactly that, and no response from here can end or block a
+// session. The readable address is resolved here from the raw coordinates; a
+// client-supplied address is never accepted.
+const LOGIN_LOCATION_REASONS = { denied: 'permission denied', unavailable: 'location unavailable on the device' };
+
+router.post('/login-location', requireAuth, async (req, res) => {
+  const currentToken = req.cookies?.[REFRESH_COOKIE_NAME];
+  const session = currentToken
+    ? await RefreshToken.findOne({ tokenHash: hashToken(currentToken), userId: req.auth.sub, revokedAt: null })
+    : null;
+  // One record per sign-in: it describes the moment of signing in, so a later
+  // call cannot overwrite it.
+  if (session?.location) {
+    return res.json({ recorded: false, location: sessionLocationLabel(session.location) });
+  }
+
+  const lat = parseCoordinate(req.body?.lat);
+  const lng = parseCoordinate(req.body?.lng);
+  const accuracyRaw = req.body?.accuracy != null && req.body.accuracy !== '' ? Number(req.body.accuracy) : null;
+  const accuracy = Number.isFinite(accuracyRaw) && accuracyRaw >= 0 ? accuracyRaw : null;
+  const capturedRaw = Number(req.body?.timestamp);
+  const capturedAt = Number.isFinite(capturedRaw) && capturedRaw > 0 ? new Date(capturedRaw).toISOString() : null;
+
+  let location;
+  if (validateCoordinates(lat, lng).ok) {
+    let address = null;
+    try {
+      const [geo, settings] = await Promise.all([
+        reverseGeocode(lat, lng, { accuracy }).catch(() => null),
+        getSettingsDoc(req.auth.company),
+      ]);
+      address = describePunchLocation(geo, { lat, lng, accuracy }, settings).address;
+    } catch {
+      address = null; // the position is still recorded
+    }
+    location = { status: 'shared', reason: null, address, lat, lng, accuracy, capturedAt, resolvedAt: new Date().toISOString() };
+  } else {
+    const reason = LOGIN_LOCATION_REASONS[String(req.body?.status || '')] || 'no location received';
+    location = { status: 'not-shared', reason, address: null, lat: null, lng: null, accuracy: null, capturedAt: null, resolvedAt: new Date().toISOString() };
+  }
+
+  if (session) {
+    session.location = location;
+    await session.save();
+  }
+  await logAudit(req, {
+    action: 'Sign-in location',
+    subject: req.auth.email || '',
+    details: location.status === 'shared'
+      ? sessionLocationLabel(location)
+      : `Location not shared (${location.reason})`,
+  });
+  res.json({ recorded: true, location: sessionLocationLabel(location) });
 });
 
 router.post('/logout', async (req, res) => {
@@ -324,6 +387,7 @@ router.get('/sessions', requireAuth, async (req, res) => {
     id: String(s._id),
     userAgent: s.userAgent || '',
     ip: s.ip || '',
+    location: sessionLocationLabel(s.location),
     createdAt: s.createdAt,
     current: s.tokenHash === currentHash,
   })));

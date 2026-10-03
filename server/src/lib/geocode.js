@@ -72,7 +72,13 @@ export function structureAddress(addr = {}, displayName = null, providerName = n
   const area = clean(addr.suburb) || clean(addr.neighbourhood) || clean(addr.residential)
     || clean(addr.quarter) || clean(addr.subdistrict);
   // Every locality level returned, finest first, for the readable address.
-  const localities = [addr.neighbourhood, addr.residential, addr.quarter, addr.suburb, addr.city_district, addr.subdistrict]
+  // Where the provider returns both, `state_district` is the district and
+  // `county` is the finer level beneath it — in India often the locality
+  // itself ("Saheednagar" under "Khordha"). It was being dropped, leaving
+  // only district and state. When `state_district` is absent, `county` is
+  // the district (below) and is not repeated here.
+  const localities = [addr.neighbourhood, addr.residential, addr.quarter, addr.suburb, addr.city_district, addr.subdistrict,
+    clean(addr.state_district) ? addr.county : null]
     .map(clean);
   const city = clean(addr.city) || clean(addr.town) || clean(addr.village) || clean(addr.municipality)
     || clean(addr.city_district);
@@ -98,7 +104,7 @@ export function structureAddress(addr = {}, displayName = null, providerName = n
     .join(', ') || clean(displayName);
 
   return {
-    placeName: name || building || road || area || city || null,
+    placeName: name || building || road || area || city || (clean(addr.state_district) ? clean(addr.county) : null) || null,
     fullAddress,
     pincode,
     area,
