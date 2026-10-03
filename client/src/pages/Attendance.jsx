@@ -419,6 +419,10 @@ export default function Attendance() {
             </div>
           </div>
 
+          {/* The roster card (heading, exports, table) is for Admin/HR; users
+              with the Employee role do not see it. They still request
+              corrections from the Corrections tab. */}
+          {currentUser.role !== 'Employee' && (
           <div className="card" style={{ marginTop: 18 }}>
             <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div>
@@ -620,6 +624,7 @@ export default function Attendance() {
               </div>
             )}
           </div>
+          )}
         </>
       )}
 
