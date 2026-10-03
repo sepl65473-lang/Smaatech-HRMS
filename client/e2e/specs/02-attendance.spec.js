@@ -128,6 +128,20 @@ test.describe('employee attendance through the browser', () => {
     await captureThroughUI(page, /Check Out/i);
     const response = await responsePromise;
 
+    // A General-shift employee cannot check out before 18:00 IST. This runs
+    // against the real server clock, so assert whichever side of 18:00 it is.
+    const nowIST = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kolkata',
+    }).format(new Date());
+    if (nowIST < '18:00') {
+      expect(response.status()).toBe(400);
+      expect((await response.json()).error.code).toBe('CHECKOUT_TOO_EARLY');
+      await expect(page.locator('body')).toContainText('Check-Out is available from 6:00 PM onwards.', { timeout: 20_000 });
+      const list = await apiCall(page, 'GET', '/attendance');
+      expect(list.body.find((r) => r.name === USERS.employee.name && r.checkIn).checkOut).toBeNull();
+      return;
+    }
+
     expect(response.status()).toBe(200);
     const row = await response.json();
     expect(row.checkOut).toBeTruthy();

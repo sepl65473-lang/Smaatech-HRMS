@@ -258,6 +258,9 @@ router.post('/qr-checkin', async (req, res) => {
   }
 
   const settings = await getSettingsDoc(req.auth.company);
+  if (direction === 'out' && isCheckoutTooEarly(resolveShiftForToday(String(row.empId), settings), nowTimeIST())) {
+    return res.status(400).json({ error: CHECKOUT_TOO_EARLY });
+  }
   const lat = parseCoordinate(req.body.lat);
   const lng = parseCoordinate(req.body.lng);
   const accuracy = readAccuracy(req.body.accuracy);
@@ -541,6 +544,19 @@ router.delete('/:id', requireRole('HR Manager'), async (req, res) => {
   res.json({ id: req.params.id });
 });
 
+// An employee on the General (09:00-18:00) shift may not check themselves out
+// before 18:00 IST. A fixed time, not check-in + N hours. Other shifts are not
+// affected. "HH:MM" strings compare correctly as text.
+const GENERAL_SHIFT_ID = 'shift_general';
+const GENERAL_MIN_CHECKOUT = '18:00';
+const CHECKOUT_TOO_EARLY = {
+  code: 'CHECKOUT_TOO_EARLY',
+  message: 'Check-Out is available from 6:00 PM onwards.',
+};
+function isCheckoutTooEarly(shift, time) {
+  return shift?.id === GENERAL_SHIFT_ID && time < GENERAL_MIN_CHECKOUT;
+}
+
 // Accuracy is optional, but it is stored — so a non-number never reaches the row.
 function readAccuracy(value) {
   const n = value != null && value !== '' ? Number(value) : null;
@@ -596,6 +612,11 @@ async function handlePunch(req, res, direction) {
   const isHrOverride = isAdminRole && !isOwnRow;
 
   const settings = await getSettingsDoc(req.auth.company);
+  // Self check-out only: an HR override on someone else's row is unchanged.
+  if (direction === 'out' && isSelfService
+    && isCheckoutTooEarly(resolveShiftForToday(String(row.empId), settings), nowTimeIST())) {
+    return res.status(400).json({ error: CHECKOUT_TOO_EARLY });
+  }
   const lat = parseCoordinate(req.body.lat);
   const lng = parseCoordinate(req.body.lng);
   const accuracy = readAccuracy(req.body.accuracy);

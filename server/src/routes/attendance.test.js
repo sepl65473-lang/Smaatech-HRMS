@@ -41,6 +41,14 @@ vi.mock('../lib/faceEngine.js', async (importOriginal) => {
   };
 });
 
+// Punches happen at a fixed IST time of day, so these tests do not depend on
+// when the suite runs (a General-shift check-out is refused before 18:00).
+const clock = vi.hoisted(() => ({ now: '18:30' }));
+vi.mock('../lib/shifts.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  nowTimeIST: () => clock.now,
+}));
+
 vi.mock('../lib/geocode.js', () => ({ reverseGeocode: vi.fn(async () => 'Test Area, Bengaluru, Karnataka - 560001') }));
 
 const { startTestDB, stopTestDB, clearTestDB, TEST_DB_HOOK_TIMEOUT } = await import('../test-utils/testDb.js');
