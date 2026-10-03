@@ -44,32 +44,61 @@ function writeCache(key, value) {
   cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
+// A provider value worth showing: a non-empty string, trimmed. Anything else
+// is treated as absent — never replaced with a guess.
+const clean = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+
 /**
  * Splits a Nominatim address object into the fields an attendance record and
  * an HR reviewer actually need.
+ *
+ * Every part comes from the provider's own response; a level it did not
+ * return is simply left out. `providerName` is the response's top-level
+ * `name` — the named thing at the coordinates (a building, campus or shop),
+ * which is often the most specific label available and is not repeated
+ * inside `address`.
  */
-export function structureAddress(addr = {}, displayName = null) {
-  // The most specific recognisable thing at the coordinates — a building or
-  // business name where one exists, otherwise the street.
-  const placeName = addr.building || addr.amenity || addr.office || addr.shop
-    || addr.industrial || addr.commercial || null;
-  const road = [addr.house_number, addr.road || addr.pedestrian].filter(Boolean).join(' ') || null;
-  const area = addr.suburb || addr.neighbourhood || addr.residential || addr.quarter || addr.subdistrict || null;
-  const city = addr.city || addr.town || addr.village || addr.municipality || addr.city_district || null;
-  const district = addr.state_district || addr.county || null;
-  const state = addr.state || null;
-  const pincode = addr.postcode || null;
-  const country = addr.country || null;
+export function structureAddress(addr = {}, displayName = null, providerName = null) {
+  addr = addr || {};
+  const name = clean(providerName);
+  // A building or business name where the provider tagged one.
+  const building = clean(addr.building) || clean(addr.amenity) || clean(addr.office) || clean(addr.shop)
+    || clean(addr.industrial) || clean(addr.commercial) || clean(addr.house_name);
+  // Floor / unit only when actually returned (OSM rarely maps them).
+  const unit = clean(addr.unit) || clean(addr.flats);
+  const floor = clean(addr.floor) || clean(addr.level);
+  const road = [clean(addr.house_number), clean(addr.road) || clean(addr.pedestrian)].filter(Boolean).join(' ') || null;
+  // Field kept as before: one representative locality.
+  const area = clean(addr.suburb) || clean(addr.neighbourhood) || clean(addr.residential)
+    || clean(addr.quarter) || clean(addr.subdistrict);
+  // Every locality level returned, finest first, for the readable address.
+  const localities = [addr.neighbourhood, addr.residential, addr.quarter, addr.suburb, addr.city_district, addr.subdistrict]
+    .map(clean);
+  const city = clean(addr.city) || clean(addr.town) || clean(addr.village) || clean(addr.municipality)
+    || clean(addr.city_district);
+  const district = clean(addr.state_district) || clean(addr.county);
+  const state = clean(addr.state);
+  const pincode = clean(addr.postcode);
+  const country = clean(addr.country);
 
-  // Full address line, de-duplicated and without the postcode (which is its
-  // own field) so the two are never conflated.
+  // Full address line, de-duplicated (case-insensitively) and without the
+  // postcode (which is its own field) so the two are never conflated.
   const seen = new Set();
-  const fullAddress = [placeName, road, area, city, district, state, country]
-    .filter((part) => part && !seen.has(part) && seen.add(part))
-    .join(', ') || displayName || null;
+  const fullAddress = [
+    unit && `Unit ${unit}`, floor && `Floor ${floor}`,
+    name, building, road, ...localities, city, district, state, country,
+  ]
+    .filter((part) => {
+      if (!part) return false;
+      const key = part.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(', ') || clean(displayName);
 
   return {
-    placeName: placeName || road || area || city || null,
+    placeName: name || building || road || area || city || null,
     fullAddress,
     pincode,
     area,
@@ -117,7 +146,7 @@ export async function reverseGeocode(lat, lng, { accuracy = null } = {}) {
     const data = await res.json();
     if (!data) return { ...base, ...structureAddress({}, null), source: 'unresolved', display: null };
 
-    const structured = structureAddress(data.address || {}, data.display_name || null);
+    const structured = structureAddress(data.address || {}, data.display_name || null, data.name || null);
     // One-line form, kept for existing UI that renders a single string.
     const display = structured.fullAddress && structured.pincode
       ? `${structured.fullAddress} - ${structured.pincode}`

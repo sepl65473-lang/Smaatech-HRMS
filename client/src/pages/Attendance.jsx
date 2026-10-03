@@ -107,6 +107,20 @@ function cleanLocationText(text) {
     .replace(/,\s*India$/i, '');
 }
 
+// The readable address recorded for one punch ('checkIn' | 'checkOut'), for
+// the Admin/HR location display. Only reverse-geocoded address text is used,
+// never the stored coordinates: a punch with no resolved address reads
+// "Address unavailable", and a punch that has not happened returns null.
+function punchAddress(row, dir) {
+  if (!row[dir]) return null;
+  const structured = row[`${dir}Location`];
+  const text = row[`${dir}Address`]
+    || (structured?.fullAddress
+      ? (structured.pincode ? `${structured.fullAddress} - ${structured.pincode}` : structured.fullAddress)
+      : null);
+  return text ? cleanLocationText(text) : 'Address unavailable';
+}
+
 function LiveIndicator({ lastSyncedAt }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -495,7 +509,8 @@ export default function Attendance() {
                 <tbody>
                   {filtered.map((a) => {
                     const s = STATUS[a.status] || STATUS.absent;
-                    const locText = a.checkInAddress || a.checkInLoc || a.checkOutAddress || a.checkOutLoc;
+                    const inAddress = punchAddress(a, 'checkIn');
+                    const outAddress = punchAddress(a, 'checkOut');
                     return (
                       <tr key={a.id}>
                         {rangeActive && <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.date}</td>}
@@ -568,9 +583,18 @@ export default function Attendance() {
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }}
-                          title={cleanLocationText(locText) || undefined}
+                          title={[inAddress && `In: ${inAddress}`, outAddress && `Out: ${outAddress}`].filter(Boolean).join('\n') || undefined}
                         >
-                          {locText ? `📍 ${cleanLocationText(locText)}` : '—'}
+                          {inAddress || outAddress ? (
+                            <>
+                              {inAddress && (
+                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>📍 In: {inAddress}</div>
+                              )}
+                              {outAddress && (
+                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>📍 Out: {outAddress}</div>
+                              )}
+                            </>
+                          ) : '—'}
                         </td>
                       </tr>
                     );
@@ -722,8 +746,7 @@ export default function Attendance() {
                   <div className="card-title" style={{ fontSize: 13, marginBottom: 8 }}>{label} · {time}</div>
                   <div className="muted-text" style={{ fontSize: 12.5, lineHeight: 1.8 }}>
                     <div><strong>Method:</strong> {detailsRow[`${cap}Details`] || '—'}</div>
-                    <div><strong>Coordinates:</strong> {detailsRow[`${cap}Loc`] || '—'} {detailsRow[`${cap}Accuracy`] != null ? `(±${Math.round(detailsRow[`${cap}Accuracy`])}m)` : ''}</div>
-                    <div><strong>Address:</strong> {cleanLocationText(detailsRow[`${cap}Address`]) || 'Not available'}</div>
+                    <div><strong>Current location:</strong> {punchAddress(detailsRow, dir)} {detailsRow[`${cap}Accuracy`] != null ? `(±${Math.round(detailsRow[`${cap}Accuracy`])}m)` : ''}</div>
                     <div><strong>Device:</strong> {device ? `${device.name} · ${device.browser} · ${device.os}` : '—'}</div>
                     <div><strong>IP address:</strong> {detailsRow[`${cap}Ip`] || '—'}</div>
                     <div><strong>Device ID:</strong> {detailsRow[`${cap}DeviceId`] || '—'}</div>
