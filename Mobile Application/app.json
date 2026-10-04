@@ -2,7 +2,7 @@
   "expo": {
     "name": "Smaatech HRMS",
     "slug": "smaatech-hrms-mobile",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,7 +10,7 @@
     "backgroundColor": "#EEF2F8",
     "android": {
       "package": "com.smaatech.hrms",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",

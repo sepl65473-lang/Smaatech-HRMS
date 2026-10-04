@@ -12,9 +12,13 @@ import type { Attendance } from '../types';
 // rotation into the pixels and brings a multi-megabyte camera frame down to a
 // size that uploads quickly on mobile data, well inside the 5 MB limit.
 const UPLOAD_WIDTH = 720;
+// A liveness burst is several frames that the server decodes and analyses one
+// after another, so each is sent smaller. The face still fills most of the
+// frame, well above what detection and matching need.
+export const LIVENESS_FRAME_WIDTH = 480;
 
-export async function prepareFrame(uri: string): Promise<string> {
-  const rendered = await ImageManipulator.manipulate(uri).resize({ width: UPLOAD_WIDTH }).renderAsync();
+export async function prepareFrame(uri: string, width: number = UPLOAD_WIDTH): Promise<string> {
+  const rendered = await ImageManipulator.manipulate(uri).resize({ width }).renderAsync();
   const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.8 });
   return saved.uri;
 }
@@ -112,8 +116,15 @@ const ADVICE: Record<string, string> = {
   LOW_ACCURACY: 'Move outdoors or near a window so GPS can get a better reading.',
   STALE_FIX: 'Your location reading was too old. Try again.',
   CHECKOUT_TOO_EARLY: '',
-  TOO_MANY_FAILED_ATTEMPTS: '',
+  TOO_MANY_FAILED_ATTEMPTS: 'Verification is paused after several failed attempts. Wait about 15 minutes, then try again.',
   CHALLENGE_EXPIRED: 'Start again and follow the prompt promptly.',
+  NO_HEAD_MOVEMENT: 'Start facing the screen. When the prompt says NOW, turn your head a little in the direction shown and hold it there until the photos finish.',
+  WRONG_DIRECTION: 'Turn towards the side named in the prompt: your own left or your own right.',
+  NO_BLINK_DETECTED: 'When the prompt says NOW, close your eyes for a full second, then open them.',
+  EYES_NOT_MEASURABLE: 'Take off reflective glasses or move out of the glare, and look at the screen.',
+  STATIC_IMAGE_REPLAY: 'Move as the prompt asks while the photos are being taken.',
+  INCONSISTENT_FRAMES: 'Keep your face in the frame and move slowly.',
+  FACE_TOO_SMALL: 'Hold the phone closer so your face fills the oval.',
 };
 
 export function punchFailure(err: unknown): { title: string; message: string; code: string } {

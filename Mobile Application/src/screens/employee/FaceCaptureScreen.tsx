@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../services/api';
 import { attendanceApi } from '../../services/endpoints';
-import { EARLY_CHECKOUT_REASONS, findRecordedPunch, prepareFrame, punchFailure, submitEnrollment, submitPunch } from '../../attendance/punch';
+import { EARLY_CHECKOUT_REASONS, LIVENESS_FRAME_WIDTH, findRecordedPunch, prepareFrame, punchFailure, submitEnrollment, submitPunch } from '../../attendance/punch';
 import { FIX_MAX_AGE_MS, getFreshFix, LocationError, type Fix } from '../../permissions/location';
 import { useSettings } from '../../hooks/queries';
 import { useSession } from '../../auth/AuthContext';
@@ -29,13 +29,33 @@ type LocationState =
   | { status: 'ready'; fix: Fix }
   | { status: 'error'; error: LocationError };
 
-const PROMPTS: Record<LivenessChallenge['action'], string> = {
-  'turn-left': 'Slowly turn your head to the LEFT',
-  'turn-right': 'Slowly turn your head to the RIGHT',
-  blink: 'Blink a few times',
+// How each server challenge is captured. The server compares the FIRST frames
+// with the LAST ones, so the person must be told what is coming, given time to
+// read it, and then photographed while they do it — not before, and not after.
+// `frames` is clamped to the server's own limits.
+const LIVENESS_PLAN: Record<LivenessChallenge['action'], { ready: string; go: string; frames: number; gapMs: number }> = {
+  'turn-left': {
+    ready: 'Get ready: look at the screen. Next you will turn your head a little to your LEFT.',
+    go: 'NOW turn your head a little to your LEFT and hold it',
+    frames: 6,
+    gapMs: 450,
+  },
+  'turn-right': {
+    ready: 'Get ready: look at the screen. Next you will turn your head a little to your RIGHT.',
+    go: 'NOW turn your head a little to your RIGHT and hold it',
+    frames: 6,
+    gapMs: 450,
+  },
+  // A natural blink is over in a fifth of a second and falls between photos,
+  // so the eyes are held closed long enough for a frame to see it.
+  blink: {
+    ready: 'Get ready: look at the screen. Next you will close your eyes for a second.',
+    go: 'NOW close your eyes for one second, then open them',
+    frames: 8,
+    gapMs: 150,
+  },
 };
-const BURST_FRAMES = 5;
-const BURST_GAP_MS = 350;
+const READ_PROMPT_MS = 2500;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -58,6 +78,9 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
   const [phase, setPhase] = useState<Phase>({ name: 'ready' });
   const [location, setLocation] = useState<LocationState>({ status: 'locating' });
   const alive = useRef(true);
+  // One capture at a time. `busy` comes from state and is one render behind,
+  // so a quick second tap used to start a second capture and a second request.
+  const capturing = useRef(false);
 
   // Early check-out: before 6:00 PM on the General shift a check-out is
   // allowed but needs a reason first. This only decides whether to ASK; the
@@ -116,8 +139,16 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
   };
 
   const capture = async () => {
-    if (busy || !cameraReady) return;
+    if (capturing.current || busy || !cameraReady) return;
+    capturing.current = true;
+    try {
+      await runCapture();
+    } finally {
+      capturing.current = false;
+    }
+  };
 
+  const runCapture = async () => {
     if (!isPunch) {
       try {
         setPhase({ name: 'capturing' });
@@ -138,16 +169,23 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
       // Policy is the server's; if it is unknown, a single photo is sent and
       // the server rejects it when liveness is in fact required.
       let challenge: LivenessChallenge | null = null;
+      // Shown at once, so the shutter is visibly taken while the challenge is fetched.
+      setPhase({ name: 'capturing', prompt: settings.data?.livenessRequired ? 'Getting ready…' : undefined });
       if (settings.data?.livenessRequired) challenge = await attendanceApi.challenge();
 
-      setPhase({ name: 'capturing', prompt: challenge ? PROMPTS[challenge.action] : undefined });
       const shots: string[] = [];
       if (challenge) {
-        const count = Math.min(Math.max(BURST_FRAMES, challenge.minFrames), challenge.maxFrames);
-        await wait(700); // time to read the prompt before the first frame
+        const plan = LIVENESS_PLAN[challenge.action];
+        const count = Math.min(Math.max(plan.frames, challenge.minFrames), challenge.maxFrames);
+        // 1. Say what is coming and give time to read it.
+        setPhase({ name: 'capturing', prompt: plan.ready });
+        await wait(READ_PROMPT_MS);
+        // 2. Photograph the motion itself: the first frame is the starting
+        //    pose, the last ones are the finished movement.
+        setPhase({ name: 'capturing', prompt: plan.go });
         for (let i = 0; i < count; i += 1) {
           shots.push(await shoot());
-          if (i < count - 1) await wait(BURST_GAP_MS);
+          if (i < count - 1) await wait(plan.gapMs);
         }
       } else {
         shots.push(await shoot());
@@ -156,7 +194,7 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
       setPhase({ name: 'submitting' });
       // Resized after the burst so processing does not stretch the gaps
       // between frames while the person is moving.
-      const frames = await Promise.all(shots.map(prepareFrame));
+      const frames = await Promise.all(shots.map((shot) => prepareFrame(shot, challenge ? LIVENESS_FRAME_WIDTH : undefined)));
       let fix = location.status === 'ready' ? location.fix : null;
       if (!fix || Date.now() - fix.timestamp > FIX_MAX_AGE_MS) fix = await locate();
       if (!fix) {
@@ -277,7 +315,9 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
           <View style={styles.guide} />
           <Text style={styles.prompt}>
             {phase.name === 'capturing' && phase.prompt ? phase.prompt
-              : phase.name === 'submitting' ? 'Verifying with the server…'
+              : phase.name === 'submitting' ? (settings.data?.livenessRequired && isPunch
+                ? 'Photos taken. You can relax.\nVerifying with the server — this can take up to 20 seconds…'
+                : 'Verifying with the server…')
               : phase.name === 'capturing' ? 'Hold still…'
               : 'Centre your face in the frame'}
           </Text>

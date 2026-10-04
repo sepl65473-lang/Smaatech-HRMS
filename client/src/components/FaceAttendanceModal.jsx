@@ -8,13 +8,31 @@ import { apiFetch } from '../lib/apiClient';
 // Server-issued liveness challenge (GET /attendance/liveness/challenge). The
 // words are the person's own left and right. The server alone decides whether
 // the motion happened; this only tells the person what to do and records it.
-const LIVENESS_PROMPTS = {
-  'turn-left': 'Slowly turn your head to your LEFT',
-  'turn-right': 'Slowly turn your head to your RIGHT',
-  blink: 'Blink a few times',
+//
+// The server compares the first frames with the last ones, so the person is
+// told what is coming, given time to read it, and photographed while they do
+// it. A natural blink falls between frames, so the eyes are held closed.
+const LIVENESS_PLAN = {
+  'turn-left': {
+    ready: 'Get ready: look at the camera. Next you will turn your head a little to your LEFT.',
+    go: 'NOW turn your head a little to your LEFT and hold it',
+    frames: 6,
+    gapMs: 600,
+  },
+  'turn-right': {
+    ready: 'Get ready: look at the camera. Next you will turn your head a little to your RIGHT.',
+    go: 'NOW turn your head a little to your RIGHT and hold it',
+    frames: 6,
+    gapMs: 600,
+  },
+  blink: {
+    ready: 'Get ready: look at the camera. Next you will close your eyes for a second.',
+    go: 'NOW close your eyes for one second, then open them',
+    frames: 8,
+    gapMs: 350,
+  },
 };
-const LIVENESS_FRAMES = 5;
-const LIVENESS_GAP_MS = 350;
+const READ_PROMPT_MS = 2500;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const SCAN_INTERVAL_MS = 150; // a real blink is only ~100-300ms — a slower poll can miss the closed-eye moment entirely
@@ -166,16 +184,19 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified,
           // offered in this mode: a still is what liveness exists to refuse.
           const challenge = await apiFetch('/attendance/liveness/challenge');
           if (cancelled) return;
-          setLivenessPrompt(LIVENESS_PROMPTS[challenge.action] || 'Follow the prompt');
+          const plan = LIVENESS_PLAN[challenge.action] || LIVENESS_PLAN['turn-left'];
+          const count = Math.min(Math.max(plan.frames, challenge.minFrames || 3), challenge.maxFrames || 8);
+          setLivenessPrompt(plan.ready);
           setStatus('challenge');
-          const count = Math.min(Math.max(LIVENESS_FRAMES, challenge.minFrames || 3), challenge.maxFrames || 8);
-          await wait(900); // time to read the prompt
+          await wait(READ_PROMPT_MS); // time to read what is coming
+          if (cancelled) return;
+          setLivenessPrompt(plan.go);
           const frames = [];
           for (let i = 0; i < count; i += 1) {
             if (cancelled) return;
             const frame = await captureFrame();
             if (frame) frames.push(frame);
-            if (i < count - 1) await wait(LIVENESS_GAP_MS);
+            if (i < count - 1) await wait(plan.gapMs);
           }
           if (cancelled) return;
           stopResources();
