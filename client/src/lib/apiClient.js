@@ -194,6 +194,11 @@ axiosInstance.interceptors.response.use(
         const parsed = Number(retryAfter);
         if (Number.isFinite(parsed)) retryAfterSeconds = parsed;
       }
+      // Retry-After is not readable cross-origin, so the API repeats the wait
+      // in the body where it matters (the face-verification lock).
+      if (retryAfterSeconds == null && Number.isFinite(Number(body?.retryAfterSeconds))) {
+        retryAfterSeconds = Number(body.retryAfterSeconds);
+      }
 
       const apiError = new ApiError(status, code, message, { retryAfterSeconds });
       if (code === 'ACCOUNT_DISABLED' && !originalRequest.skipAuth) notifySessionLost(apiError);

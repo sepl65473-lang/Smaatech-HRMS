@@ -2,7 +2,7 @@ import { request } from './api';
 import { UPLOAD_TIMEOUT_MS } from '../config/env';
 import type {
   AnalyticsOverview, AppNotification, Attendance, AttendanceCorrection, Employee, Holiday, HrDocument,
-  Leave, LeaveBalance, LeaveType, LivenessChallenge, Paged, Payroll, Settings, User,
+  FaceLock, Leave, LeaveBalance, LeaveType, LivenessChallenge, Paged, Payroll, Settings, User,
 } from '../types';
 
 // Every call here targets an endpoint that already exists in server/src/routes.
@@ -60,6 +60,11 @@ export const attendanceApi = {
   /** Everyone's rows for one day (HR only; others receive just their own). */
   byDate: (date: string, page = 1) => attendancePage({ date, page, limit: 200 }),
   challenge: () => request<LivenessChallenge>('/attendance/liveness/challenge'),
+  /** The caller's own face-verification lock. */
+  lock: () => request<FaceLock>('/attendance/verification-lock'),
+  /** One employee's lock, and its release: HR only, enforced and audited by the server. */
+  lockFor: (email: string) => request<FaceLock>('/attendance/verification-lock', { query: { email } }),
+  resetLock: (email: string) => request<FaceLock>('/attendance/verification-lock/reset', { method: 'POST', body: { email } }),
   punch: (id: string, direction: 'in' | 'out', form: FormData) =>
     request<Attendance>(`/attendance/${id}/check-${direction}`, { method: 'POST', form, timeoutMs: UPLOAD_TIMEOUT_MS }),
 };

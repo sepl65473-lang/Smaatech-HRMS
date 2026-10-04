@@ -276,6 +276,12 @@ export const attendanceApi = {
   // geofence distance and lateness rather than trusting anything in `payload`.
   checkIn: (id, payload) => apiFetch(`/attendance/${id}/check-in`, { method: 'POST', body: payload }),
   checkOut: (id, payload) => apiFetch(`/attendance/${id}/check-out`, { method: 'POST', body: payload }),
+  // The temporary lock after repeated failed face verifications. Without an
+  // email it is the caller's own; HR may name an employee and release theirs.
+  verificationLock: (email) => apiFetch(`/attendance/verification-lock${email ? `?email=${encodeURIComponent(email)}` : ''}`),
+  resetVerificationLock: ({ email, reason }) => apiFetch('/attendance/verification-lock/reset', {
+    method: 'POST', body: { email, reason },
+  }),
   // Real per-department present/late/absent totals over a date range (server
   // aggregates from actual daily history) — feeds Dashboard's AttendanceChart.
   summary: (params = {}) => {

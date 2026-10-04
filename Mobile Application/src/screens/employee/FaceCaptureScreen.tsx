@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, KeyboardAvoidingView, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, KeyboardAvoidingView, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,14 +15,17 @@ import { colors, radius, spacing, type } from '../../theme';
 import { formatTime, nowTimeIST } from '../../utils/date';
 import { attendanceStatus, shiftForToday } from '../../utils/format';
 import type { StackProps } from '../../navigation/types';
-import type { Attendance, LivenessChallenge } from '../../types';
+import type { Attendance, FaceLock, LivenessChallenge } from '../../types';
 
 type Phase =
   | { name: 'ready' }
   | { name: 'capturing'; prompt?: string }
   | { name: 'submitting' }
   | { name: 'success'; row?: Attendance; note?: string }
-  | { name: 'failure'; title: string; message: string; code: string };
+  | { name: 'failure'; title: string; message: string; code: string }
+  // Verification is paused after repeated failures. `seconds` is the wait the
+  // server reported; `stamp` restarts the countdown when it reports a new one.
+  | { name: 'locked'; seconds: number; stamp: number };
 
 type LocationState =
   | { status: 'locating' }
@@ -117,6 +120,27 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
     }
     return () => { alive.current = false; };
   }, [isPunch, readLocation]);
+
+  // Ask the server whether verification is paused: on opening, when the
+  // countdown ends, on returning to the app, and on "check again" after HR
+  // has unlocked. Only the server's answer opens the camera again.
+  // Unknown (null) is not "locked": the server still refuses a locked punch.
+  const readLock = useCallback(() => attendanceApi.lock().catch(() => null), []);
+  const applyLock = useCallback((lock: FaceLock | null) => {
+    if (!lock || !alive.current) return;
+    setPhase((current) => {
+      if (lock.locked) {
+        return current.name === 'ready' || current.name === 'locked'
+          ? { name: 'locked', seconds: lock.remainingSeconds, stamp: Date.now() } : current;
+      }
+      return current.name === 'locked' ? { name: 'ready' } : current;
+    });
+  }, []);
+  const recheckLock = useCallback(() => readLock().then(applyLock), [readLock, applyLock]);
+
+  useEffect(() => {
+    if (isPunch) void readLock().then(applyLock);
+  }, [isPunch, readLock, applyLock]);
 
   useEffect(() => {
     if (permission && !permission.granted && permission.canAskAgain) void requestPermission();
@@ -224,6 +248,10 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
           return;
         }
       }
+      if (err instanceof ApiError && err.code === 'TOO_MANY_FAILED_ATTEMPTS' && err.retryAfterSeconds) {
+        if (alive.current) setPhase({ name: 'locked', seconds: err.retryAfterSeconds, stamp: Date.now() });
+        return;
+      }
       if (alive.current) setPhase({ name: 'failure', ...failureOf(err) });
     }
   };
@@ -246,6 +274,10 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
         <Button label="Done" onPress={close} />
       </Result>
     );
+  }
+
+  if (phase.name === 'locked') {
+    return <Locked key={phase.stamp} seconds={phase.seconds} onRecheck={recheckLock} onClose={close} />;
   }
 
   if (phase.name === 'failure') {
@@ -393,6 +425,52 @@ function EarlyCheckoutReason({ onCancel, onConfirm }: {
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+// The lock screen. It counts the server's wait down on a monotonic clock, so
+// changing the phone's time does not move it, and it never unlocks by itself:
+// at zero, and whenever the app comes back to the front, it asks the server.
+function Locked({ seconds, onRecheck, onClose }: { seconds: number; onRecheck: () => Promise<void>; onClose: () => void }) {
+  const [left, setLeft] = useState(seconds);
+  const [checking, setChecking] = useState(false);
+  const recheck = useRef(onRecheck);
+  useEffect(() => { recheck.current = onRecheck; });
+
+  useEffect(() => {
+    const deadline = performance.now() + seconds * 1000;
+    const timer = setInterval(() => {
+      const remaining = Math.ceil((deadline - performance.now()) / 1000);
+      setLeft(Math.max(0, remaining));
+      if (remaining <= 0) {
+        clearInterval(timer);
+        void recheck.current();
+      }
+    }, 1000);
+    const foreground = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void recheck.current();
+    });
+    return () => { clearInterval(timer); foreground.remove(); };
+  }, [seconds]);
+
+  const minutes = Math.floor(left / 60);
+  const rest = left % 60;
+  const clock = `${minutes}:${String(rest).padStart(2, '0')}`;
+  return (
+    <Result
+      icon="lock-closed"
+      tone={colors.danger}
+      title="Face verification is paused"
+      message={`Too many failed face verification attempts.\n\nYou can try again in ${clock}\n(${minutes} minute${minutes === 1 ? '' : 's'} ${rest} second${rest === 1 ? '' : 's'})\n\nNeed immediate access? Ask HR/Admin to unlock your face verification.`}
+    >
+      <Button
+        label="I have been unlocked — check again"
+        variant="secondary"
+        loading={checking}
+        onPress={() => { setChecking(true); void onRecheck().finally(() => setChecking(false)); }}
+      />
+      <Button label="Close" onPress={onClose} style={{ marginTop: spacing.sm }} />
+    </Result>
   );
 }
 

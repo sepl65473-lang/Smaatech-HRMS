@@ -56,7 +56,13 @@ const MAX_FRAME_VARIATION = 0.45;
 // held at a distance rather than someone standing at the camera.
 const MIN_FACE_AREA_RATIO = 0.02;
 
-export const CHALLENGE_ACTIONS = ['turn-left', 'turn-right', 'blink'];
+// Head turns only. A blink challenge used to be issued one time in three, but
+// it cannot be passed: measured on real captures with this landmark model, the
+// eye-aspect ratio of fully closed eyes (0.22) is within the frame-to-frame
+// noise of open eyes (0.24-0.28), nowhere near the 0.62 x open drop the check
+// requires. Every blink challenge therefore rejected the genuine employee.
+// The blink evaluation below is kept for reference but is never issued.
+export const CHALLENGE_ACTIONS = ['turn-left', 'turn-right'];
 
 // Challenges live in the SHARED store, not in this process.
 //

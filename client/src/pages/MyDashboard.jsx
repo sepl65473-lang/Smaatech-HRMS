@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
 import LeaveForm from '../components/LeaveForm';
 import FaceAttendanceModal from '../components/FaceAttendanceModal';
+import FaceLockNotice from '../components/FaceLockNotice';
 import FaceEnrollModal from '../components/FaceEnrollModal';
 import QrCheckInModal from '../components/QrCheckInModal';
 import {
@@ -114,8 +115,16 @@ export default function MyDashboard() {
   const {
     currentUser, employees, leaves, attendance, payroll, settings, reviews,
     addLeave, checkIn, checkOut, audit, submitSelfReview, toast,
-    enrollFace, faceEnrolled, faceAccess, qrCheckIn, refreshAttendance,
+    enrollFace, faceEnrolled, faceAccess, qrCheckIn, refreshAttendance, getFaceLock,
   } = useHRMS();
+  // The temporary lock after repeated failed face verifications, as the
+  // server reports it: { seconds, stamp } while locked, otherwise null.
+  const [faceLock, setFaceLock] = useState(null);
+  const recheckFaceLock = useCallback(() => getFaceLock().then(
+    (lock) => setFaceLock(lock?.locked ? { seconds: lock.remainingSeconds, stamp: lock.retryAt } : null),
+    () => {}, // unknown is not "locked": the server still refuses a locked punch
+  ), [getFaceLock]);
+  useEffect(() => { recheckFaceLock(); }, [recheckFaceLock]);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [selfRating, setSelfRating] = useState(3);
@@ -319,9 +328,15 @@ export default function MyDashboard() {
           ? 'Checked out — face + location verified.'
           : 'Checked out — face verified.');
       }
-    } catch {
+    } catch (err) {
       // The server already surfaced the rejection reason (e.g. outside the
-      // geofence, or the face didn't match) via a toast — nothing more to do here.
+      // geofence, or the face didn't match) via a toast. A failure may also
+      // have been the one that locked verification, so the lock is re-read.
+      if (err?.code === 'TOO_MANY_FAILED_ATTEMPTS' && err.retryAfterSeconds) {
+        setFaceLock({ seconds: err.retryAfterSeconds, stamp: Date.now() });
+      } else {
+        recheckFaceLock();
+      }
     } finally {
       locationRef.current = null;
       setFaceModalOpen(false);
@@ -600,6 +615,15 @@ export default function MyDashboard() {
                 </div>
               )}
 
+              {faceLock && (
+                <FaceLockNotice
+                  key={faceLock.stamp}
+                  seconds={faceLock.seconds}
+                  onExpire={recheckFaceLock}
+                  onRecheck={recheckFaceLock}
+                />
+              )}
+
               {/* Action Buttons */}
               <div className="leave-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
                 {todayRow.status === 'leave' && !todayRow.checkIn && (
@@ -612,7 +636,7 @@ export default function MyDashboard() {
                     <button
                       type="button"
                       className="mini-btn approve"
-                      disabled={gpsLoading}
+                      disabled={gpsLoading || Boolean(faceLock)}
                       title={faceEnrolled ? undefined : 'You will be asked to enroll your face first'}
                       onClick={() => handleCheckIn(todayRow.id)}
                     >
@@ -630,7 +654,7 @@ export default function MyDashboard() {
                     <button
                       type="button"
                       className="mini-btn approve"
-                      disabled={gpsLoading}
+                      disabled={gpsLoading || Boolean(faceLock)}
                       title={faceEnrolled ? undefined : 'You will be asked to enroll your face first'}
                       onClick={() => handleCheckOut(todayRow.id)}
                     >

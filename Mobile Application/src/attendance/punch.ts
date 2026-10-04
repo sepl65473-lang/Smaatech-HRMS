@@ -116,7 +116,7 @@ const ADVICE: Record<string, string> = {
   LOW_ACCURACY: 'Move outdoors or near a window so GPS can get a better reading.',
   STALE_FIX: 'Your location reading was too old. Try again.',
   CHECKOUT_TOO_EARLY: '',
-  TOO_MANY_FAILED_ATTEMPTS: 'Verification is paused after several failed attempts. Wait about 15 minutes, then try again.',
+  TOO_MANY_FAILED_ATTEMPTS: '',
   CHALLENGE_EXPIRED: 'Start again and follow the prompt promptly.',
   NO_HEAD_MOVEMENT: 'Start facing the screen. When the prompt says NOW, turn your head a little in the direction shown and hold it there until the photos finish.',
   WRONG_DIRECTION: 'Turn towards the side named in the prompt: your own left or your own right.',

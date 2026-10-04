@@ -191,6 +191,16 @@ export interface LivenessChallenge {
   maxFrames: number;
 }
 
+/** The temporary lock after repeated failed face verifications (server-computed). */
+export interface FaceLock {
+  locked: boolean;
+  failedAttempts: number;
+  retryAt: string | null;
+  remainingSeconds: number;
+  userId?: string;
+  name?: string;
+}
+
 export interface AnalyticsOverview {
   range: { from: string; to: string };
   headcount: { total: number; active: number; exited: number };

@@ -151,7 +151,7 @@ async function transportError(err: unknown, opts: RequestOptions): Promise<ApiEr
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
-  let body: { error?: { code?: string; message?: string } } | null = null;
+  let body: { error?: { code?: string; message?: string; retryAfterSeconds?: number } } | null = null;
   try {
     body = await response.json();
   } catch {
@@ -159,7 +159,8 @@ async function toApiError(response: Response): Promise<ApiError> {
   }
   const code = body?.error?.code || `HTTP_${response.status}`;
   const message = body?.error?.message || STATUS_MESSAGES[response.status] || `The server returned an error (HTTP ${response.status}).`;
-  const retryAfter = Number(response.headers.get('retry-after'));
+  // The face-verification lock repeats its wait in the body; the header covers the rest.
+  const retryAfter = Number(body?.error?.retryAfterSeconds ?? response.headers.get('retry-after'));
   return new ApiError(response.status, code, message, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined);
 }
 

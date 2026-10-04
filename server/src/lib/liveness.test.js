@@ -308,3 +308,16 @@ describe('what a successful result claims', () => {
     }
   });
 });
+
+describe('challenges that are issued', () => {
+  it('are head turns only: the blink check cannot be passed by a real face and is not issued', async () => {
+    expect(CHALLENGE_ACTIONS).toEqual(['turn-left', 'turn-right']);
+    const seen = new Set();
+    for (let i = 0; i < 40; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      seen.add((await issueChallenge('user-1')).action);
+    }
+    expect(seen.has('blink')).toBe(false);
+    expect([...seen].sort()).toEqual(['turn-left', 'turn-right']);
+  });
+});

@@ -34,6 +34,10 @@ const userSchema = new mongoose.Schema({
   // token stops working the instant the account is disabled instead of
   // lingering until it expires. See lib/sessionRevoker.js.
   tokenVersion: { type: Number, default: 0 },
+  // Set when HR/Admin resets this account's face-verification lock: failed
+  // attempts recorded before it no longer count toward the lock. The attempt
+  // records themselves are kept as evidence.
+  faceLockResetAt: { type: Date, default: null },
 }, { timestamps: true });
 
 // /auth/login, /refresh and requireAuth all look an account up by email or id
@@ -56,6 +60,7 @@ userSchema.set('toJSON', {
     delete ret.failedLoginAttempts;
     delete ret.lockedUntil;
     delete ret.tokenVersion;
+    delete ret.faceLockResetAt;
   },
 });
 

@@ -199,7 +199,7 @@ export default function Employees() {
                     {canManageFaceAccess && (
                       <button
                         className="icon-btn sm"
-                        title="Face re-verification access"
+                        title="Face verification: unlock or re-verification access"
                         onClick={() => setFaceAccessFor(e)}
                       >
                         🙂

@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
-import { Linking, RefreshControl, ScrollView, Text, View } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import { Alert, Linking, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSession } from '../../auth/AuthContext';
 import { attendanceApi, employeesApi, leaveApi } from '../../services/endpoints';
 import { errorMessage } from '../../services/api';
 import { keys } from '../../hooks/queries';
-import { Avatar, Button, Card, Chip, ErrorState, Loading, SectionTitle, Stat, layout } from '../../components/ui';
+import { Avatar, Banner, Button, Card, Chip, ErrorState, Loading, SectionTitle, Stat, layout } from '../../components/ui';
 import { colors, spacing, type } from '../../theme';
 import { formatDate, formatDay, formatMonth, formatTime, monthKeyIST, monthRange, todayIST } from '../../utils/date';
 import { attendanceStatus, titleCase } from '../../utils/format';
@@ -14,6 +15,7 @@ import type { StackProps } from '../../navigation/types';
 // (routes/employees.js redactEmployee); nothing is unhidden here.
 export function EmployeeDetailScreen({ route }: StackProps<'EmployeeDetail'>) {
   const { id } = route.params;
+  const { caps } = useSession();
   const month = monthKeyIST();
   const employee = useQuery({ queryKey: keys.me(id), queryFn: () => employeesApi.get(id) });
   const balance = useQuery({ queryKey: keys.leaveBalance(id), queryFn: () => leaveApi.balance(id) });
@@ -89,6 +91,8 @@ export function EmployeeDetailScreen({ route }: StackProps<'EmployeeDetail'>) {
         </>
       )}
 
+      {caps?.manageWorkforce && e.email ? <FaceLockCard email={e.email} name={e.name} /> : null}
+
       <SectionTitle title="Leave balance" />
       <Card style={{ paddingVertical: spacing.sm }}>
         {balance.isLoading ? <Text style={type.caption}>Loading…</Text>
@@ -98,6 +102,54 @@ export function EmployeeDetailScreen({ route }: StackProps<'EmployeeDetail'>) {
           ))}
       </Card>
     </ScrollView>
+  );
+}
+
+// HR/Admin: this employee's face-verification lock, and its release. The app
+// only offers it; the server decides who may, refuses a self-unlock, and
+// writes the audit entry. Unlocking verifies nobody: the employee's next
+// attempt goes through the same face check.
+function FaceLockCard({ email, name }: { email: string; name: string }) {
+  const queryClient = useQueryClient();
+  const key = ['faceLock', email];
+  const lock = useQuery({ queryKey: key, queryFn: () => attendanceApi.lockFor(email), retry: false, staleTime: 0 });
+  const unlock = useMutation({
+    mutationFn: () => attendanceApi.resetLock(email),
+    onSuccess: (data) => queryClient.setQueryData(key, data),
+  });
+
+  const confirm = () => Alert.alert(
+    'Unlock face verification?',
+    `${name} will be able to try again straight away, but must still pass the normal face check. This is recorded in the audit log.`,
+    [{ text: 'Cancel', style: 'cancel' }, { text: 'Unlock', onPress: () => unlock.mutate() }],
+  );
+
+  const state = lock.data;
+  return (
+    <>
+      <SectionTitle title="Face verification" />
+      <Card>
+        {lock.isLoading ? <Text style={type.caption}>Loading…</Text>
+          : lock.isError || !state ? <Text style={type.caption}>{errorMessage(lock.error)}</Text>
+          : (
+            <>
+              <View style={layout.rowBetween}>
+                <Text style={[type.body, { flex: 1, marginRight: spacing.sm }]}>
+                  {state.locked
+                    ? `Locked after repeated failed attempts. Unlocks automatically at ${state.retryAt ? new Date(state.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'the end of the wait'}.`
+                    : `${state.failedAttempts} failed attempt${state.failedAttempts === 1 ? '' : 's'} in the last 15 minutes (pauses at 8).`}
+                </Text>
+                <Chip label={state.locked ? 'Locked' : 'Not locked'} tone={state.locked ? 'danger' : 'success'} />
+              </View>
+              {unlock.isSuccess ? <View style={{ marginTop: spacing.md }}><Banner tone="success" message={`Unlocked. ${name} can try again now.`} /></View> : null}
+              {unlock.isError ? <View style={{ marginTop: spacing.md }}><Banner message={errorMessage(unlock.error)} /></View> : null}
+              {state.locked || state.failedAttempts > 0 ? (
+                <Button label="Unlock Face Verification" icon="lock-open-outline" loading={unlock.isPending} onPress={confirm} style={{ marginTop: spacing.md }} />
+              ) : null}
+            </>
+          )}
+      </Card>
+    </>
   );
 }
 

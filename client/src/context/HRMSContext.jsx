@@ -898,6 +898,9 @@ export function HRMSProvider({ children }) {
   // recorded twice here.
   const grantFaceAccess = useCallback((payload) => faceApi.grantAccess(payload), []);
   const revokeFaceAccess = useCallback((id) => faceApi.revokeAccess(id), []);
+  // The server enforces who may do this and writes the audit entry.
+  const getFaceLock = useCallback((email) => attendanceApi.verificationLock(email), []);
+  const resetFaceLock = useCallback((payload) => attendanceApi.resetVerificationLock(payload), []);
 
   // Used by the biometric-device reconciliation flow (Integrations page):
   // applies a punch time to today's attendance row for an employee.
@@ -1758,6 +1761,7 @@ export function HRMSProvider({ children }) {
     // attendance
     checkIn, checkOut, setAttendanceStatus, recordPunch, enrollFace, faceEnrolled, getQrToken, qrCheckIn,
     faceAccess, refreshMyFaceAccess, listFaceAccess, grantFaceAccess, revokeFaceAccess,
+    getFaceLock, resetFaceLock,
     loadDeviceMappings, linkDeviceUser, regenerateDeviceKey,
     // payroll
     processPayroll, markPaid, updatePayrollStructure,

@@ -12,7 +12,9 @@ import { reverseGeocode } from '../lib/geocode.js';
 import multer from 'multer';
 import { extractDescriptor, matchDescriptor, faceFailureMessage } from '../lib/faceEngine.js';
 import { issueChallenge, consumeChallenge, verifyLiveness, livenessFailureMessage, LIVENESS_TUNING } from '../lib/liveness.js';
-import { recordFailedAttempt, recentFailureCount } from '../lib/verificationRecorder.js';
+import { recordFailedAttempt, verificationLockState, lockMessage } from '../lib/verificationRecorder.js';
+import User from '../models/User.js';
+import { invalidateAccountStateCache } from '../middleware/auth.js';
 import { hasValidE2EHeader } from '../lib/e2eGuard.js';
 import VerificationAttempt from '../models/VerificationAttempt.js';
 import { savePhoto, randomFilename, wrapUpload } from '../lib/photoStorage.js';
@@ -26,10 +28,8 @@ const RANGE_TO_DAYS = { Week: 7, Month: 30, Quarter: 90 };
 
 const SHARED_DEVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-// Repeated rejections inside 15 minutes is what a spoofing attempt looks like.
-// Deliberately a slow-down, not a lockout: a bad camera or poor light must not
-// shut someone out of recording their own attendance — they can still ask HR.
-const MAX_FAILED_ATTEMPTS_PER_WINDOW = 8;
+// Repeated rejections inside 15 minutes pause verification for the account:
+// see verificationLockState() in lib/verificationRecorder.js.
 // Accepts either the single `photo` field (the existing single-still flow) or
 // a `frames` burst (the liveness flow). JPEG only: the client always captures
 // via canvas.toBlob(..., 'image/jpeg'), and the server-side decoder is
@@ -429,6 +429,64 @@ router.get('/:id/verification', requireRole('HR Manager'), async (req, res) => {
 });
 
 // Company-wide rejected-attempt feed, for the HR review screen.
+// ── Face-verification lock: status, and HR/Admin reset ────────────────────
+// The lock itself is enforced in handlePunch. These two routes only report it
+// and let HR release it for ONE named account. A reset means "this person may
+// try again": the next attempt still goes through the whole face / liveness /
+// 1:1 match path, and nothing about the enrolled face or any setting changes.
+async function lockTarget(req, source) {
+  const { userId, email } = source || {};
+  if (userId) {
+    if (!mongoose.Types.ObjectId.isValid(String(userId))) return null;
+    return User.findOne({ _id: userId, ...companyFilter(req) });
+  }
+  if (email) return User.findOne({ email: String(email).toLowerCase().trim(), ...companyFilter(req) });
+  return null;
+}
+
+const lockView = (lock) => ({
+  locked: lock.locked,
+  failedAttempts: lock.failedAttempts,
+  retryAt: lock.retryAt ? lock.retryAt.toISOString() : null,
+  remainingSeconds: lock.remainingSeconds,
+});
+
+router.get('/verification-lock', async (req, res) => {
+  const wantsOther = req.query.userId || req.query.email;
+  if (!wantsOther) {
+    return res.json(lockView(await verificationLockState({ company: req.auth.company, userId: req.auth.sub })));
+  }
+  // Someone else's lock state is for HR only.
+  if (!['HR Director', 'HR Manager'].includes(req.auth.role)) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'You can only view your own face verification status.' } });
+  }
+  const target = await lockTarget(req, req.query);
+  if (!target) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+  res.json({ userId: String(target._id), name: target.name, ...lockView(await verificationLockState({ company: target.company, userId: target._id })) });
+});
+
+router.post('/verification-lock/reset', requireRole('HR Manager'), async (req, res) => {
+  const target = await lockTarget(req, req.body);
+  if (!target) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found.' } });
+  if (String(target._id) === String(req.auth.sub)) {
+    // Same rule as face re-verification grants: nobody releases their own lock.
+    return res.status(403).json({ error: { code: 'SELF_RESET_FORBIDDEN', message: 'You cannot unlock your own face verification. Ask another HR user.' } });
+  }
+  const before = await verificationLockState({ company: target.company, userId: target._id });
+  target.faceLockResetAt = new Date();
+  await target.save();
+  invalidateAccountStateCache(target._id);
+
+  const reason = String(req.body?.reason || '').trim().slice(0, 300);
+  await logAudit(req, {
+    action: 'Face verification lock reset',
+    subject: target.name,
+    details: `${before.locked ? 'Locked' : 'Not locked'} with ${before.failedAttempts} recent failed attempt(s) for ${target.email}`
+      + (reason ? ` — reason: ${reason}` : ''),
+  });
+  res.json({ userId: String(target._id), name: target.name, ...lockView(await verificationLockState({ company: target.company, userId: target._id })) });
+});
+
 router.get('/verification/attempts', requireRole('HR Manager'), async (req, res) => {
   const filter = { company: req.auth.company };
   if (req.query.date) filter.date = String(req.query.date);
@@ -734,20 +792,24 @@ async function handlePunch(req, res, direction) {
     // so nobody is shut out of their own attendance by a bad camera.
     // Independent lookups (the enrolled face is used further down): fetched
     // together rather than one after the other.
-    const [recentFailures, enrolled] = await Promise.all([
-      recentFailureCount({ company: req.auth.company, userId: req.auth.sub }),
+    const [lock, enrolled] = await Promise.all([
+      verificationLockState({ company: req.auth.company, userId: req.auth.sub }),
       FaceDescriptor.findOne({ userId: req.auth.sub }),
     ]);
-    if (recentFailures >= MAX_FAILED_ATTEMPTS_PER_WINDOW) {
+    if (lock.locked) {
       await recordFailedAttempt(req, {
         row, direction, stage: 'face', reasonCode: 'TOO_MANY_FAILED_ATTEMPTS',
         reasonMessage: 'Too many failed verification attempts.',
         photoBuffer, geo: await geoPromise, gpsResult, deviceId,
       });
+      // The exact wait comes from the server; the client only counts it down.
+      res.setHeader('Retry-After', String(lock.remainingSeconds));
       return res.status(429).json({
         error: {
           code: 'TOO_MANY_FAILED_ATTEMPTS',
-          message: `Too many failed verification attempts. Wait a few minutes, or ask HR to record this punch for you.`,
+          message: lockMessage(lock),
+          retryAt: lock.retryAt.toISOString(),
+          retryAfterSeconds: lock.remainingSeconds,
         },
       });
     }
