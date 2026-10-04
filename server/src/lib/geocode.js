@@ -22,6 +22,37 @@ const cache = new Map();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 500;
 
+// One lookup that fails (a refused or slow answer from the provider) is tried
+// once more after a short pause, well inside its 1 request/second policy.
+// A second failure is final: the punch is recorded with coordinates only.
+const LOOKUP_TIMEOUT_MS = 5000;
+const RETRY_DELAY_MS = 1200;
+const ATTEMPTS = 2;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// One request to the provider. Returns its JSON, or null with the reason
+// logged — including the HTTP status, which used to be dropped silently.
+async function lookupOnce(url, attempt) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: controller.signal });
+    if (!res.ok) {
+      logger.warn('[geocode] attempt %d/%d: provider answered HTTP %d', attempt, ATTEMPTS, res.status);
+      return null;
+    }
+    const data = await res.json();
+    if (!data) logger.warn('[geocode] attempt %d/%d: provider returned an empty body', attempt, ATTEMPTS);
+    return data || null;
+  } catch (err) {
+    logger.warn('[geocode] attempt %d/%d failed: %s', attempt, ATTEMPTS,
+      err.name === 'AbortError' ? `no answer within ${LOOKUP_TIMEOUT_MS} ms` : err.message);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ~11 m of precision: enough to distinguish entrances, coarse enough that
 // every punch from one office lands on the same key.
 const cacheKeyOf = (lat, lng) => `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
@@ -143,13 +174,11 @@ export async function reverseGeocode(lat, lng, { accuracy = null } = {}) {
 
   try {
     const url = `${NOMINATIM_URL}?format=json&lat=${latNum}&lon=${lngNum}&zoom=18&addressdetails=1`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) return { ...base, ...structureAddress({}, null), source: 'unresolved', display: null };
-
-    const data = await res.json();
+    let data = await lookupOnce(url, 1);
+    if (!data) {
+      await pause(RETRY_DELAY_MS);
+      data = await lookupOnce(url, 2);
+    }
     if (!data) return { ...base, ...structureAddress({}, null), source: 'unresolved', display: null };
 
     const structured = structureAddress(data.address || {}, data.display_name || null, data.name || null);

@@ -2,8 +2,8 @@
 // attendance record's address fields. These pin two things: every level of
 // detail the provider actually returned survives into the readable address,
 // and nothing the provider did NOT return is ever made up.
-import { describe, it, expect } from 'vitest';
-import { structureAddress } from './geocode.js';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { structureAddress, reverseGeocode, _clearGeocodeCache } from './geocode.js';
 
 // Shape of a real Nominatim `address` object for a point in Patia, Bhubaneswar.
 const PATIA = {
@@ -134,5 +134,56 @@ describe('structureAddress — locality returned as county', () => {
     expect(out.district).toBe('Rayagada');
     expect(out.fullAddress).toBe('Rayagada, Odisha, India');
     expect(out.placeName).toBeNull();
+  });
+});
+
+// A failed lookup is tried once more; a second failure leaves the address
+// unresolved and never throws, so the punch that asked for it is not blocked.
+describe('reverseGeocode — one retry, then unresolved', () => {
+  const ok = { ok: true, status: 200, json: async () => ({ address: { county: 'Chandaka', state_district: 'Khordha', state: 'Odisha', postcode: '754005', country: 'India' } }) };
+  const refused = { ok: false, status: 429, json: async () => ({}) };
+
+  beforeEach(() => { _clearGeocodeCache(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('retries exactly once after a non-OK answer and returns the address in the usual format', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(refused).mockResolvedValueOnce(ok);
+    vi.stubGlobal('fetch', fetchMock);
+    const geo = await reverseGeocode(20.37571, 85.807564, { accuracy: 114 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(geo).toMatchObject({
+      source: 'nominatim', display: 'Chandaka, Khordha, Odisha, India - 754005',
+      pincode: '754005', lat: 20.37571, lng: 85.807564, accuracy: 114,
+    });
+  });
+
+  it('retries once after a network error or timeout', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error('socket hang up')).mockResolvedValueOnce(ok);
+    vi.stubGlobal('fetch', fetchMock);
+    const geo = await reverseGeocode(20.37571, 85.807564);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(geo.source).toBe('nominatim');
+  });
+
+  it('does not retry a lookup that succeeded', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok);
+    vi.stubGlobal('fetch', fetchMock);
+    await reverseGeocode(20.37571, 85.807564);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('after two failures keeps the coordinates, invents no address, and does not throw or cache', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(refused).mockRejectedValueOnce(new Error('down'));
+    vi.stubGlobal('fetch', fetchMock);
+    const geo = await reverseGeocode(20.37571, 85.807564, { accuracy: 114 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(geo).toMatchObject({
+      source: 'unresolved', display: null, fullAddress: null, placeName: null, pincode: null,
+      lat: 20.37571, lng: 85.807564, accuracy: 114,
+    });
+
+    // The failure was not cached: the next punch from the same place asks again.
+    fetchMock.mockResolvedValueOnce(ok);
+    expect((await reverseGeocode(20.37571, 85.807564)).source).toBe('nominatim');
   });
 });
