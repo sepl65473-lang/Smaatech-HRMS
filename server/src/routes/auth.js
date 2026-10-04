@@ -312,7 +312,8 @@ router.post('/refresh', async (req, res) => {
 // a control: it never runs before authentication, a refusal to share is
 // recorded as exactly that, and no response from here can end or block a
 // session. The readable address is resolved here from the raw coordinates; a
-// client-supplied address is never accepted.
+// client-supplied address is never accepted. It is the actual place, with no
+// special case for the company's own site.
 const LOGIN_LOCATION_REASONS = { denied: 'permission denied', unavailable: 'location unavailable on the device' };
 
 router.post('/login-location', requireAuth, async (req, res) => {
@@ -337,11 +338,8 @@ router.post('/login-location', requireAuth, async (req, res) => {
   if (validateCoordinates(lat, lng).ok) {
     let address = null;
     try {
-      const [geo, settings] = await Promise.all([
-        reverseGeocode(lat, lng, { accuracy }).catch(() => null),
-        getSettingsDoc(req.auth.company),
-      ]);
-      address = describePunchLocation(geo, { lat, lng, accuracy }, settings).address;
+      const geo = await reverseGeocode(lat, lng, { accuracy });
+      address = describePunchLocation(geo, { accuracy }).address;
     } catch {
       address = null; // the position is still recorded
     }

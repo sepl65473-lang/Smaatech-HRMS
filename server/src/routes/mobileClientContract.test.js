@@ -239,7 +239,7 @@ describe('mobile face attendance', () => {
     expect(inRes.body.checkIn).toBe('18:30');
     expect(inRes.body.checkInDetails).toContain('Face');
     expect(inRes.body.checkInDeviceId).toBe(`android-test-${person.empId}`);
-    // Away from the configured company site: the resolved address, no company name.
+    // The resolved address of where the punch happened.
     expect(inRes.body.checkInAddress).toBe('Test Area, Bengaluru');
     // The User-Agent the app sends is what names the handset on the record.
     expect(inRes.body.checkInDevice.os).toContain('Android');
@@ -249,14 +249,14 @@ describe('mobile face attendance', () => {
     expect(outRes.body.checkOut).toBe('18:30');
   });
 
-  it('names the company site only for a punch inside the configured site radius', async () => {
-    // Site configured at the punch coordinates; geofence ENFORCEMENT stays off.
+  it('records the actual place even when a company site is configured at the same point', async () => {
+    // A site configured at the punch coordinates changes nothing: no company name, no blocking.
     await Settings.updateOne({ _id: COMPANY }, { orgName: 'Smaatech Engineering Pvt Ltd', geofenceLat: 12.9716, geofenceLng: 77.5946, geofenceRadius: 50 });
     const person = await seed('Employee');
     const row = await todayRow(person);
     const res = await punch(person, row.id, 'in');
     expect(res.status).toBe(200);
-    expect(res.body.checkInAddress).toBe('Smaatech Engineering Pvt Ltd, Test Area, Bengaluru');
+    expect(res.body.checkInAddress).toBe('Test Area, Bengaluru');
     expect(res.body.checkInLocation.lat).toBeCloseTo(12.9716, 4);
     expect(res.body.checkInAccuracy).toBe(12);
   });

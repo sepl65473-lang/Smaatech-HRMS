@@ -1,10 +1,10 @@
-// describePunchLocation builds the readable location stored on a punch. These
-// pin the two rules that matter: the company name appears only for a punch
-// genuinely inside the configured site, and nothing is ever made up.
+// describePunchLocation builds the readable location stored for a punch or a
+// sign-in. These pin the rules that matter: it is the actual resolved place,
+// the same everywhere, nothing is made up, and a coarse fix is not presented
+// as exact.
 import { describe, it, expect } from 'vitest';
 import { describePunchLocation } from './geofence.js';
 
-const SITE = { orgName: 'Smaatech Engineering Pvt Ltd', geofenceLat: 20.27332, geofenceLng: 85.87778, geofenceRadius: 60 };
 const geo = (overrides = {}) => ({
   placeName: 'Saheednagar',
   fullAddress: 'Saheednagar, Khordha, Odisha, India',
@@ -12,67 +12,42 @@ const geo = (overrides = {}) => ({
   ...overrides,
 });
 
-describe('describePunchLocation — company site', () => {
-  it('names the company and keeps the specific address for a punch at the site coordinates', () => {
-    const out = describePunchLocation(geo(), { lat: 20.27332, lng: 85.87778, accuracy: 12 }, SITE);
-    expect(out.atSite).toBe(true);
-    expect(out.address).toBe('Smaatech Engineering Pvt Ltd, Saheednagar, Khordha, Odisha, India - 751025');
+describe('describePunchLocation — the actual place, with no special cases', () => {
+  it('returns the resolved address as it is', () => {
+    expect(describePunchLocation(geo(), { accuracy: 12 })).toEqual({ address: 'Saheednagar, Khordha, Odisha, India - 751025' });
   });
 
-  it('names the company for a punch a few metres away but inside the radius', () => {
-    // ~35 m north of the site point.
-    const out = describePunchLocation(geo(), { lat: 20.27363, lng: 85.87778, accuracy: 15 }, SITE);
-    expect(out.atSite).toBe(true);
-  });
-
-  it('does NOT name the company for a punch elsewhere in the same city', () => {
-    // ~340 m away: same locality, same geocoded address, not the office.
-    const out = describePunchLocation(geo(), { lat: 20.27027, lng: 85.87702, accuracy: 15 }, SITE);
-    expect(out.atSite).toBe(false);
+  it('never substitutes or prefixes a company name, even when a site is configured at the same point', () => {
+    const site = { orgName: 'Smaatech Engineering Pvt Ltd', geofenceLat: 20.27332, geofenceLng: 85.87778, geofenceRadius: 60 };
+    // A third argument is ignored: there is no company-site logic.
+    const out = describePunchLocation(geo(), { lat: 20.27332, lng: 85.87778, accuracy: 12 }, site);
     expect(out.address).toBe('Saheednagar, Khordha, Odisha, India - 751025');
+    expect(out.address).not.toContain('Smaatech');
+    expect(out).not.toHaveProperty('atSite');
   });
 
-  it('still names the company when the address lookup failed, without inventing an address', () => {
-    const out = describePunchLocation(null, { lat: 20.27332, lng: 85.87778, accuracy: 10 }, SITE);
-    expect(out.address).toBe('Smaatech Engineering Pvt Ltd');
-  });
-
-  it('never names a site that is not configured', () => {
-    for (const settings of [{ ...SITE, orgName: '  ' }, { ...SITE, geofenceRadius: 0 }, { orgName: 'X' }, null]) {
-      expect(describePunchLocation(geo(), { lat: 20.27332, lng: 85.87778, accuracy: 10 }, settings).atSite).toBe(false);
-    }
-  });
-});
-
-describe('describePunchLocation — away from the site', () => {
-  it('keeps the place the geocoder resolved, unchanged', () => {
-    const cafe = geo({ placeName: 'Cafe Coffee Day', fullAddress: 'Cafe Coffee Day, Janpath, Bhubaneswar, Odisha, India', display: 'Cafe Coffee Day, Janpath, Bhubaneswar, Odisha, India - 751001' });
-    const out = describePunchLocation(cafe, { lat: 20.2961, lng: 85.8245, accuracy: 20 }, SITE);
-    expect(out.atSite).toBe(false);
-    expect(out.address).toBe('Cafe Coffee Day, Janpath, Bhubaneswar, Odisha, India - 751001');
+  it('keeps a named place the geocoder resolved', () => {
+    const cafe = geo({ display: 'Cafe Coffee Day, Janpath, Bhubaneswar, Odisha, India - 751001' });
+    expect(describePunchLocation(cafe, { accuracy: 20 }).address).toBe('Cafe Coffee Day, Janpath, Bhubaneswar, Odisha, India - 751001');
   });
 
   it('a city-only result stays city-only', () => {
-    const out = describePunchLocation(geo({ placeName: 'Puri', fullAddress: 'Puri, Odisha, India', display: 'Puri, Odisha, India' }), { lat: 19.8, lng: 85.83, accuracy: 30 }, SITE);
-    expect(out.address).toBe('Puri, Odisha, India');
+    expect(describePunchLocation(geo({ display: 'Puri, Odisha, India' }), { accuracy: 30 }).address).toBe('Puri, Odisha, India');
   });
 
   it('returns no address at all when geocoding is unavailable', () => {
-    const out = describePunchLocation(null, { lat: 19.8, lng: 85.83, accuracy: 30 }, SITE);
-    expect(out).toEqual({ address: null, atSite: false });
+    expect(describePunchLocation(null, { accuracy: 30 })).toEqual({ address: null });
   });
 });
 
 describe('describePunchLocation — precision', () => {
-  it('marks a coarse fix as approximate and does not claim the company site from it', () => {
-    const out = describePunchLocation(geo(), { lat: 20.27332, lng: 85.87778, accuracy: 2000 }, SITE);
-    expect(out.atSite).toBe(false);
-    expect(out.address).toBe('Saheednagar, Khordha, Odisha, India - 751025 (approximate, within 2000 m)');
+  it('marks a coarse fix as approximate', () => {
+    expect(describePunchLocation(geo(), { accuracy: 2000 }).address)
+      .toBe('Saheednagar, Khordha, Odisha, India - 751025 (approximate, within 2000 m)');
   });
 
-  it('treats a fix with no reported accuracy as given, with no approximate marker', () => {
-    const out = describePunchLocation(geo(), { lat: 20.27332, lng: 85.87778, accuracy: null }, SITE);
-    expect(out.atSite).toBe(true);
-    expect(out.address).not.toContain('approximate');
+  it('adds no marker for a precise fix or one with no reported accuracy', () => {
+    expect(describePunchLocation(geo(), { accuracy: 100 }).address).not.toContain('approximate');
+    expect(describePunchLocation(geo(), { accuracy: null }).address).not.toContain('approximate');
   });
 });

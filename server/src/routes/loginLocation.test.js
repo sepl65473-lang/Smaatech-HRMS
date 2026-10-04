@@ -55,7 +55,8 @@ beforeEach(async () => {
   await clearTestDB();
   reverseGeocode.mockReset();
   reverseGeocode.mockImplementation(async () => ({ placeName: 'Saheednagar', fullAddress: 'Saheednagar, Khordha, Odisha, India', display: OFFICE_ADDRESS }));
-  // Site configured at the office; geofence ENFORCEMENT is off, as in production.
+  // A company site IS configured at the office coordinates, to prove it has no
+  // effect on the recorded location.
   await Settings.create({ _id: COMPANY, gpsCheckInEnabled: false, orgName: 'Smaatech Engineering Pvt Ltd', geofenceLat: OFFICE.lat, geofenceLng: OFFICE.lng, geofenceRadius: 50 });
   for (const name of ['HR Director', 'HR Manager', 'Employee']) await Role.create({ name, allowedActions: [] });
 });
@@ -85,33 +86,33 @@ describe('sign-in never depends on location', () => {
 });
 
 describe('location shared', () => {
-  it('stores the server-resolved address, names the company at the company site, and audits it', async () => {
+  it('stores the server-resolved address of the actual place, with no company name, and audits it', async () => {
     const session = await signIn();
     const res = await report(session, { ...OFFICE, accuracy: 14, timestamp: Date.now() });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ recorded: true, location: `Smaatech Engineering Pvt Ltd, ${OFFICE_ADDRESS}` });
+    expect(res.body).toEqual({ recorded: true, location: OFFICE_ADDRESS });
 
     const stored = (await RefreshToken.findOne({ userId: session.userId, revokedAt: null })).location;
     expect(stored.status).toBe('shared');
-    expect(stored.address).toBe(`Smaatech Engineering Pvt Ltd, ${OFFICE_ADDRESS}`);
+    expect(stored.address).toBe(OFFICE_ADDRESS);
     // Coordinates, accuracy and capture time are kept for audit.
     expect(stored.lat).toBeCloseTo(OFFICE.lat, 5);
     expect(stored.accuracy).toBe(14);
     expect(stored.capturedAt).toBeTruthy();
 
     const audit = await lastAudit(session.email);
-    expect(audit.details).toBe(`Smaatech Engineering Pvt Ltd, ${OFFICE_ADDRESS}`);
+    expect(audit.details).toBe(OFFICE_ADDRESS);
     expect(audit.details).not.toMatch(/\d{2}\.\d{4}/); // no coordinates in what HR reads
   });
 
-  it('away from the company site: the actual place, without the company name', async () => {
+  it('another location: the actual place there, by the same rule', async () => {
     reverseGeocode.mockImplementation(async () => ({ placeName: 'Gunupur Town', display: 'Gunupur Town, Rayagada, Odisha, India - 765022' }));
     const session = await signIn();
     const res = await report(session, { lat: 19.09617, lng: 83.81625, accuracy: 30, timestamp: Date.now() });
     expect(res.body.location).toBe('Gunupur Town, Rayagada, Odisha, India - 765022');
   });
 
-  it('a coarse position is marked approximate and never claims the company site', async () => {
+  it('a coarse position is marked approximate', async () => {
     const session = await signIn();
     const res = await report(session, { ...OFFICE, accuracy: 1800, timestamp: Date.now() });
     expect(res.body.location).toBe(`${OFFICE_ADDRESS} (approximate, within 1800 m)`);
@@ -159,7 +160,7 @@ describe('the record describes the sign-in', () => {
     await report(session, { ...OFFICE, accuracy: 10 });
     const again = await report(session, { lat: 19.09617, lng: 83.81625, accuracy: 10 });
     expect(again.body.recorded).toBe(false);
-    expect(again.body.location).toContain('Smaatech Engineering Pvt Ltd');
+    expect(again.body.location).toBe(OFFICE_ADDRESS);
     expect(await AuditLog.countDocuments({ action: 'Sign-in location', subject: session.email })).toBe(1);
   });
 
@@ -178,12 +179,12 @@ describe('the record describes the sign-in', () => {
     const admin = await signIn('HR Director');
 
     const mine = await request(app).get('/api/v1/auth/sessions').set('Authorization', `Bearer ${session.token}`);
-    expect(mine.body[0].location).toBe(`Smaatech Engineering Pvt Ltd, ${OFFICE_ADDRESS}`);
+    expect(mine.body[0].location).toBe(OFFICE_ADDRESS);
     expect(JSON.stringify(mine.body)).not.toContain('20.27');
 
     const theirs = await request(app).get(`/api/v1/users/${session.userId}/sessions`).set('Authorization', `Bearer ${admin.token}`);
     expect(theirs.status).toBe(200);
-    expect(theirs.body[0].location).toBe(`Smaatech Engineering Pvt Ltd, ${OFFICE_ADDRESS}`);
+    expect(theirs.body[0].location).toBe(OFFICE_ADDRESS);
     expect(JSON.stringify(theirs.body)).not.toContain('20.27');
 
     // A plain employee cannot read someone else's sessions.

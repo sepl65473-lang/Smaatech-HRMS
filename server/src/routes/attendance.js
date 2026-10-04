@@ -289,7 +289,7 @@ router.post('/qr-checkin', async (req, res) => {
   // its one-line `display` goes there; the rest goes to the structured field,
   // exactly as handlePunch does. A failed lookup still carries the coordinates.
   const geo = await reverseGeocode(lat, lng, { accuracy }).catch(() => null);
-  const { address } = describePunchLocation(geo, { lat, lng, accuracy }, settings);
+  const { address } = describePunchLocation(geo, { accuracy });
   const structuredLocation = {
     placeName: geo?.placeName ?? null, fullAddress: geo?.fullAddress ?? null, pincode: geo?.pincode ?? null,
     area: geo?.area ?? null, city: geo?.city ?? null, district: geo?.district ?? null,
@@ -832,7 +832,7 @@ async function handlePunch(req, res, direction) {
   const device = parseDeviceInfo(req.headers['user-agent']);
   const ip = clientIp(req);
   const effectiveDeviceId = deviceId || (isHrOverride ? 'HR-Console' : null);
-  const { address } = describePunchLocation(geo, { lat, lng, accuracy }, settings);
+  const { address } = describePunchLocation(geo, { accuracy });
   const structuredLocation = geo ? {
     placeName: geo.placeName, fullAddress: geo.fullAddress, pincode: geo.pincode,
     area: geo.area, city: geo.city, district: geo.district, state: geo.state, country: geo.country,
