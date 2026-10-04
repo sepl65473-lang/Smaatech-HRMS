@@ -83,6 +83,7 @@ export function TeamAttendanceScreen({ navigation }: StackProps<'TeamAttendance'
               {item.workedMinutes != null ? `  ·  ${formatWorked(item.workedMinutes)}` : ''}
             </Text>
             {item.checkInAddress ? <Text style={[type.caption, { marginTop: 2 }]} numberOfLines={1}>{item.checkInAddress}</Text> : null}
+            {item.earlyCheckoutReason ? <Text style={[type.caption, { marginTop: 2 }]} numberOfLines={2}>Early check-out: {item.earlyCheckoutReason}</Text> : null}
             {isFlagged(item) ? (
               <Text style={[type.caption, { color: colors.danger, marginTop: 4 }]}>
                 {[

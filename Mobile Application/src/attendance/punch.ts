@@ -36,7 +36,21 @@ export interface PunchInput {
   frames: string[];
   challengeId?: string;
   fix: Fix;
+  /** Check-out before 6:00 PM: the reason chosen, and the text when it is "Other". */
+  earlyCheckout?: { reason: string; note?: string } | null;
 }
+
+// Reasons offered for a check-out before 6:00 PM. The server holds the same
+// list (server/src/routes/attendance.js) and is the one that enforces it.
+export const EARLY_CHECKOUT_REASONS = [
+  'Personal emergency',
+  'Medical reason',
+  'Family/personal work',
+  'Official work outside office',
+  'Approved permission',
+  'Transport/travel issue',
+  'Other',
+];
 
 /**
  * Submits a self check-in/out. The photo, the raw coordinates and the device
@@ -51,6 +65,10 @@ export async function submitPunch(input: PunchInput): Promise<Attendance> {
   if (input.fix.accuracy != null) form.append('accuracy', String(input.fix.accuracy));
   form.append('timestamp', String(input.fix.timestamp));
   form.append('deviceId', await getDeviceId());
+  if (input.earlyCheckout?.reason) {
+    form.append('earlyCheckoutReason', input.earlyCheckout.reason);
+    if (input.earlyCheckout.note) form.append('earlyCheckoutNote', input.earlyCheckout.note);
+  }
   if (input.challengeId) {
     form.append('challengeId', input.challengeId);
     input.frames.forEach((uri, index) => appendJpeg(form, 'frames', uri, `frame-${index}.jpg`));

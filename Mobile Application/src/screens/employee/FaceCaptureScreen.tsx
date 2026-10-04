@@ -1,19 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, KeyboardAvoidingView, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../services/api';
 import { attendanceApi } from '../../services/endpoints';
-import { findRecordedPunch, prepareFrame, punchFailure, submitEnrollment, submitPunch } from '../../attendance/punch';
+import { EARLY_CHECKOUT_REASONS, findRecordedPunch, prepareFrame, punchFailure, submitEnrollment, submitPunch } from '../../attendance/punch';
 import { FIX_MAX_AGE_MS, getFreshFix, LocationError, type Fix } from '../../permissions/location';
 import { useSettings } from '../../hooks/queries';
 import { useSession } from '../../auth/AuthContext';
-import { Button } from '../../components/ui';
-import { colors, radius, spacing } from '../../theme';
-import { formatTime } from '../../utils/date';
-import { attendanceStatus } from '../../utils/format';
+import { Banner, Button, Field } from '../../components/ui';
+import { colors, radius, spacing, type } from '../../theme';
+import { formatTime, nowTimeIST } from '../../utils/date';
+import { attendanceStatus, shiftForToday } from '../../utils/format';
 import type { StackProps } from '../../navigation/types';
 import type { Attendance, LivenessChallenge } from '../../types';
 
@@ -58,6 +58,16 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
   const [phase, setPhase] = useState<Phase>({ name: 'ready' });
   const [location, setLocation] = useState<LocationState>({ status: 'locating' });
   const alive = useRef(true);
+
+  // Early check-out: before 6:00 PM on the General shift a check-out is
+  // allowed but needs a reason first. This only decides whether to ASK; the
+  // server applies the rule on its own clock, and `reasonRequested` covers the
+  // case where it asks for one this screen did not expect to need.
+  const [earlyCheckout, setEarlyCheckout] = useState<{ reason: string; note?: string } | null>(null);
+  const [reasonRequested, setReasonRequested] = useState(false);
+  const isEarlyCheckout = mode === 'out'
+    && (reasonRequested || (shiftForToday(user.employeeId, settings.data).id === 'shift_general' && nowTimeIST() < '18:00'));
+  const needsReason = isEarlyCheckout && !earlyCheckout;
 
   const busy = phase.name === 'capturing' || phase.name === 'submitting';
 
@@ -154,11 +164,20 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
         return;
       }
 
-      const row = await submitPunch({ attendanceId, direction, frames, challengeId: challenge?.challengeId, fix });
+      const row = await submitPunch({
+        attendanceId, direction, frames, challengeId: challenge?.challengeId, fix,
+        earlyCheckout: direction === 'out' ? earlyCheckout : null,
+      });
       refreshAttendance();
       if (alive.current) setPhase({ name: 'success', row });
     } catch (err) {
       refreshAttendance();
+      // The server wants an early check-out reason this screen did not ask for
+      // (the phone's clock disagreed with the server's): ask now and retry.
+      if (err instanceof ApiError && err.code === 'EARLY_CHECKOUT_REASON_REQUIRED') {
+        if (alive.current) { setEarlyCheckout(null); setReasonRequested(true); setPhase({ name: 'ready' }); }
+        return;
+      }
       // The upload may have landed even though the reply never arrived.
       if (err instanceof ApiError && err.isTransport) {
         const recorded = user.employeeId ? await findRecordedPunch(user.employeeId, direction) : null;
@@ -203,6 +222,11 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
         <Button label="Close" variant={final ? 'primary' : 'ghost'} onPress={close} style={{ marginTop: spacing.sm }} />
       </Result>
     );
+  }
+
+  // The reason comes first; face verification and location follow as usual.
+  if (needsReason && phase.name === 'ready') {
+    return <EarlyCheckoutReason onCancel={close} onConfirm={setEarlyCheckout} />;
   }
 
   if (!permission) return <View style={styles.dark} />;
@@ -277,6 +301,58 @@ export function FaceCaptureScreen({ navigation, route }: StackProps<'FaceCapture
         </View>
       </SafeAreaView>
     </View>
+  );
+}
+
+function EarlyCheckoutReason({ onCancel, onConfirm }: {
+  onCancel: () => void; onConfirm: (value: { reason: string; note?: string }) => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const confirm = () => {
+    if (!reason) return setError('Choose a reason for checking out early.');
+    if (reason === 'Other' && !note.trim()) return setError('Please describe the reason.');
+    onConfirm(reason === 'Other' ? { reason, note: note.trim() } : { reason });
+  };
+
+  return (
+    <SafeAreaView style={styles.result}>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ padding: spacing.xl }} keyboardShouldPersistTaps="handled">
+          <Text style={type.title}>Early check-out</Text>
+          <Text style={[type.caption, { marginTop: spacing.xs, marginBottom: spacing.lg }]}>
+            It is before 6:00 PM. Choose a reason to continue to face verification.
+          </Text>
+          {error ? <Banner message={error} /> : null}
+          {EARLY_CHECKOUT_REASONS.map((option) => {
+            const selected = option === reason;
+            return (
+              <Pressable
+                key={option}
+                onPress={() => { setReason(option); setError(null); }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                style={[styles.reasonRow, selected && styles.reasonRowSelected]}
+              >
+                <Ionicons name={selected ? 'radio-button-on' : 'radio-button-off'} size={22} color={selected ? colors.primary : colors.muted} />
+                <Text style={[type.body, { marginLeft: spacing.md, flex: 1 }]}>{option}</Text>
+              </Pressable>
+            );
+          })}
+          {reason === 'Other' ? (
+            <View style={{ marginTop: spacing.md }}>
+              <Field label="Describe the reason" value={note} onChangeText={(v) => { setNote(v); setError(null); }} multiline maxLength={300} />
+            </View>
+          ) : null}
+        </ScrollView>
+        <View style={{ padding: spacing.xl }}>
+          <Button label="Continue" onPress={confirm} />
+          <Button label="Cancel" variant="ghost" onPress={onCancel} style={{ marginTop: spacing.sm }} />
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -358,5 +434,10 @@ const styles = StyleSheet.create({
   result: { flex: 1, backgroundColor: colors.background },
   resultBody: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   resultTitle: { fontSize: 22, fontWeight: '700', color: colors.ink, marginTop: spacing.lg, textAlign: 'center' },
+  reasonRow: {
+    flexDirection: 'row', alignItems: 'center', minHeight: 52, paddingHorizontal: spacing.md, marginBottom: spacing.sm,
+    backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+  },
+  reasonRowSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   resultMessage: { fontSize: 15, color: colors.inkSoft, marginTop: spacing.sm, textAlign: 'center', lineHeight: 22 },
 });

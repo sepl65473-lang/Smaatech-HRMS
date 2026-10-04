@@ -86,6 +86,9 @@ const attendanceSchema = new mongoose.Schema({
   // have null and are derived on read below — nothing is back-filled into the
   // database, so no historical record is rewritten.
   workedMinutes: { type: Number, default: null },
+  // Why a General-shift employee checked themselves out before 6:00 PM.
+  // Written only by the verified self check-out (routes/attendance.js).
+  earlyCheckoutReason: { type: String, default: null },
   company: { type: String, default: 'Smaatech', index: true },
 }, { timestamps: true });
 

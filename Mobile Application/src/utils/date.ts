@@ -15,6 +15,12 @@ export function todayIST(): string {
   return `${y}-${pad(m)}-${pad(d)}`;
 }
 
+/** Current IST time as "HH:MM" (24h), the form the server compares shift times in. */
+export function nowTimeIST(): string {
+  const shifted = new Date(Date.now() + IST_OFFSET_MS);
+  return `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`;
+}
+
 export function monthKeyIST(): string {
   return todayIST().slice(0, 7);
 }

@@ -557,6 +557,51 @@ function isCheckoutTooEarly(shift, time) {
   return shift?.id === GENERAL_SHIFT_ID && time < GENERAL_MIN_CHECKOUT;
 }
 
+// Reasons an employee may give for a face check-out before 6:00 PM. 'Other'
+// must come with the employee's own words. The web and Android clients offer
+// this same list; anything else is refused, so the stored value is always one
+// of these or "Other: <text>".
+export const EARLY_CHECKOUT_REASONS = [
+  'Personal emergency',
+  'Medical reason',
+  'Family/personal work',
+  'Official work outside office',
+  'Approved permission',
+  'Transport/travel issue',
+];
+const EARLY_CHECKOUT_OTHER = 'Other';
+const EARLY_CHECKOUT_NOTE_MAX = 300;
+
+function readEarlyCheckoutReason(body) {
+  const choice = String(body?.earlyCheckoutReason ?? '').trim();
+  if (!choice) {
+    return {
+      ok: false,
+      code: 'EARLY_CHECKOUT_REASON_REQUIRED',
+      message: 'Checking out before 6:00 PM needs a reason. Choose a reason and try again.',
+    };
+  }
+  if (choice === EARLY_CHECKOUT_OTHER) {
+    const note = String(body?.earlyCheckoutNote ?? '').trim().slice(0, EARLY_CHECKOUT_NOTE_MAX);
+    if (!note) {
+      return {
+        ok: false,
+        code: 'EARLY_CHECKOUT_NOTE_REQUIRED',
+        message: 'Please describe the reason for checking out early.',
+      };
+    }
+    return { ok: true, reason: `${EARLY_CHECKOUT_OTHER}: ${note}` };
+  }
+  if (!EARLY_CHECKOUT_REASONS.includes(choice)) {
+    return {
+      ok: false,
+      code: 'EARLY_CHECKOUT_REASON_INVALID',
+      message: 'That early check-out reason is not recognised. Choose one from the list.',
+    };
+  }
+  return { ok: true, reason: choice };
+}
+
 // Accuracy is optional, but it is stored — so a non-number never reaches the row.
 function readAccuracy(value) {
   const n = value != null && value !== '' ? Number(value) : null;
@@ -613,9 +658,16 @@ async function handlePunch(req, res, direction) {
 
   const settings = await getSettingsDoc(req.auth.company);
   // Self check-out only: an HR override on someone else's row is unchanged.
+  // Before 6:00 PM on the General shift a face check-out is ALLOWED, but it is
+  // an early check-out and must say why. The reason is validated here, on the
+  // server's own clock, before any verification work; face, liveness and
+  // location checks below still apply exactly as for any other punch.
+  let earlyCheckoutReason = null;
   if (direction === 'out' && isSelfService
     && isCheckoutTooEarly(resolveShiftForToday(String(row.empId), settings), nowTimeIST())) {
-    return res.status(400).json({ error: CHECKOUT_TOO_EARLY });
+    const given = readEarlyCheckoutReason(req.body);
+    if (!given.ok) return res.status(400).json({ error: { code: given.code, message: given.message } });
+    earlyCheckoutReason = given.reason;
   }
   const lat = parseCoordinate(req.body.lat);
   const lng = parseCoordinate(req.body.lng);
@@ -874,6 +926,7 @@ async function handlePunch(req, res, direction) {
       }
     : {
         checkOut: time,
+        ...(earlyCheckoutReason ? { earlyCheckoutReason } : {}),
         // Derived from the two times already being written — the punch
         // decision itself is untouched.
         workedMinutes: workedMinutesBetween(row.checkIn, time),
@@ -921,7 +974,8 @@ async function handlePunch(req, res, direction) {
   await logAudit(req, {
     action: direction === 'in' ? 'Attendance check-in' : 'Attendance check-out',
     subject: updated.name,
-    details: isHrOverride ? `${details} (HR override for another employee)` : details,
+    details: (isHrOverride ? `${details} (HR override for another employee)` : details)
+      + (earlyCheckoutReason ? ` · Early check-out: ${earlyCheckoutReason}` : ''),
     before: row,
     after: updated,
   });

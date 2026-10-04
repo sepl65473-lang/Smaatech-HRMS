@@ -313,13 +313,41 @@ describe('mobile face attendance', () => {
     clock.now = '15:00';
     const tooEarly = await punch(person, row.id, 'out');
     expect(tooEarly.status).toBe(400);
-    expect(tooEarly.body.error.code).toBe('CHECKOUT_TOO_EARLY');
+    expect(tooEarly.body.error.code).toBe('EARLY_CHECKOUT_REASON_REQUIRED');
 
     clock.now = '18:30';
     expect((await punch(person, row.id, 'out')).status).toBe(200);
     const twice = await punch(person, row.id, 'out');
     expect(twice.status).toBe(409);
     expect(twice.body.error.code).toBe('ALREADY_CHECKED_OUT');
+  });
+
+  it('an early check-out reason never stands in for the face check', async () => {
+    const person = await seed('Employee');
+    const row = await todayRow(person);
+    clock.now = '09:30';
+    expect((await punch(person, row.id, 'in')).status).toBe(200);
+
+    clock.now = '15:00';
+    // No reason: refused before any verification.
+    const noReason = await punch(person, row.id, 'out');
+    expect(noReason.status).toBe(400);
+    expect(noReason.body.error.code).toBe('EARLY_CHECKOUT_REASON_REQUIRED');
+
+    // A reason plus someone else's face: still refused, nothing recorded.
+    face.result = { descriptor: STRANGER };
+    const stranger = await punch(person, row.id, 'out').field('earlyCheckoutReason', 'Medical reason');
+    expect(stranger.status).toBe(400);
+    expect(stranger.body.error.code).toBe('FACE_NOT_MATCHED');
+    expect((await todayRow(person)).checkOut).toBeNull();
+
+    // A reason plus the employee's own face: recorded, with the reason.
+    face.result = { descriptor: ENROLLED };
+    const ok = await punch(person, row.id, 'out').field('earlyCheckoutReason', 'Other').field('earlyCheckoutNote', 'Doctor appointment');
+    expect(ok.status).toBe(200);
+    expect(ok.body.checkOut).toBe('15:00');
+    expect(ok.body.earlyCheckoutReason).toBe('Other: Doctor appointment');
+    expect(ok.body.checkOutAddress).toBe('Test Area, Bengaluru');
   });
 
   it('enforces the geofence from raw coordinates when it is enabled', async () => {

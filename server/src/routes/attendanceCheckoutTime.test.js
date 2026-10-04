@@ -78,11 +78,11 @@ function rowFor(emp) {
   return Attendance.create({ empId: emp._id, name: emp.name, dept: emp.dept, date: todayISO(), company: COMPANY });
 }
 
-function punch(direction, rowId, token) {
+function punch(direction, rowId, token, extra = {}) {
   const req = request(app)
     .post(`/api/v1/attendance/${rowId}/check-${direction}`)
     .set('Authorization', `Bearer ${token}`);
-  for (const [k, v] of Object.entries(HERE)) req.field(k, v);
+  for (const [k, v] of Object.entries({ ...HERE, ...extra })) req.field(k, v);
   return req.attach('photo', makeJpeg(seq), { filename: 'selfie.jpg', contentType: 'image/jpeg' });
 }
 
@@ -118,56 +118,147 @@ beforeEach(async () => {
   }
 });
 
-describe('General shift: face check-out before 6:00 PM is refused', () => {
+describe('General shift: face check-out before 6:00 PM is an early check-out and needs a reason', () => {
   it.each([
-    ['09:30', '17:59', 400],
-    ['09:30', '18:00', 200],
-    ['10:00', '17:59', 400],
-    ['10:00', '18:00', 200],
-    ['09:30', '18:45', 200],
-    ['09:30', '12:00', 400],
-  ])('in at %s, out at %s -> %s', async (inAt, outAt, expected) => {
+    ['09:30', '17:59'],
+    ['09:30', '17:00'],
+    ['09:30', '14:00'],
+    ['10:00', '12:15'],
+  ])('in at %s, out at %s without a reason is not recorded', async (inAt, outAt) => {
     const { token, row } = await checkedInAt(inAt);
     const before = (await Attendance.findById(row.id)).toObject();
 
     clock.now = outAt;
     const res = await punch('out', row.id, token);
-    expect(res.status).toBe(expected);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('EARLY_CHECKOUT_REASON_REQUIRED');
 
+    // Nothing about the record changed.
     const after = (await Attendance.findById(row.id)).toObject();
-    if (expected === 400) {
-      expect(res.body.error).toEqual({ code: 'CHECKOUT_TOO_EARLY', message: TOO_EARLY });
-      // Nothing about the record changed.
-      expect(after.checkOut).toBeNull();
-      expect(after.updatedAt).toEqual(before.updatedAt);
-      expect(after.failedVerificationCount).toBe(0);
-      expect(after.status).toBe(before.status);
-    } else {
-      expect(after.checkOut).toBe(outAt);
-      expect(after.checkIn).toBe(inAt);
+    expect(after.checkOut).toBeNull();
+    expect(after.updatedAt).toEqual(before.updatedAt);
+    expect(after.failedVerificationCount).toBe(0);
+    expect(after.status).toBe(before.status);
+  });
+
+  it.each([
+    ['09:30', '17:59'],
+    ['09:30', '17:00'],
+    ['09:30', '14:00'],
+    ['10:00', '12:15'],
+  ])('in at %s, out at %s WITH a reason is allowed and the reason is stored', async (inAt, outAt) => {
+    const { token, row } = await checkedInAt(inAt);
+    clock.now = outAt;
+    const res = await punch('out', row.id, token, { earlyCheckoutReason: 'Medical reason' });
+    expect(res.status).toBe(200);
+    expect(res.body.checkOut).toBe(outAt);
+    expect(res.body.earlyCheckoutReason).toBe('Medical reason');
+
+    const after = await Attendance.findById(row.id);
+    expect(after.checkIn).toBe(inAt);
+    expect(after.checkOut).toBe(outAt);
+    expect(after.earlyCheckoutReason).toBe('Medical reason');
+    // The punch is still a face-verified one: the reason replaces nothing.
+    expect(after.checkOutDetails).toContain('Face');
+  });
+
+  it.each([
+    ['09:30', '18:00'],
+    ['10:00', '18:00'],
+    ['09:30', '18:45'],
+  ])('in at %s, out at %s is a normal check-out: no reason needed, none stored', async (inAt, outAt) => {
+    const { token, row } = await checkedInAt(inAt);
+    clock.now = outAt;
+    const res = await punch('out', row.id, token);
+    expect(res.status).toBe(200);
+    const after = await Attendance.findById(row.id);
+    expect(after.checkOut).toBe(outAt);
+    expect(after.earlyCheckoutReason).toBeNull();
+  });
+
+  it('ignores a reason sent with a check-out at or after 6:00 PM', async () => {
+    const { token, row } = await checkedInAt('09:30');
+    clock.now = '18:10';
+    const res = await punch('out', row.id, token, { earlyCheckoutReason: 'Medical reason' });
+    expect(res.status).toBe(200);
+    expect((await Attendance.findById(row.id)).earlyCheckoutReason).toBeNull();
+  });
+
+  it('accepts every predefined reason', async () => {
+    for (const reason of ['Personal emergency', 'Medical reason', 'Family/personal work', 'Official work outside office', 'Approved permission', 'Transport/travel issue']) {
+      // eslint-disable-next-line no-await-in-loop
+      const { token, row } = await checkedInAt('09:30');
+      clock.now = '16:00';
+      // eslint-disable-next-line no-await-in-loop
+      const res = await punch('out', row.id, token, { earlyCheckoutReason: reason });
+      expect(res.status, reason).toBe(200);
+      expect(res.body.earlyCheckoutReason).toBe(reason);
     }
   });
 
-  it('a refused check-out can be completed once it is 6:00 PM', async () => {
+  it('"Other" needs the employee\'s own words', async () => {
     const { token, row } = await checkedInAt('09:30');
-    clock.now = '17:30';
-    expect((await punch('out', row.id, token)).status).toBe(400);
-    clock.now = '18:00';
-    const ok = await punch('out', row.id, token);
+    clock.now = '16:00';
+
+    const empty = await punch('out', row.id, token, { earlyCheckoutReason: 'Other' });
+    expect(empty.status).toBe(400);
+    expect(empty.body.error.code).toBe('EARLY_CHECKOUT_NOTE_REQUIRED');
+
+    const blank = await punch('out', row.id, token, { earlyCheckoutReason: 'Other', earlyCheckoutNote: '   ' });
+    expect(blank.status).toBe(400);
+    expect(blank.body.error.code).toBe('EARLY_CHECKOUT_NOTE_REQUIRED');
+    expect((await Attendance.findById(row.id)).checkOut).toBeNull();
+
+    const ok = await punch('out', row.id, token, { earlyCheckoutReason: 'Other', earlyCheckoutNote: '  Bank appointment  ' });
     expect(ok.status).toBe(200);
-    expect(ok.body.checkOut).toBe('18:00');
+    expect(ok.body.earlyCheckoutReason).toBe('Other: Bank appointment');
   });
 
-  it('a direct API call without photo or location is refused the same way', async () => {
+  it('refuses a reason that is not on the list', async () => {
+    const { token, row } = await checkedInAt('09:30');
+    clock.now = '16:00';
+    const res = await punch('out', row.id, token, { earlyCheckoutReason: 'Because' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('EARLY_CHECKOUT_REASON_INVALID');
+    expect((await Attendance.findById(row.id)).checkOut).toBeNull();
+  });
+
+  it('a reason does not replace verification: a direct call with a reason but no photo or location is still refused', async () => {
     const { token, row } = await checkedInAt('09:30');
     clock.now = '17:59';
-    const res = await request(app)
+
+    const noReason = await request(app)
       .post(`/api/v1/attendance/${row.id}/check-out`)
       .set('Authorization', `Bearer ${token}`)
       .send({});
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('CHECKOUT_TOO_EARLY');
+    expect(noReason.status).toBe(400);
+    expect(noReason.body.error.code).toBe('EARLY_CHECKOUT_REASON_REQUIRED');
+
+    const reasonOnly = await request(app)
+      .post(`/api/v1/attendance/${row.id}/check-out`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ earlyCheckoutReason: 'Medical reason' });
+    expect(reasonOnly.status).toBe(400);
+    expect(reasonOnly.body.error.code).toBe('NO_COORDINATES');
+
+    const noPhoto = await request(app)
+      .post(`/api/v1/attendance/${row.id}/check-out`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...HERE, earlyCheckoutReason: 'Medical reason' });
+    expect(noPhoto.status).toBe(400);
+    expect(noPhoto.body.error.code).toBe('NO_PHOTO');
     expect((await Attendance.findById(row.id)).checkOut).toBeNull();
+  });
+
+  it('the stored reason cannot be changed afterwards, and a second check-out is refused', async () => {
+    const { token, row } = await checkedInAt('09:30');
+    clock.now = '16:00';
+    expect((await punch('out', row.id, token, { earlyCheckoutReason: 'Medical reason' })).status).toBe(200);
+
+    const again = await punch('out', row.id, token, { earlyCheckoutReason: 'Approved permission' });
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('ALREADY_CHECKED_OUT');
+    expect((await Attendance.findById(row.id)).earlyCheckoutReason).toBe('Medical reason');
   });
 
   it('check-in itself is not restricted', async () => {

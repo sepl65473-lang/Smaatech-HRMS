@@ -57,6 +57,7 @@ export interface Attendance {
   checkInAddress?: string | null;
   checkOutAddress?: string | null;
   workedMinutes?: number | null;
+  earlyCheckoutReason?: string | null;
   anomalyFlags?: string[];
   failedVerificationCount?: number;
 }

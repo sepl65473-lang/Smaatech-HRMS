@@ -15,6 +15,22 @@ import Modal from '../components/Modal';
 import { downloadPayslip } from '../lib/payslip';
 import { apiFetchBlob } from '../lib/apiClient';
 import { loadFaceModels } from '../lib/faceAuth';
+import { resolveShiftForToday } from '../lib/shifts';
+
+// Reasons offered for a check-out before 6:00 PM. The server holds the same
+// list (routes/attendance.js) and is the one that enforces it.
+const EARLY_CHECKOUT_REASONS = [
+  'Personal emergency',
+  'Medical reason',
+  'Family/personal work',
+  'Official work outside office',
+  'Approved permission',
+  'Transport/travel issue',
+  'Other',
+];
+const istTimeNow = () => new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
+}).format(new Date());
 
 // Keyed by GeolocationPositionError.code.
 const LOCATION_ERROR_MESSAGES = {
@@ -112,6 +128,12 @@ export default function MyDashboard() {
   // Face + GPS attendance verification state
   const [faceModalOpen, setFaceModalOpen] = useState(false);
   const [faceAction, setFaceAction] = useState('in'); // in | out
+  // Early check-out reason step (General shift, before 6:00 PM).
+  const [earlyRowId, setEarlyRowId] = useState(null);
+  const [earlyReason, setEarlyReason] = useState('');
+  const [earlyNote, setEarlyNote] = useState('');
+  const [earlyError, setEarlyError] = useState('');
+  const earlyReasonRef = useRef(null);
   const [pendingRowId, setPendingRowId] = useState(null);
   // The in-flight GPS lookup for the current check-in/out attempt, or null
   // once it is finished, rejected or cancelled.
@@ -223,8 +245,37 @@ export default function MyDashboard() {
     }
   };
 
-  const handleCheckIn = (rowId) => startAttendance(rowId, 'in');
-  const handleCheckOut = (rowId) => startAttendance(rowId, 'out');
+  const handleCheckIn = (rowId) => {
+    earlyReasonRef.current = null;
+    return startAttendance(rowId, 'in');
+  };
+  // Before 6:00 PM on the General shift a check-out is allowed but needs a
+  // reason first. This only decides whether to ASK; the server applies the
+  // rule on its own clock and refuses a check-out that should have had one.
+  const handleCheckOut = (rowId) => {
+    earlyReasonRef.current = null;
+    const shift = resolveShiftForToday(currentUser.empId, settings);
+    if (shift?.id === 'shift_general' && istTimeNow() < '18:00') {
+      setEarlyReason('');
+      setEarlyNote('');
+      setEarlyError('');
+      setEarlyRowId(rowId);
+      return undefined;
+    }
+    return startAttendance(rowId, 'out');
+  };
+  const confirmEarlyCheckout = () => {
+    if (!earlyReason) return setEarlyError('Choose a reason for checking out early.');
+    if (earlyReason === 'Other' && !earlyNote.trim()) return setEarlyError('Please describe the reason.');
+    earlyReasonRef.current = {
+      earlyCheckoutReason: earlyReason,
+      ...(earlyReason === 'Other' ? { earlyCheckoutNote: earlyNote.trim() } : {}),
+    };
+    const rowId = earlyRowId;
+    setEarlyRowId(null);
+    // Face verification and location run next, exactly as for any check-out.
+    return startAttendance(rowId, 'out');
+  };
 
   // `photo` is the captured selfie Blob — the server independently re-detects
   // and matches it against the enrolled descriptor; this call doesn't know
@@ -250,9 +301,10 @@ export default function MyDashboard() {
       setGpsStatus(loc);
     }
     // Liveness mode hands back a burst of frames plus the challenge they answer.
+    const early = faceAction === 'out' ? earlyReasonRef.current : null;
     const locationData = photo?.frames
-      ? { ...loc, frames: photo.frames, challengeId: photo.challengeId }
-      : { ...loc, photo };
+      ? { ...loc, ...early, frames: photo.frames, challengeId: photo.challengeId }
+      : { ...loc, ...early, photo };
     // The modal stays open showing "verifying with the server" until the
     // answer arrives, instead of closing to a screen where nothing happens.
     try {
@@ -794,6 +846,44 @@ export default function MyDashboard() {
         onVerified={handleFaceVerified}
         liveness={Boolean(settings.livenessRequired)}
       />
+      <Modal
+        open={Boolean(earlyRowId)}
+        title="Early check-out"
+        subtitle="It is before 6:00 PM. Choose a reason to continue."
+        onClose={() => setEarlyRowId(null)}
+        footer={(
+          <div style={{ display: 'flex', width: '100%', gap: 10, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-ghost" onClick={() => setEarlyRowId(null)}>Cancel</button>
+            <button type="button" className="btn" onClick={confirmEarlyCheckout}>Continue to face verification</button>
+          </div>
+        )}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {EARLY_CHECKOUT_REASONS.map((reason) => (
+            <label key={reason} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="early-checkout-reason"
+                checked={earlyReason === reason}
+                onChange={() => { setEarlyReason(reason); setEarlyError(''); }}
+              />
+              <span>{reason}</span>
+            </label>
+          ))}
+          {earlyReason === 'Other' && (
+            <textarea
+              className="input"
+              rows={3}
+              maxLength={300}
+              placeholder="Describe the reason"
+              aria-label="Reason for checking out early"
+              value={earlyNote}
+              onChange={(e) => { setEarlyNote(e.target.value); setEarlyError(''); }}
+            />
+          )}
+          {earlyError && <div style={{ color: '#dc3545', fontSize: '12.5px' }}>{earlyError}</div>}
+        </div>
+      </Modal>
       <FaceEnrollModal
         open={faceEnrollOpen}
         user={me}

@@ -751,6 +751,9 @@ export default function Attendance() {
                   <div className="card-title" style={{ fontSize: 13, marginBottom: 8 }}>{label} · {time}</div>
                   <div className="muted-text" style={{ fontSize: 12.5, lineHeight: 1.8 }}>
                     <div><strong>Method:</strong> {detailsRow[`${cap}Details`] || '—'}</div>
+                    {dir === 'checkOut' && detailsRow.earlyCheckoutReason && (
+                      <div><strong>Early check-out reason:</strong> {detailsRow.earlyCheckoutReason}</div>
+                    )}
                     <div><strong>Current location:</strong> {punchAddress(detailsRow, dir)} {detailsRow[`${cap}Accuracy`] != null ? `(±${Math.round(detailsRow[`${cap}Accuracy`])}m)` : ''}</div>
                     <div><strong>Device:</strong> {device ? `${device.name} · ${device.browser} · ${device.os}` : '—'}</div>
                     <div><strong>IP address:</strong> {detailsRow[`${cap}Ip`] || '—'}</div>

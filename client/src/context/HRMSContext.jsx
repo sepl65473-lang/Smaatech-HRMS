@@ -772,6 +772,12 @@ export function HRMSProvider({ children }) {
       if (locationData.accuracy != null) form.append('accuracy', locationData.accuracy);
       if (locationData.timestamp != null) form.append('timestamp', locationData.timestamp);
       form.append('deviceId', getDeviceId());
+      // Early check-out (before 6:00 PM): the reason the employee chose. The
+      // server decides whether one is needed and validates it.
+      if (locationData.earlyCheckoutReason) {
+        form.append('earlyCheckoutReason', locationData.earlyCheckoutReason);
+        if (locationData.earlyCheckoutNote) form.append('earlyCheckoutNote', locationData.earlyCheckoutNote);
+      }
       if (locationData.frames?.length) {
         // Liveness: the ordered burst and the single-use challenge it answers.
         form.append('challengeId', locationData.challengeId);
