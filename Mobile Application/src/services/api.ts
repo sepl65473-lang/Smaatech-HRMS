@@ -138,6 +138,15 @@ async function transportError(err: unknown, opts: RequestOptions): Promise<ApiEr
   if (net && net.isConnected === false) {
     return new ApiError(0, 'OFFLINE', 'Your phone is offline. Reconnect and try again.');
   }
+  // A real network failure is raised by the fetch layer as "fetch failed: …"
+  // (or the classic "Network request failed"). Anything else was thrown while
+  // the request was still being put together — a file that could not be read,
+  // a body that could not be built — so nothing was sent, and calling that
+  // "could not reach the server" would point the user at the wrong problem.
+  const message = err instanceof Error ? err.message : '';
+  if (err instanceof Error && !/^fetch failed|network request failed/i.test(message)) {
+    return new ApiError(0, 'REQUEST_NOT_SENT', 'The request could not be prepared on this phone, so nothing was sent. Please try again.');
+  }
   return new ApiError(0, 'UNREACHABLE', 'Could not reach the server. It may be starting up — please try again in a moment.');
 }
 

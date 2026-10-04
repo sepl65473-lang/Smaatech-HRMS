@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { attendanceApi, faceApi } from '../services/endpoints';
 import { ApiError } from '../services/api';
@@ -19,8 +20,13 @@ export async function prepareFrame(uri: string): Promise<string> {
 }
 
 function appendJpeg(form: FormData, field: string, uri: string, name: string) {
-  // React Native's multipart file part.
-  form.append(field, { uri, name, type: 'image/jpeg' } as unknown as Blob);
+  // Expo's fetch (the global fetch in this SDK) does not accept React Native's
+  // path-based `{ uri, name, type }` file part: it throws while building the
+  // request, before anything is sent. It takes a part that can hand over its
+  // bytes, with the filename and content type read from `name` and `type`.
+  // The server accepts only image/jpeg, so the type is stated, not inferred.
+  const file = new File(uri);
+  form.append(field, { name, type: 'image/jpeg', bytes: () => file.bytes() } as unknown as Blob);
 }
 
 export interface PunchInput {
@@ -97,7 +103,8 @@ export function punchFailure(err: unknown): { title: string; message: string; co
     const advice = ADVICE[err.code];
     return {
       code: err.code,
-      title: err.isTransport ? 'Could not reach the server' : 'Not recorded',
+      title: err.code === 'REQUEST_NOT_SENT' ? 'Could not send the photo'
+        : err.isTransport ? 'Could not reach the server' : 'Not recorded',
       message: advice ? `${err.message}\n\n${advice}` : err.message,
     };
   }
