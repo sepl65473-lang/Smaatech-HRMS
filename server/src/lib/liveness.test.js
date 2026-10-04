@@ -195,19 +195,34 @@ describe('replay and spoof rejection', () => {
 });
 
 describe('commanded motion must actually occur', () => {
-  it('accepts a genuine turn to the right', async () => {
+  // Frames are the un-mirrored camera image: the person's LEFT is image-right,
+  // so a turn to their left makes yaw rise.
+  it("accepts a genuine turn to the person's left (yaw rising in the image)", async () => {
     queue([
       frame({ drift: 0.00, yaw: -0.10 }),
       frame({ drift: 0.05, yaw: 0.05 }),
       frame({ drift: 0.10, yaw: 0.22 }),
     ]);
     const result = await verifyLiveness({
-      frameBuffers: buffers(3), action: 'turn-right', enrolledDescriptor: ENROLLED,
+      frameBuffers: buffers(3), action: 'turn-left', enrolledDescriptor: ENROLLED,
     });
     expect(result.ok).toBe(true);
     expect(result.detail.strength).toBe('active-challenge');
-    expect(result.detail.action).toBe('turn-right');
+    expect(result.detail.action).toBe('turn-left');
     expect(result.detail.frameCount).toBe(3);
+  });
+
+  it("accepts a genuine turn to the person's right (yaw falling in the image)", async () => {
+    queue([
+      frame({ drift: 0.00, yaw: 0.22 }),
+      frame({ drift: 0.05, yaw: 0.05 }),
+      frame({ drift: 0.10, yaw: -0.10 }),
+    ]);
+    const result = await verifyLiveness({
+      frameBuffers: buffers(3), action: 'turn-right', enrolledDescriptor: ENROLLED,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.detail.action).toBe('turn-right');
   });
 
   it('rejects turning the WRONG way', async () => {
@@ -219,7 +234,7 @@ describe('commanded motion must actually occur', () => {
       frame({ drift: 0.10, yaw: -0.10 }),
     ]);
     const result = await verifyLiveness({
-      frameBuffers: buffers(3), action: 'turn-right', enrolledDescriptor: ENROLLED,
+      frameBuffers: buffers(3), action: 'turn-left', enrolledDescriptor: ENROLLED,
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('WRONG_DIRECTION');
@@ -273,7 +288,7 @@ describe('what a successful result claims', () => {
       frame({ drift: 0.10, yaw: -0.10 }),
     ]);
     const result = await verifyLiveness({
-      frameBuffers: buffers(3), action: 'turn-left', enrolledDescriptor: ENROLLED,
+      frameBuffers: buffers(3), action: 'turn-right', enrolledDescriptor: ENROLLED,
     });
     expect(result.ok).toBe(true);
     // The stored audit detail must be honest about what was and was not tested.

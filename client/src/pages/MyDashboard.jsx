@@ -249,7 +249,10 @@ export default function MyDashboard() {
       }
       setGpsStatus(loc);
     }
-    const locationData = { ...loc, photo };
+    // Liveness mode hands back a burst of frames plus the challenge they answer.
+    const locationData = photo?.frames
+      ? { ...loc, frames: photo.frames, challengeId: photo.challengeId }
+      : { ...loc, photo };
     // The modal stays open showing "verifying with the server" until the
     // answer arrives, instead of closing to a screen where nothing happens.
     try {
@@ -789,6 +792,7 @@ export default function MyDashboard() {
         action={faceAction}
         onClose={handleFaceModalClose}
         onVerified={handleFaceVerified}
+        liveness={Boolean(settings.livenessRequired)}
       />
       <FaceEnrollModal
         open={faceEnrollOpen}

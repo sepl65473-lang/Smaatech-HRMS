@@ -134,9 +134,15 @@ function evaluateMotion(action, frames) {
 
   // Direction: the sequence must END further toward the commanded side than
   // it started, so turning the opposite way doesn't satisfy the challenge.
-  const movedRight = yaws[yaws.length - 1] > yaws[0];
-  const expectedRight = action === 'turn-right';
-  const ok = movedRight === expectedRight;
+  //
+  // Yaw is measured in IMAGE coordinates, and both clients upload the camera
+  // frame as captured (not the mirrored preview). In such a frame the person's
+  // left is on the image's right, so a turn to THEIR left moves the nose
+  // toward image-right (yaw rises). 'turn-left' / 'turn-right' are the
+  // person's own left and right — the words shown to them.
+  const movedImageRight = yaws[yaws.length - 1] > yaws[0];
+  const expectedImageRight = action === 'turn-left';
+  const ok = movedImageRight === expectedImageRight;
   return {
     ok,
     reason: ok ? null : 'WRONG_DIRECTION',

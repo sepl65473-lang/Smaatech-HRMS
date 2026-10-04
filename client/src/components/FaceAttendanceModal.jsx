@@ -3,6 +3,19 @@ import Modal from './Modal';
 import {
   loadFaceModels, detectFaceDescriptor, detectFaceLandmarks, eyeAspectRatio, createBlinkTracker,
 } from '../lib/faceAuth';
+import { apiFetch } from '../lib/apiClient';
+
+// Server-issued liveness challenge (GET /attendance/liveness/challenge). The
+// words are the person's own left and right. The server alone decides whether
+// the motion happened; this only tells the person what to do and records it.
+const LIVENESS_PROMPTS = {
+  'turn-left': 'Slowly turn your head to your LEFT',
+  'turn-right': 'Slowly turn your head to your RIGHT',
+  blink: 'Blink a few times',
+};
+const LIVENESS_FRAMES = 5;
+const LIVENESS_GAP_MS = 350;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const SCAN_INTERVAL_MS = 150; // a real blink is only ~100-300ms — a slower poll can miss the closed-eye moment entirely
 const MAX_SCAN_MS = 20000; // blink-liveness needs a real blink to occur, not just a face to appear — a bit more room than a plain detection wait
@@ -27,7 +40,7 @@ const ERROR_MESSAGES = {
 // all — a static printed photo or a paused video frame has no eye motion to
 // produce, so it never triggers a capture. Not a dedicated anti-spoofing
 // model (face-api.js ships none), just a real signal beyond a single frame.
-export default function FaceAttendanceModal({ open, action, onClose, onVerified }) {
+export default function FaceAttendanceModal({ open, action, onClose, onVerified, liveness = false }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
@@ -40,6 +53,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
   const [hasStream, setHasStream] = useState(false);
   const [awaitingBlink, setAwaitingBlink] = useState(false);
   const [sawFace, setSawFace] = useState(false);
+  const [livenessPrompt, setLivenessPrompt] = useState('');
   // The parent now keeps this modal open while the server verifies the photo,
   // and re-renders meanwhile. Reading the callback through a ref keeps a new
   // function identity from restarting the camera effect mid-verification.
@@ -146,6 +160,34 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
         }
         if (cancelled) return;
         setHasStream(true);
+        if (liveness) {
+          // A fresh, single-use challenge, then a short burst of camera frames
+          // taken while the person performs it. No single-photo capture is
+          // offered in this mode: a still is what liveness exists to refuse.
+          const challenge = await apiFetch('/attendance/liveness/challenge');
+          if (cancelled) return;
+          setLivenessPrompt(LIVENESS_PROMPTS[challenge.action] || 'Follow the prompt');
+          setStatus('challenge');
+          const count = Math.min(Math.max(LIVENESS_FRAMES, challenge.minFrames || 3), challenge.maxFrames || 8);
+          await wait(900); // time to read the prompt
+          const frames = [];
+          for (let i = 0; i < count; i += 1) {
+            if (cancelled) return;
+            const frame = await captureFrame();
+            if (frame) frames.push(frame);
+            if (i < count - 1) await wait(LIVENESS_GAP_MS);
+          }
+          if (cancelled) return;
+          stopResources();
+          if (frames.length < (challenge.minFrames || 3)) {
+            setError('Could not capture enough camera frames. Please try again.');
+            setStatus('error');
+            return;
+          }
+          setStatus('verifying');
+          onVerifiedRef.current({ frames, challengeId: challenge.challengeId });
+          return;
+        }
         setStatus('scanning');
         setAwaitingBlink(false);
         blinkTrackerRef.current = createBlinkTracker();
@@ -163,7 +205,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
       cancelled = true;
       stopResources();
     };
-  }, [open, retryToken, stopResources, captureFrame]);
+  }, [open, retryToken, stopResources, captureFrame, liveness]);
 
   const tryAgain = () => setRetryToken((t) => t + 1);
 
@@ -206,6 +248,7 @@ export default function FaceAttendanceModal({ open, action, onClose, onVerified 
 
         <div style={{ textAlign: 'center', width: '100%' }}>
           {status === 'loading' && <div className="muted-text">Loading camera &amp; face verification model…</div>}
+          {status === 'challenge' && <div style={{ color: '#3b7ddd', fontWeight: 600 }}>{livenessPrompt}</div>}
           {status === 'scanning' && (
             <div style={{ color: '#3b7ddd', fontWeight: 500 }}>
               {awaitingBlink ? 'Hold still or blink naturally…' : 'Looking for your face…'}

@@ -238,6 +238,20 @@ router.post('/face-login', faceLoginUpload, async (req, res) => {
     return res.status(403).json({ error: { code: 'ACCOUNT_DISABLED', message: 'This account has been deactivated.' } });
   }
 
+  // Face sign-in verifies ONE still photo. When the company requires
+  // liveness, a still photo is exactly what must not be accepted, and this
+  // route has no challenge flow — so it is refused outright rather than left
+  // as a way around the liveness check. Password sign-in is unaffected.
+  if ((await getSettingsDoc(user.company)).livenessRequired) {
+    await logAudit(req, {
+      action: 'Failed face sign-in attempt', subject: user.email, details: 'Face sign-in is disabled while liveness is required',
+      actor: loginActor(user), company: user.company,
+    });
+    return res.status(403).json({
+      error: { code: 'LIVENESS_REQUIRED', message: 'Face sign-in is not available. Please sign in with your password.' },
+    });
+  }
+
   if (!req.file) {
     return res.status(400).json({ error: { code: 'NO_PHOTO', message: faceFailureMessage('NO_PHOTO') } });
   }

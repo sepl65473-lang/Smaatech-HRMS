@@ -196,6 +196,7 @@ export default function Settings() {
   };
 
   const [gpsCheckInEnabled, setGpsCheckInEnabled] = useState(false);
+  const [livenessRequired, setLivenessRequired] = useState(false);
   const [geofenceLat, setGeofenceLat] = useState(19.0760);
   const [geofenceLng, setGeofenceLng] = useState(72.8777);
   const [geofenceRadius, setGeofenceRadius] = useState(25);
@@ -230,6 +231,7 @@ export default function Settings() {
     setWorkWeek(settings.workWeek || '5-day');
     setTotalLeaveDays(Number(settings.totalLeaveDays || 24));
     setGpsCheckInEnabled(settings.gpsCheckInEnabled ?? false);
+    setLivenessRequired(settings.livenessRequired ?? false);
     setGeofenceLat(settings.geofenceLat ?? 19.0760);
     setGeofenceLng(settings.geofenceLng ?? 72.8777);
     setGeofenceRadius(settings.geofenceRadius ?? 25);
@@ -241,7 +243,7 @@ export default function Settings() {
     setSmtpPass(settings.gatewaySmtpPass || '');
   }, [
     settings.orgName, settings.workWeek, settings.totalLeaveDays,
-    settings.gpsCheckInEnabled, settings.geofenceLat, settings.geofenceLng, settings.geofenceRadius,
+    settings.gpsCheckInEnabled, settings.livenessRequired, settings.geofenceLat, settings.geofenceLng, settings.geofenceRadius,
     settings.gatewayTwilioSid, settings.gatewayTwilioToken, settings.gatewayTwilioFrom,
     settings.gatewaySmtpHost, settings.gatewaySmtpUser, settings.gatewaySmtpPass
   ]);
@@ -394,6 +396,23 @@ export default function Settings() {
             >
               Save Geofence
             </button>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">Face liveness check</div>
+              <div className="card-sub">Require a live head-turn or blink at every face check-in and check-out, so a photo of the employee is not accepted</div>
+            </div>
+            <Toggle
+              on={livenessRequired}
+              onClick={() => {
+                const next = !livenessRequired;
+                setLivenessRequired(next);
+                updateSettings({ livenessRequired: next });
+              }}
+            />
           </div>
         </div>
 

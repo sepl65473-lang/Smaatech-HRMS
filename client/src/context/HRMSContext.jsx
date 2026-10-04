@@ -765,14 +765,20 @@ export function HRMSProvider({ children }) {
   // a multipart request — the server re-detects and re-matches the face in
   // that photo itself rather than trusting any client-reported result.
   const buildPunchPayload = (locationData) => {
-    if (locationData?.photo) {
+    if (locationData?.photo || locationData?.frames?.length) {
       const form = new FormData();
       if (locationData.lat != null) form.append('lat', locationData.lat);
       if (locationData.lng != null) form.append('lng', locationData.lng);
       if (locationData.accuracy != null) form.append('accuracy', locationData.accuracy);
       if (locationData.timestamp != null) form.append('timestamp', locationData.timestamp);
       form.append('deviceId', getDeviceId());
-      form.append('photo', locationData.photo, 'checkin.jpg');
+      if (locationData.frames?.length) {
+        // Liveness: the ordered burst and the single-use challenge it answers.
+        form.append('challengeId', locationData.challengeId);
+        locationData.frames.forEach((frame, i) => form.append('frames', frame, `frame-${i}.jpg`));
+      } else {
+        form.append('photo', locationData.photo, 'checkin.jpg');
+      }
       return form;
     }
     return {
