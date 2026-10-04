@@ -23,6 +23,7 @@ import { logAudit } from '../lib/auditLogger.js';
 import { todayISO, isoDateDaysAgo } from '../lib/dateUtils.js';
 import { notifyAttendanceEvent } from '../lib/attendanceNotify.js';
 import { issueQrToken, consumeQrToken } from '../lib/qrTokenStore.js';
+import logger from '../lib/logger.js';
 
 const RANGE_TO_DAYS = { Week: 7, Month: 30, Quarter: 90 };
 
@@ -684,6 +685,37 @@ function gpsFailureMessage(result) {
 // against the enrolled descriptor server-side: a forged client can lie about
 // a "faceVerified" flag, but not about what this server's own model sees in
 // the photo it uploaded.
+// How long a verified punch waits for its address once the face check is done.
+// The lookup runs alongside the face check and has normally finished by then;
+// when the provider is slow or down (a lookup can take ~11 s with its retry),
+// the punch is recorded with its coordinates and the address is added to that
+// record when the lookup completes.
+const ADDRESS_GRACE_MS = Number(process.env.ADDRESS_GRACE_MS || 2000);
+const ADDRESS_PENDING = Symbol('address-pending');
+
+function addAddressWhenResolved(geoPromise, rowId, direction, accuracy) {
+  const field = direction === 'in' ? 'checkIn' : 'checkOut';
+  geoPromise.then((geo) => {
+    if (!geo?.display) return null; // still unresolved: coordinates only, as recorded
+    const { address } = describePunchLocation(geo, { accuracy });
+    // Only the punch that was saved without an address, and only if nothing
+    // has replaced its location since.
+    return Attendance.updateOne(
+      { _id: rowId, [`${field}Location.source`]: 'unresolved', [`${field}Location.lat`]: geo.lat, [`${field}Location.lng`]: geo.lng },
+      {
+        $set: {
+          [`${field}Address`]: address,
+          [`${field}Location`]: {
+            placeName: geo.placeName, fullAddress: geo.fullAddress, pincode: geo.pincode,
+            area: geo.area, city: geo.city, district: geo.district, state: geo.state, country: geo.country,
+            lat: geo.lat, lng: geo.lng, accuracy: geo.accuracy, source: geo.source, resolvedAt: geo.resolvedAt,
+          },
+        },
+      },
+    );
+  }).catch((err) => logger.warn('[attendance] late address for %s was not saved: %s', rowId, err.message));
+}
+
 async function handlePunch(req, res, direction) {
   const row = await Attendance.findOne({ _id: req.params.id, ...companyFilter(req) });
   if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attendance row not found.' } });
@@ -912,7 +944,15 @@ async function handlePunch(req, res, direction) {
     }
   }
 
-  const geo = await geoPromise;
+  // The address must never hold up a verified punch.
+  let graceTimer;
+  const settled = await Promise.race([
+    geoPromise,
+    new Promise((resolve) => { graceTimer = setTimeout(() => resolve(ADDRESS_PENDING), ADDRESS_GRACE_MS); }),
+  ]);
+  clearTimeout(graceTimer);
+  const addressPending = settled === ADDRESS_PENDING;
+  const geo = addressPending ? null : settled;
   const time = nowTimeIST();
   const hasGpsCoords = lat != null && lng != null;
   // "GPS Verified" only when the geofence was actually evaluated and passed.
@@ -1032,6 +1072,8 @@ async function handlePunch(req, res, direction) {
       },
     });
   }
+
+  if (addressPending) addAddressWhenResolved(geoPromise, updated._id, direction, accuracy);
 
   await logAudit(req, {
     action: direction === 'in' ? 'Attendance check-in' : 'Attendance check-out',
