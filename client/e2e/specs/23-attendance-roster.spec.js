@@ -50,10 +50,13 @@ test('employee avatars are still rendered in the roster', async ({ page }) => {
 test('a punched-in employee shows their time and opens the captured evidence', async ({ page }) => {
   await openRoster(page);
 
-  // Find a row that actually has a check-in time.
+  // Find a row that actually has a check-in time. The default view is "Today
+  // Attendance Records", so it has to be one of TODAY's rows: a punch from an
+  // earlier day is in the loaded list but, correctly, not on this screen.
   const rows = await apiAs(page, 'GET', '/attendance');
-  const punched = (Array.isArray(rows.body) ? rows.body : rows.body.rows || []).find((r) => r.checkIn);
-  test.skip(!punched, 'no punched-in row in the tenant yet');
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const punched = (Array.isArray(rows.body) ? rows.body : rows.body.rows || []).find((r) => r.checkIn && r.date === today);
+  test.skip(!punched, 'nobody has punched in today in the tenant yet');
 
   console.log(`[roster] inspecting ${punched.name}: in=${punched.checkIn} out=${punched.checkOut || '—'}`);
 

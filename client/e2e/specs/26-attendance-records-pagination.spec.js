@@ -8,11 +8,11 @@ import { USERS } from '../fixtures/harness.js';
  * 20 rows at a time. Driven through the real page on the isolated tenant.
  */
 const pad = (n) => String(n).padStart(2, '0');
-// A whole month three months back: nothing else writes there.
+// A month fifteen months back: outside the twelve months 19-exports fills.
 const base = (() => {
   const d = new Date();
   d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() - 3);
+  d.setUTCMonth(d.getUTCMonth() - 15);
   const year = d.getUTCFullYear(); const month = d.getUTCMonth() + 1;
   return { from: `${year}-${pad(month)}-01`, to: `${year}-${pad(month)}-28`, day: (n) => `${year}-${pad(month)}-${pad(n)}` };
 })();
@@ -143,17 +143,53 @@ test('changing a filter returns to page 1, and a result that fits one page has n
   expect((await rowKeys(page)).length).toBe(0);
 });
 
-test("today's roster, the exports and the timesheet controls are untouched; the pager fits a phone-sized window", async ({ page }) => {
+const TODAY_TITLE = 'Today Attendance Records';
+const todaysRows = async (page) => {
+  const list = (await apiAs(page, 'GET', '/attendance')).body;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  return { today, all: list, rows: list.filter((r) => r.date === today) };
+};
+
+test('the default view is "Today Attendance Records": today only, and 20 or fewer rows have no page buttons', async ({ page }) => {
   test.setTimeout(180_000);
   await login(page, 'hr');
   await page.goto('/attendance');
-  await expect(page.getByText('Today’s roster', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/^Showing /)).toHaveCount(0); // no pager on today's roster
+  // Both the tab button and the card heading carry the new name.
+  await expect(page.getByRole('button', { name: TODAY_TITLE, exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.card-title', { hasText: TODAY_TITLE })).toBeVisible();
+  await expect(page.getByText(/Today.s roster/)).toHaveCount(0);
+
+  const { all, rows } = await todaysRows(page);
+  expect(all.length).toBeGreaterThan(rows.length); // earlier days ARE in the loaded list...
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.length).toBeLessThanOrEqual(20);
+  // ...but only today's rows are listed.
+  await expect(page.getByText(`Showing 1–${rows.length} of ${rows.length} record${rows.length === 1 ? '' : 's'}`)).toBeVisible();
+  await expect(page.getByText(`${rows.length} of ${rows.length} people shown`)).toBeVisible();
+  const keys = await rowKeys(page);
+  expect(keys.length).toBe(rows.length);
+  rows.forEach((r, i) => { if (r.name) expect(keys[i]).toContain(r.name); });
+  await expect(page.getByRole('button', { name: 'Next', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Previous', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Page 1', exact: true })).toHaveCount(0);
+
+  // Summary cards are today's figures.
+  for (const [label, status] of [['Absent', 'absent'], ['On leave', 'leave']]) {
+    await expect(page.locator('.stat', { hasText: label }).locator('.stat-value')).toHaveText(String(rows.filter((r) => r.status === status).length));
+  }
+
+  // Nothing else on the page moved.
   for (const name of ['Export CSV', 'Export Excel', 'Export PDF', 'Timesheet PDF', 'Timesheet Excel']) {
     await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
   }
-  await expect(page.getByLabel('Timesheet employee')).toBeVisible();
+  for (const label of ['Timesheet employee', 'Timesheet month', 'Timesheet year']) await expect(page.getByLabel(label)).toBeVisible();
+  const headers = await page.locator('.attendance-page table.table').first().locator('thead th').allInnerTexts();
+  expect(headers.map((h) => h.trim().toUpperCase())).toEqual(['EMPLOYEE', 'DEPARTMENT', 'SHIFT', 'CHECK-IN', 'CHECK-OUT', 'STATUS', 'LOCATION']);
+});
 
+test('the pager fits a phone-sized window', async ({ page }) => {
+  test.setTimeout(180_000);
+  await login(page, 'hr');
   await page.setViewportSize({ width: 390, height: 800 });
   await openRecords(page, base);
   const next = page.getByRole('button', { name: 'Next', exact: true });
@@ -163,4 +199,55 @@ test("today's roster, the exports and the timesheet controls are untouched; the 
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   await next.click();
   await expect(page.getByText(/^Showing 21–40 of /)).toBeVisible();
+});
+
+// Last on purpose: it adds employees to the shared tenant.
+test('more than 20 records today: page 1 has 20, the rest follow, and a filter returns to page 1', async ({ page }) => {
+  test.setTimeout(300_000);
+  await login(page, 'admin');
+  const before = await todaysRows(page);
+  const toAdd = Math.max(0, 23 - before.rows.length); // 23 today: pages of 20 and 3
+  for (let i = 1; i <= toAdd; i += 1) {
+    const created = await apiAs(page, 'POST', '/employees', {
+      name: `Pager Person ${String(i).padStart(2, '0')}`, role: 'Associate', dept: i % 2 ? 'Engineering' : 'Design',
+      loc: 'Bengaluru', email: `pager.person${i}.${Date.now()}@example.com`, status: 'active', joinDate: before.today,
+    });
+    expect(created.status, JSON.stringify(created.body).slice(0, 300)).toBe(201);
+    const row = await apiAs(page, 'POST', '/attendance', { empId: created.body.id, name: created.body.name, dept: created.body.dept, date: before.today, status: 'absent' });
+    expect([201, 409]).toContain(row.status);
+  }
+  const { rows } = await todaysRows(page);
+  const total = rows.length;
+  expect(total).toBe(23);
+
+  await page.goto('/attendance');
+  await expect(page.locator('.card-title', { hasText: TODAY_TITLE })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`Showing 1–20 of ${total} records`)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('button', { name: 'Previous', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Page 3', exact: true })).toHaveCount(0); // two pages, not more
+  const first = await rowKeys(page);
+  expect(first.length).toBe(20);
+
+  await page.getByRole('button', { name: 'Page 2', exact: true }).click();
+  await expect(page.getByText(`Showing 21–${total} of ${total} records`)).toBeVisible();
+  const second = await rowKeys(page);
+  expect(second.length).toBe(total - 20);
+  await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
+  const seen = [...first, ...second];
+  expect(new Set(seen).size).toBe(total); // every person once
+  rows.forEach((r, i) => expect(seen[i], `row ${i + 1}`).toContain(r.name)); // the order the list already had
+
+  await page.getByRole('button', { name: 'Previous', exact: true }).click();
+  expect(await rowKeys(page)).toEqual(first);
+
+  // The cards count all of today's rows, not just the 20 on screen.
+  await expect(page.locator('.stat', { hasText: 'Absent' }).locator('.stat-value')).toHaveText(String(rows.filter((r) => r.status === 'absent').length));
+
+  // A department chip chosen on page 2 returns to page 1 of today's filtered rows.
+  await page.getByRole('button', { name: 'Page 2', exact: true }).click();
+  await page.locator('.attendance-page .filter-chips button', { hasText: /^Design$/ }).click();
+  const design = rows.filter((r) => r.dept === 'Design').length;
+  expect(design).toBeGreaterThan(0);
+  await expect(page.getByText(`Showing 1–${Math.min(20, design)} of ${design} record${design === 1 ? '' : 's'}`)).toBeVisible();
+  expect((await rowKeys(page)).length).toBe(Math.min(20, design));
 });

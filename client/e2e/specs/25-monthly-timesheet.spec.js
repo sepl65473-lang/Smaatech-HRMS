@@ -14,11 +14,12 @@ import { USERS } from '../fixtures/harness.js';
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const pad = (n) => String(n).padStart(2, '0');
 
-// Two months back, so the month is complete and no other spec writes into it.
+// Fourteen months back: a complete month, and outside the twelve months that
+// 19-exports fills with its own rows for the same employee.
 const target = (() => {
   const d = new Date();
   d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() - 2);
+  d.setUTCMonth(d.getUTCMonth() - 14);
   const year = d.getUTCFullYear();
   const month = d.getUTCMonth() + 1;
   return { year, month, days: new Date(year, month, 0).getDate(), label: `${MONTH_NAMES[month - 1]} ${year}` };

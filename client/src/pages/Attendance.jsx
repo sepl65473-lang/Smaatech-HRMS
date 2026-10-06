@@ -274,7 +274,13 @@ export default function Attendance() {
 
   // Everything below reads this one list, so filters, counts, the table and
   // the exports all stay in step whichever source is in use.
-  const sourceRows = periodRows ?? attendance;
+  // With no dates selected the section is "Today Attendance Records": only
+  // today's rows from the hydrated list, which also holds earlier days.
+  const todayRows = useMemo(() => {
+    const today = todayISO();
+    return attendance.filter((a) => a.date === today);
+  }, [attendance]);
+  const sourceRows = periodRows ?? todayRows;
   const hasMorePeriodRows = Boolean(periodRows) && periodRows.length < periodTotal;
 
   // Leave type for a row that is on leave, from the leave records already
@@ -293,19 +299,17 @@ export default function Attendance() {
     return deptMatch && statusMatch;
   }), [sourceRows, dept, status]);
 
-  // "Attendance records" (the date-range view) is shown 20 rows at a time.
-  // This only decides which of the already filtered rows are on screen:
-  // nothing is fetched, filtered, sorted or counted differently, and today's
-  // roster is left as it was.
+  // The table - today's roster and the date-range "Attendance records" alike -
+  // is shown 20 rows at a time. This only decides which of the already
+  // filtered rows are on screen: nothing is fetched, filtered, sorted or
+  // counted differently.
   const [recordsPage, setRecordsPage] = useState(1);
   useEffect(() => { setRecordsPage(1); }, [dept, status, range.from, range.to]);
   const recordsPageCount = Math.max(1, Math.ceil(filtered.length / RECORDS_PER_PAGE));
   const currentRecordsPage = Math.min(recordsPage, recordsPageCount);
   const visibleRows = useMemo(
-    () => (rangeActive
-      ? filtered.slice((currentRecordsPage - 1) * RECORDS_PER_PAGE, currentRecordsPage * RECORDS_PER_PAGE)
-      : filtered),
-    [rangeActive, filtered, currentRecordsPage],
+    () => filtered.slice((currentRecordsPage - 1) * RECORDS_PER_PAGE, currentRecordsPage * RECORDS_PER_PAGE),
+    [filtered, currentRecordsPage],
   );
 
   const counts = useMemo(() => {
@@ -493,7 +497,7 @@ export default function Attendance() {
     <div className="page-wrap active attendance-page">
       <div className="list-toolbar" style={{ marginBottom: 4 }}>
         <div className="filter-chips">
-          <button className={`chip ${tab === 'roster' ? 'active' : ''}`} onClick={() => setTab('roster')}>Today's roster</button>
+          <button className={`chip ${tab === 'roster' ? 'active' : ''}`} onClick={() => setTab('roster')}>Today Attendance Records</button>
           {isHR && (
             <button className={`chip ${tab === 'planning' ? 'active' : ''}`} onClick={() => setTab('planning')}>Shifts & planning</button>
           )}
@@ -536,11 +540,11 @@ export default function Attendance() {
           <div className="card" style={{ marginTop: 18 }}>
             <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div>
-                <div className="card-title">{rangeActive ? 'Attendance records' : 'Today’s roster'}</div>
+                <div className="card-title">{rangeActive ? 'Attendance records' : 'Today Attendance Records'}</div>
                 <div className="card-sub">
                   {rangeActive
                     ? `${filtered.length} of ${periodTotal} record${periodTotal === 1 ? '' : 's'} loaded${range.from ? ` · from ${range.from}` : ''}${range.to ? ` · to ${range.to}` : ''}`
-                    : `${filtered.length} of ${attendance.length} people shown`}
+                    : `${filtered.length} of ${todayRows.length} people shown`}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -744,7 +748,7 @@ export default function Attendance() {
               </table>
             </div>
 
-            {rangeActive && filtered.length > 0 && (
+            {filtered.length > 0 && (
               <div className="pager" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }} aria-label="Attendance records pages">
                 <span className="pager-meta">
                   Showing {(currentRecordsPage - 1) * RECORDS_PER_PAGE + 1}–{Math.min(currentRecordsPage * RECORDS_PER_PAGE, filtered.length)} of {filtered.length} record{filtered.length === 1 ? '' : 's'}
