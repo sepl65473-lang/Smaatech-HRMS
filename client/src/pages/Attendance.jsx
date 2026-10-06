@@ -139,6 +139,21 @@ function punchCoordinates(row, dir) {
   return { lat, lng };
 }
 
+// Page numbers for the records pager: first, last and the pages around the
+// current one, with gaps shown as null (rendered as an ellipsis).
+const RECORDS_PER_PAGE = 20;
+function pagerItems(current, total) {
+  const wanted = new Set([1, total, current - 1, current, current + 1].filter((n) => n >= 1 && n <= total));
+  if (total <= 7) for (let n = 1; n <= total; n += 1) wanted.add(n);
+  const pages = [...wanted].sort((a, b) => a - b);
+  const items = [];
+  pages.forEach((n, i) => {
+    if (i > 0 && n - pages[i - 1] > 1) items.push(null);
+    items.push(n);
+  });
+  return items;
+}
+
 function LiveIndicator({ lastSyncedAt }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -277,6 +292,21 @@ export default function Attendance() {
     const statusMatch = status === 'all' || a.status === status;
     return deptMatch && statusMatch;
   }), [sourceRows, dept, status]);
+
+  // "Attendance records" (the date-range view) is shown 20 rows at a time.
+  // This only decides which of the already filtered rows are on screen:
+  // nothing is fetched, filtered, sorted or counted differently, and today's
+  // roster is left as it was.
+  const [recordsPage, setRecordsPage] = useState(1);
+  useEffect(() => { setRecordsPage(1); }, [dept, status, range.from, range.to]);
+  const recordsPageCount = Math.max(1, Math.ceil(filtered.length / RECORDS_PER_PAGE));
+  const currentRecordsPage = Math.min(recordsPage, recordsPageCount);
+  const visibleRows = useMemo(
+    () => (rangeActive
+      ? filtered.slice((currentRecordsPage - 1) * RECORDS_PER_PAGE, currentRecordsPage * RECORDS_PER_PAGE)
+      : filtered),
+    [rangeActive, filtered, currentRecordsPage],
+  );
 
   const counts = useMemo(() => {
     const c = { present: 0, late: 0, absent: 0, leave: 0 };
@@ -618,7 +648,7 @@ export default function Attendance() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((a) => {
+                  {visibleRows.map((a) => {
                     const s = STATUS[a.status] || STATUS.absent;
                     const inAddress = punchAddress(a, 'checkIn');
                     const outAddress = punchAddress(a, 'checkOut');
@@ -713,6 +743,34 @@ export default function Attendance() {
                 </tbody>
               </table>
             </div>
+
+            {rangeActive && filtered.length > 0 && (
+              <div className="pager" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }} aria-label="Attendance records pages">
+                <span className="pager-meta">
+                  Showing {(currentRecordsPage - 1) * RECORDS_PER_PAGE + 1}–{Math.min(currentRecordsPage * RECORDS_PER_PAGE, filtered.length)} of {filtered.length} record{filtered.length === 1 ? '' : 's'}
+                </span>
+                {recordsPageCount > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <button type="button" className="mini-btn" disabled={currentRecordsPage <= 1} onClick={() => setRecordsPage(currentRecordsPage - 1)}>Previous</button>
+                    {pagerItems(currentRecordsPage, recordsPageCount).map((n, i) => (n == null
+                      ? <span key={`gap-${i}`} className="pager-meta" aria-hidden="true">…</span>
+                      : (
+                        <button
+                          key={n}
+                          type="button"
+                          className={`mini-btn ${n === currentRecordsPage ? 'approve' : ''}`}
+                          aria-current={n === currentRecordsPage ? 'page' : undefined}
+                          aria-label={`Page ${n}`}
+                          onClick={() => setRecordsPage(n)}
+                        >
+                          {n}
+                        </button>
+                      )))}
+                    <button type="button" className="mini-btn" disabled={currentRecordsPage >= recordsPageCount} onClick={() => setRecordsPage(currentRecordsPage + 1)}>Next</button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {(periodError || periodLoading || hasMorePeriodRows) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 4px 2px' }}>
