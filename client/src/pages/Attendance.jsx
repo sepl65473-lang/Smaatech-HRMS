@@ -121,6 +121,23 @@ function punchAddress(row, dir) {
   return text ? cleanLocationText(text) : 'Address unavailable';
 }
 
+// The exact position recorded for one punch, for "Open location". It is that
+// attendance record's own latitude/longitude and nothing else: never the
+// company site, a default, or a position derived from the address text.
+function punchCoordinates(row, dir) {
+  if (!row?.[dir]) return null;
+  const structured = row[`${dir}Location`];
+  let lat = Number(structured?.lat);
+  let lng = Number(structured?.lng);
+  if (structured?.lat == null || structured?.lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    const parts = String(row[`${dir}Loc`] || '').split(',').map((part) => Number(part.trim()));
+    if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part))) return null;
+    [lat, lng] = parts;
+  }
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
 function LiveIndicator({ lastSyncedAt }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -755,6 +772,18 @@ export default function Attendance() {
                       <div><strong>Early check-out reason:</strong> {detailsRow.earlyCheckoutReason}</div>
                     )}
                     <div><strong>Current location:</strong> {punchAddress(detailsRow, dir)} {detailsRow[`${cap}Accuracy`] != null ? `(±${Math.round(detailsRow[`${cap}Accuracy`])}m)` : ''}</div>
+                    {punchCoordinates(detailsRow, dir) && (
+                      <div>
+                        <strong>Exact position:</strong> {punchCoordinates(detailsRow, dir).lat.toFixed(6)}, {punchCoordinates(detailsRow, dir).lng.toFixed(6)}{' '}
+                        <a
+                          href={`https://www.google.com/maps?q=${punchCoordinates(detailsRow, dir).lat},${punchCoordinates(detailsRow, dir).lng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open location
+                        </a>
+                      </div>
+                    )}
                     <div><strong>Device:</strong> {device ? `${device.name} · ${device.browser} · ${device.os}` : '—'}</div>
                     <div><strong>IP address:</strong> {detailsRow[`${cap}Ip`] || '—'}</div>
                     <div><strong>Device ID:</strong> {detailsRow[`${cap}DeviceId`] || '—'}</div>
