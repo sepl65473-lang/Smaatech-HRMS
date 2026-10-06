@@ -14,6 +14,7 @@ import { formatWorkedMinutes } from '../lib/workingHours';
 import { ATTENDANCE_STATUS as STATUS } from '../lib/attendanceStatus';
 import { apiFetchBlob } from '../lib/apiClient';
 import { attendanceApi } from '../data/store';
+import { buildMonthlyTimesheet, monthBounds, shiftMinutes, FULL_MONTH_NAMES } from '../lib/timesheet';
 
 function AttendancePhotoPreview({ attendanceId, which }) {
   const [url, setUrl] = useState(null);
@@ -158,7 +159,7 @@ export default function Attendance() {
   const {
     attendance, leaves, settings, checkIn, checkOut, setAttendanceStatus, refreshAttendance,
     attendanceCorrections, requestCorrection, approveCorrection, rejectCorrection, currentUser, employees, toast,
-    getMasterValues, getQrToken,
+    getMasterValues, getQrToken, holidays,
   } = useHRMS();
 
   // Real "who's in office now" freshness — polls the attendance list on an
@@ -370,6 +371,68 @@ export default function Attendance() {
     downloadPDF('attendance-roster', 'Attendance Roster', rows, EXPORT_COLUMNS);
   });
 
+  // ── Monthly Employee Timesheet (HR) ────────────────────────────────────
+  // A separate download from the roster exports above: one employee or all of
+  // them, for one whole calendar month. It reads the same attendance API, the
+  // leave records and the holiday list already in use; nothing is recalculated
+  // except the report's own regular / overtime split of the server's hours.
+  const [sheetEmployee, setSheetEmployee] = useState('all');
+  const [sheetMonth, setSheetMonth] = useState(() => Number(todayISO().slice(5, 7)));
+  const [sheetYear, setSheetYear] = useState(() => Number(todayISO().slice(0, 4)));
+  const sheetEmployees = useMemo(
+    () => [...(employees || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+    [employees],
+  );
+  const sheetYears = useMemo(() => {
+    const thisYear = Number(todayISO().slice(0, 4));
+    return Array.from({ length: 6 }, (_, i) => thisYear + 1 - i);
+  }, []);
+
+  const downloadTimesheet = useCallback(async (format) => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const { from, to } = monthBounds(sheetYear, sheetMonth);
+      const { rows, truncated } = await attendanceApi.listAll({ from, to });
+      if (truncated) {
+        toast('error', 'That month is too large to build in the browser. Choose one employee and try again.');
+        return;
+      }
+      let people;
+      let label;
+      if (sheetEmployee === 'all') {
+        // Everyone in the employee list, plus anyone who has attendance in the
+        // month but is no longer in that list, so no recorded day is dropped.
+        const known = new Map(sheetEmployees.map((e) => [String(e.id), { id: String(e.id), name: e.name }]));
+        rows.forEach((r) => { if (!known.has(String(r.empId))) known.set(String(r.empId), { id: String(r.empId), name: r.name }); });
+        people = [...known.values()];
+        label = 'All Employees';
+      } else {
+        const one = sheetEmployees.find((e) => String(e.id) === String(sheetEmployee));
+        if (!one) { toast('error', 'Choose an employee for the timesheet.'); return; }
+        people = [{ id: String(one.id), name: one.name }];
+        label = one.name;
+      }
+      const sheet = buildMonthlyTimesheet({
+        year: sheetYear, month: sheetMonth, employees: people, employeeLabel: label,
+        attendance: rows, leaves: leaves || [], holidays: holidays || [], today: todayISO(),
+        // Regular hours stop at the length of the employee's configured shift.
+        regularMinutesFor: (empId) => shiftMinutes(resolveShiftForToday(empId, settings)),
+      });
+      if (format === 'pdf') {
+        const { downloadTimesheetPdf } = await import('../lib/timesheetPdf');
+        downloadTimesheetPdf(sheet);
+      } else {
+        const { downloadTimesheetExcel } = await import('../lib/timesheetExcel');
+        await downloadTimesheetExcel(sheet);
+      }
+    } catch (err) {
+      toast('error', err?.message || 'The timesheet could not be generated.');
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, sheetYear, sheetMonth, sheetEmployee, sheetEmployees, leaves, holidays, settings, toast]);
+
   const handleRequestCorrection = async () => {
     if (!corrForm.date || !corrForm.checkIn || !corrForm.checkOut || !corrForm.reason) {
       toast('error', 'Please fill in all details.');
@@ -466,6 +529,33 @@ export default function Attendance() {
                 )}
               </div>
             </div>
+
+            {isHR && (
+              <div className="list-toolbar" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <strong style={{ fontSize: 13 }}>Monthly timesheet</strong>
+                <label className="inline-select">
+                  <span>Employee</span>
+                  <select className="input" value={sheetEmployee} onChange={(e) => setSheetEmployee(e.target.value)} aria-label="Timesheet employee">
+                    <option value="all">All Employees</option>
+                    {sheetEmployees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  </select>
+                </label>
+                <label className="inline-select">
+                  <span>Month</span>
+                  <select className="input" value={sheetMonth} onChange={(e) => setSheetMonth(Number(e.target.value))} aria-label="Timesheet month">
+                    {FULL_MONTH_NAMES.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
+                  </select>
+                </label>
+                <label className="inline-select">
+                  <span>Year</span>
+                  <select className="input" value={sheetYear} onChange={(e) => setSheetYear(Number(e.target.value))} aria-label="Timesheet year">
+                    {sheetYears.map((y) => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="btn btn-ghost" disabled={exporting} onClick={() => downloadTimesheet('pdf')}>Timesheet PDF</button>
+                <button type="button" className="btn btn-ghost" disabled={exporting} onClick={() => downloadTimesheet('xlsx')}>Timesheet Excel</button>
+              </div>
+            )}
 
             <div className="list-toolbar">
               <div className="filter-chips">
