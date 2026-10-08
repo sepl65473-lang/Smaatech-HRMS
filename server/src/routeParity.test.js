@@ -53,6 +53,7 @@ const EXPECTED_ROUTES = [
   ['get', '/api/v1/face/status/000000000000000000000000'],
   ['post', '/api/v1/device-punch'],
   ['get', '/api/v1/device-mappings'],
+  ['get', '/api/v1/devices'],
   ['get', '/api/v1/health'],
   ['get', '/api/v1/metrics'],
   ['get', '/api/v1/ai/predict'],

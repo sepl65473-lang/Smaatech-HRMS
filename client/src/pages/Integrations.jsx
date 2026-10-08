@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useHRMS } from '../context/HRMSContext';
 import Avatar from '../components/Avatar';
+import AttendanceDevices from '../components/AttendanceDevices';
 import { uid, todayISO, formatINR } from '../lib/helpers';
 import { downloadTallyXML } from '../lib/tally';
 
@@ -17,27 +18,12 @@ function randomTime() {
 
 export default function Integrations() {
   const {
-    employees, payroll, recordPunch, audit, toast,
-    linkDeviceUser, regenerateDeviceKey,
+    employees, payroll, recordPunch, audit, toast, currentUser,
+    linkDeviceUser,
   } = useHRMS();
   const [devices, setDevices] = useState(DEVICES);
   const [staging, setStaging] = useState([]);
   const [cycle, setCycle] = useState('');
-  const [deviceKey, setDeviceKey] = useState(null);
-  const [keyLoading, setKeyLoading] = useState(false);
-
-  const handleRegenerateKey = async () => {
-    setKeyLoading(true);
-    try {
-      const key = await regenerateDeviceKey();
-      setDeviceKey(key);
-      toast('success', 'New biometric device key generated — copy it into the device bridge config now, it won\'t be shown again.');
-    } catch (err) {
-      toast('error', err.message || 'Failed to generate a device key.');
-    } finally {
-      setKeyLoading(false);
-    }
-  };
 
   const cycles = useMemo(() => [...new Set(payroll.map((p) => p.cycle || 'Current'))], [payroll]);
   const activeCycle = cycle || cycles[0] || '';
@@ -202,29 +188,10 @@ export default function Integrations() {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="card-head">
-          <div>
-            <div className="card-title">Biometric device API key</div>
-            <div className="card-sub">Real, server-generated — a physical device bridge sends this as the X-Device-Key header to POST /api/v1/device-punch</div>
-          </div>
-          <button type="button" className="mini-btn approve" disabled={keyLoading} onClick={handleRegenerateKey}>
-            {keyLoading ? 'Generating…' : deviceKey ? 'Regenerate' : 'Generate key'}
-          </button>
-        </div>
-        {deviceKey ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div className="mono" style={{ fontSize: 12.5, background: 'var(--bg-2)', padding: '8px 12px', borderRadius: 6, border: '1px dashed #ccc', wordBreak: 'break-all' }}>
-              {deviceKey}
-            </div>
-            <div className="muted-text" style={{ fontSize: 11.5 }}>
-              Copy this now — it won't be shown again. Paste it into the device bridge's config alongside its deviceId/deviceUserId mappings above.
-            </div>
-          </div>
-        ) : (
-          <div className="empty" style={{ textAlign: 'left' }}>No key generated yet — this is a real credential, not simulated. Generate one before pointing a real device bridge at this server.</div>
-        )}
-      </div>
+      {/* Real, server-backed: per-device credentials, the registered site and
+          the device-user links. This replaces the single company-wide key
+          card: a device now authenticates with its own id and key. */}
+      {['HR Director', 'HR Manager'].includes(currentUser?.role) && <AttendanceDevices />}
 
       <div className="card" style={{ marginTop: 18 }}>
         <div className="card-head">
