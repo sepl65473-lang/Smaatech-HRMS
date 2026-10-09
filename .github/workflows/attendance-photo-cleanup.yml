@@ -1,0 +1,44 @@
+name: Attendance photo cleanup (fallback trigger)
+
+# REDUNDANCY, NOT A REPLACEMENT — same reasoning as daily-attendance.yml. The
+# API's own scheduler deletes attendance check-in / check-out photos 24 hours
+# after they were taken, every 15 minutes
+# (server/src/lib/attendancePhotoExpiry.js), but only while the service is
+# awake. This calls the SAME job through
+# POST /api/v1/internal/jobs/attendance-photo-cleanup.
+#
+# Extra runs are safe: the job deletes only files whose own stored expiry has
+# passed, so a second run finds nothing left to do. A photo is never VIEWABLE
+# past 24 hours either way: the photo route refuses it by the same expiry.
+#
+# Required repository secrets (shared with daily-attendance.yml):
+#   HRMS_API_BASE   e.g. https://smaatech-hrms-1.onrender.com/api/v1
+#   HRMS_JOB_TOKEN  the API's METRICS_TOKEN value
+
+on:
+  schedule:
+    - cron: '7,37 * * * *' # twice an hour
+  workflow_dispatch:
+
+concurrency:
+  group: hrms-attendance-photo-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger the attendance photo cleanup job
+        env:
+          HRMS_API_BASE: ${{ secrets.HRMS_API_BASE }}
+          HRMS_JOB_TOKEN: ${{ secrets.HRMS_JOB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HRMS_API_BASE" || { echo "HRMS_API_BASE secret is not set"; exit 1; }
+          test -n "$HRMS_JOB_TOKEN" || { echo "HRMS_JOB_TOKEN secret is not set"; exit 1; }
+          # --retry covers the cold start (see daily-attendance.yml).
+          curl --silent --show-error --fail --retry 6 --retry-delay 20 --retry-all-errors \
+            --max-time 180 -X POST \
+            -H "X-Metrics-Token: $HRMS_JOB_TOKEN" \
+            "$HRMS_API_BASE/internal/jobs/attendance-photo-cleanup"

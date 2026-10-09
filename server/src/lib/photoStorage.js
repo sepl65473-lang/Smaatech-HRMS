@@ -90,7 +90,10 @@ export async function savePhoto(subdir, filename, buffer) {
 
   if (storageDriver() === 'gridfs') {
     const { saveToGridFs } = await import('./gridfsStorage.js');
-    return saveToGridFs(subdir, filename, buffer, { contentType: contentTypeForRef(ref) });
+    // A successful punch photo (attendance/...) is stamped with the moment it
+    // expires; every other file gets no stamp. See lib/attendancePhotoExpiry.js.
+    const { expiryMetadataFor } = await import('./attendancePhotoExpiry.js');
+    return saveToGridFs(subdir, filename, buffer, { contentType: contentTypeForRef(ref), metadata: expiryMetadataFor(subdir) });
   }
 
   const resolved = resolveWithinUploads(ref);

@@ -8,6 +8,7 @@ import { runScheduledBackup, isScheduledBackupConfigured, backupDestination } fr
 import { createTodaysAttendanceRows, notifyYesterdaysAbsences } from './attendanceDailyJob.js';
 import { checkDocumentExpirations } from './documentExpiryJob.js';
 import { sendAttendanceReminders } from './attendanceReminderJob.js';
+import { purgeExpiredAttendancePhotos } from './attendancePhotoExpiry.js';
 import { accrueMonthly, rollOverYear, leaveYearOf, ensureLeaveTypes } from './leaveLedger.js';
 import { notifyAttendanceEvent } from './attendanceNotify.js';
 import { processInNonBlockingBatches } from './jobQueue.js';
@@ -166,6 +167,10 @@ export function startSchedulers() {
   // itself enforces the cutoff times and sends each reminder once per day, so
   // this only sets how often it looks.
   scheduleJob('attendance:same-day-reminders', process.env.ATTENDANCE_REMINDER_CRON || '*/30 * * * *', sendAttendanceReminders);
+  // Attendance check-in / check-out photos are deleted 24 hours after they
+  // were taken. The job reads each file's own stored expiry, so it only sets
+  // how often that is looked at.
+  scheduleJob('attendance:purge-expired-photos', '*/15 * * * *', purgeExpiredAttendancePhotos);
   scheduleJob('documents:expiry-reminders', '0 9 * * *', checkDocumentExpirations);
   // Last day handling is unnecessary: the accrual is idempotent per month, so
   // running on the 1st credits the month that just began.

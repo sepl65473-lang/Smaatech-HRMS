@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Attendance from '../models/Attendance.js';
 import { requireAuth, companyFilter } from '../middleware/auth.js';
 import { readPhoto, contentTypeForRef } from '../lib/photoStorage.js';
+import { attendancePhotoExpiry } from '../lib/attendancePhotoExpiry.js';
 import VerificationAttempt from '../models/VerificationAttempt.js';
 
 const router = Router();
@@ -27,11 +28,20 @@ router.get('/attendance/:attendanceId/:which', async (req, res) => {
   const ref = which === 'checkIn' ? row.checkInPhotoRef : row.checkOutPhotoRef;
   if (!ref) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No photo on file for this record.' } });
 
+  // An attendance photo is kept for 24 hours. Past that it is not served,
+  // whether or not the cleanup job has reached it yet.
+  const expiresAt = await attendancePhotoExpiry(ref);
+  const secondsLeft = expiresAt ? Math.floor((expiresAt.getTime() - Date.now()) / 1000) : null;
+  if (secondsLeft !== null && secondsLeft <= 0) {
+    return res.status(410).json({ error: { code: 'PHOTO_EXPIRED', message: 'This attendance photo was deleted automatically 24 hours after it was taken.' } });
+  }
+
   const buffer = await readPhoto(ref);
   if (!buffer) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Photo file missing.' } });
 
   res.setHeader('Content-Type', 'image/jpeg');
-  res.setHeader('Cache-Control', 'private, max-age=3600');
+  // Never cached in the browser beyond the photo's own expiry.
+  res.setHeader('Cache-Control', `private, max-age=${secondsLeft === null ? 3600 : Math.min(3600, secondsLeft)}`);
   res.send(buffer);
 });
 

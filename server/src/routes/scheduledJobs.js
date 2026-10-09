@@ -4,6 +4,7 @@ import logger from '../lib/logger.js';
 import { createTodaysAttendanceRows, notifyYesterdaysAbsences } from '../lib/attendanceDailyJob.js';
 import { flagMissingCheckouts } from '../lib/jobs.js';
 import { sendAttendanceReminders } from '../lib/attendanceReminderJob.js';
+import { purgeExpiredAttendancePhotos } from '../lib/attendancePhotoExpiry.js';
 
 /**
  * A second way to run the DAILY ATTENDANCE JOBS THAT ALREADY EXIST.
@@ -65,6 +66,25 @@ router.post('/attendance-reminders', requireInternalAccess, async (req, res) => 
     res.json({ ok: true, via, ms: Date.now() - startedAt, result });
   } catch (err) {
     logger.error('[jobs] attendance-reminders failed on external trigger: %s', err.message);
+    res.status(500).json({ ok: false, via, ms: Date.now() - startedAt, error: err.message });
+  }
+});
+
+/**
+ * The same redundancy for the 24-hour attendance photo cleanup
+ * (lib/attendancePhotoExpiry.js). An extra call is harmless: the job deletes
+ * only files whose own stored expiry has passed, so a second run finds
+ * nothing left to do.
+ */
+router.post('/attendance-photo-cleanup', requireInternalAccess, async (req, res) => {
+  const startedAt = Date.now();
+  const via = req.internalAuth?.via || 'session';
+  logger.info('[jobs] attendance-photo-cleanup triggered externally (via %s)', via);
+  try {
+    const result = await purgeExpiredAttendancePhotos();
+    res.json({ ok: true, via, ms: Date.now() - startedAt, result });
+  } catch (err) {
+    logger.error('[jobs] attendance-photo-cleanup failed on external trigger: %s', err.message);
     res.status(500).json({ ok: false, via, ms: Date.now() - startedAt, error: err.message });
   }
 });
