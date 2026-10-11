@@ -423,10 +423,11 @@ export function HRMSProvider({ children }) {
         ...(patch.name != null ? { name: updated.name } : {}),
         ...(patch.dept != null ? { dept: updated.dept } : {}),
       };
-      attendancePatch = {
-        ...linkedPatch,
-        ...(patch.status != null ? { status: updated.status === 'on-leave' ? 'leave' : 'absent' } : {}),
-      };
+      // Only the name and department printed on the rows. A profile save must
+      // never write an attendance status: it used to send 'absent' (or
+      // 'leave') to every loaded row of the employee, wiping out days they
+      // had worked. Leave reaches attendance through the leave workflow.
+      attendancePatch = { ...linkedPatch };
       const gross = Number(updated.salary || 0);
       payrollPatch = {
         ...linkedPatch,
