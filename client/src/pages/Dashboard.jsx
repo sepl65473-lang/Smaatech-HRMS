@@ -261,7 +261,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="page-wrap active">
+    <div className={`page-wrap active${currentUser?.role === 'HR Director' ? ' admin-dashboard' : ''}`}>
       {/* PAGE HEADER */}
       <div className="page-header-row">
         <div>

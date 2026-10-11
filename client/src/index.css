@@ -1594,6 +1594,44 @@
   .bar-group rect{transition: opacity .2s; cursor:pointer}
   .bar-group:hover rect{opacity:0.85}
 
+  /* ADMIN DASHBOARD - compact on a computer screen. Scoped to the HR
+     Director's dashboard (.admin-dashboard) so the shared .stats / .grid-2 /
+     .card rules every other page uses are untouched. Spacing only: nothing is
+     hidden or removed. Phones and portrait tablets (900px and below) keep
+     their own layout further down. */
+  @media (min-width: 901px){
+    .admin-dashboard .page-header-row{margin-bottom:12px}
+    .admin-dashboard .stats{gap:12px; margin-bottom:12px}
+    .admin-dashboard .stat{padding:12px 16px}
+    /* The icon sat on a line of its own above the label, a third of the
+       card's height. It moves to the top-right corner. */
+    .admin-dashboard .stat-icon{position:absolute; top:12px; right:14px; margin:0}
+    .admin-dashboard .grid, .admin-dashboard .grid-2{gap:12px; margin-bottom:12px}
+    .admin-dashboard .card{padding:14px 16px}
+    .admin-dashboard .card-head{margin-bottom:8px}
+    .admin-dashboard .chart{height:128px}
+  }
+  /* A zoomed-in or not-quite-maximised browser (901-1100px) dropped straight
+     to the phone arrangement: two stat cards a row and every other card on a
+     full-width row of its own, which is what made the cards look huge. There
+     is room for the desktop columns, so they are kept. */
+  @media (min-width: 951px) and (max-width: 1100px){
+    .admin-dashboard .stats{grid-template-columns:repeat(4, 1fr)}
+    .admin-dashboard .grid-2{grid-template-columns:repeat(3, 1fr)}
+  }
+  /* Narrow three-column widths, with or without the sidebar. A card's buttons
+     drop under its title instead of running out of the card, and the four
+     leave figures sit two by two - at these widths they were poking out of
+     the card's right edge. */
+  @media (min-width: 951px) and (max-width: 1360px){
+    .admin-dashboard .grid-2 .card-head{flex-wrap:wrap; align-items:flex-start}
+    .admin-dashboard .summary-pill-row{grid-template-columns:repeat(2, 1fr)}
+    .admin-dashboard .summary-pill-row.cols-3{grid-template-columns:repeat(3, 1fr)}
+  }
+  @media (min-width: 1101px) and (max-width: 1180px){
+    .admin-dashboard .summary-pill-row.cols-3{grid-template-columns:repeat(2, 1fr)}
+  }
+
   @media (max-width: 1100px){
     .stats{grid-template-columns: repeat(2,1fr)}
     .grid{grid-template-columns:1fr}
