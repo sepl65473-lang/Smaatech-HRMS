@@ -67,6 +67,7 @@ export function formatHours(minutes) {
 }
 
 const NO_PUNCH = '—';
+const WEEKLY_OFF = 'Weekly Off';
 
 /**
  * @param {object} input
@@ -127,8 +128,16 @@ export function buildMonthlyTimesheet({ year, month, employees, employeeLabel, a
       // status for - typically before the employee was added. Nothing is made
       // up for it: it is described only by what the leave and holiday data
       // actually say, and otherwise reads "No record".
+      //
+      // One exception: the daily job also writes "absent" on Sundays, which
+      // are the weekly off under every Settings.workWeek scheme (see the
+      // server's calculateWorkingDays). An untouched Sunday absent row - no
+      // punch at all - is shown as Weekly Off. Any punch keeps its own status.
+      const untouchedSundayAbsent = record?.status === 'absent' && !record.checkIn && !record.checkOut
+        && new Date(Date.UTC(year, month - 1, day)).getUTCDay() === 0;
       let status;
-      if (record) status = ATTENDANCE_STATUS[record.status]?.label || record.status || NO_PUNCH;
+      if (untouchedSundayAbsent) status = WEEKLY_OFF;
+      else if (record) status = ATTENDANCE_STATUS[record.status]?.label || record.status || NO_PUNCH;
       else if (onLeave) status = ATTENDANCE_STATUS.leave.label;
       else if (holiday) status = ATTENDANCE_STATUS.holiday.label;
       else if (today && iso > today) status = NO_PUNCH; // not happened yet

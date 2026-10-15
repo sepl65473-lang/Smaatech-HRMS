@@ -130,6 +130,36 @@ describe('monthly timesheet — data', () => {
     expect(day(sheet, '2026-05-08')).toMatchObject({ logIn: '09:10', logOut: '—', regular: '0', overtime: '0', total: '0', status: 'Present' }); // one punch only
   });
 
+  it('Sunday weekly off: an untouched Sunday absent row reads Weekly Off; working days and Sunday punches are unchanged', () => {
+    const sundays = [
+      ...MAY,
+      att(A, '2026-05-03', null, null, null, 'absent'), // Sunday, no punch -> weekly off
+      att(A, '2026-05-10', '10:00', '14:00', 240, 'present'), // Sunday worked -> its own status
+      att(A, '2026-05-17', null, null, null, 'holiday'), // Sunday holiday -> unchanged
+      att(A, '2026-05-24', '09:00', null, null, 'absent'), // Sunday with a punch -> unchanged
+    ];
+    const sheet = build({ attendance: sundays });
+    expect(day(sheet, '2026-05-03')).toMatchObject({ status: 'Weekly Off', logIn: '—', total: '0', onLeave: 'No', holiday: 'No' });
+    expect(day(sheet, '2026-05-10')).toMatchObject({ status: 'Present', total: '4:00' });
+    expect(day(sheet, '2026-05-17')).toMatchObject({ status: 'Holiday' });
+    expect(day(sheet, '2026-05-24')).toMatchObject({ status: 'Absent' });
+    expect(day(sheet, '2026-05-13')).toMatchObject({ status: 'Absent' }); // a working-day absence stays Absent
+    expect(day(sheet, '2026-05-31')).toMatchObject({ status: '—' }); // a future Sunday with no record is unchanged
+    expect(sheet.totals).toMatchObject({ leaveDays: 2, holidayDays: 2 });
+  });
+
+  it('Sunday weekly off reaches the downloaded Excel STATUS column', async () => {
+    const sheet = build({ attendance: [...MAY, att(A, '2026-05-03', null, null, null, 'absent')] });
+    const buffer = await buildTimesheetWorkbook(sheet).xlsx.writeBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const ws = wb.getWorksheet('Timesheet');
+    const statusCol = TIMESHEET_COLUMNS.findIndex((c) => c.key === 'status') + 1;
+    expect(ws.getRow(5 + 3).getCell(statusCol).value).toBe('Weekly Off'); // 03 May
+    expect(ws.getRow(5 + 13).getCell(statusCol).value).toBe('Absent'); // 13 May, a Wednesday
+    expect(timesheetBody(sheet)[2][statusCol - 1]).toBe('Weekly Off'); // the PDF body, same data
+  });
+
   it('the TOTAL row sums hours and counts days, and leaves text columns blank', () => {
     const sheet = build();
     expect(sheet.totals).toMatchObject({ regular: 510 + 540 + 540 + 540, overtime: 60 + 150, total: 510 + 540 + 600 + 690, leaveDays: 2, holidayDays: 1 });
